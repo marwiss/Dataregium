@@ -1049,7 +1049,7 @@ def test_every_mcp_read_tool_gives_the_text_back_as_data_and_nowhere_else(
     untraced(production_log.text(), text)
 
 
-SIDE = {"document_id": DOCUMENT, "version_index": 3, "types": None}
+SIDE = {"document_id": DOCUMENT, "version_index": 3, "types": ["IfcWall"]}
 #: A call of each tool but the change sets' (``ON_A_DRAFT``) that the stand-ins answer; each argument of it is given
 #: each hostile value in turn.
 ANSWERED: dict[str, dict[str, Any]] = {
@@ -1129,7 +1129,9 @@ def test_a_tool_refusal_never_quotes_its_arguments(name: str, tmp_path: Path) ->
     """Each argument, at any depth, is given each string, an object, a list and a very long text in turn, and each
     string names an argument the tool does not take: every refusal, which an assistant reads, says what is wrong in
     the code's own words, and none of the calls starts anything."""
-    paths = list(_argument_paths(routes._BY_NAME[name].definition()["inputSchema"], ANSWERED[name]))
+    schema = routes._BY_NAME[name].definition()["inputSchema"]
+    paths = list(_argument_paths(schema, ANSWERED[name]))
+    assert set(_places(schema)) <= set(paths), "every argument the schema names is asked"
     calls = [_given(ANSWERED[name], path, value) for path in paths for value in HOSTILE_VALUES]
     calls += [ANSWERED[name] | {text: text} for text in INJECTIONS]
     service = FakeService(reports=[clash_row()])
