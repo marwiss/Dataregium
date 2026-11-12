@@ -9,8 +9,8 @@ in a project the caller is not a member of does not exist. Every statement is on
 parameters; text is ordered by code point (``COLLATE "C"``), as the graphs order it.
 
 A version's checks are the jobs area's: ``validation`` reads them through the views ``version_validations`` and
-``version_graph_checks``, empty until that area's migration defines them. The audit log is still the graph's, so
-``publish`` records its event there once the publication is stored, rather than in the same transaction.
+``version_graph_checks``, empty until that area's migration defines them. ``publish`` records its audit event in
+the logbook's table, in the transaction that stores the publication, as the graph does.
 
 ``document_store``, ``upload_session_store`` and ``selection_session_store`` choose between the two: PostgreSQL when
 ``OPENCDE_STORE_URL`` names it, the graph otherwise.
@@ -39,7 +39,7 @@ from opencde.store.documents.versions import (
     _validation,
 )
 from opencde.store.jobs.conversions import STATE_DONE
-from opencde.store.logbook.audit import AuditLogRepository
+from opencde.store.logbook.postgres import add_in
 from opencde.timeutil import later_iso, now_iso
 
 if TYPE_CHECKING:
@@ -273,9 +273,8 @@ LIMIT $4
 
 
 class PostgresDocumentRepository:
-    def __init__(self, postgres: Postgres, *, audit_graph: Graph | None = None) -> None:
+    def __init__(self, postgres: Postgres) -> None:
         self.postgres = postgres
-        self.audit_graph = audit_graph  # where the audit log is until it follows (ADR 0029)
 
     async def latest(self, *, user_id: str, document_id: str) -> VersionRecord | None:
         row = await self.postgres.one(LATEST, user_id, document_id)
@@ -387,26 +386,29 @@ class PostgresDocumentRepository:
         publication: dict[str, Any],
         audit_event: dict[str, Any],
     ) -> bool:
-        """Mark a version published with its stored archive, as the graph's ``publish``; False when it already was,
-        also when two publish at once. The audit event follows the publication into the graph's audit log."""
-        row = await self.postgres.one(
-            PUBLISH,
-            user_id,
-            document_id,
-            version_index,
-            publication["id"],
-            publication["storage_key"],
-            publication["file_name"],
-            publication["size_in_bytes"],
-            publication["sha256"],
-            publication["published_at"],
-            publication["published_by"],
-        )
-        if row is None:
-            return False
-        if self.audit_graph is not None:
-            await audit.record(AuditLogRepository(self.audit_graph), **audit_event)
-        return True
+        """Mark a version published with its stored archive, as the graph's ``publish``, and the audit event with it
+        in the same transaction; False when it already was, also when two publish at once."""
+
+        async def work(tx: Tx) -> bool:
+            row = await tx.one(
+                PUBLISH,
+                user_id,
+                document_id,
+                version_index,
+                publication["id"],
+                publication["storage_key"],
+                publication["file_name"],
+                publication["size_in_bytes"],
+                publication["sha256"],
+                publication["published_at"],
+                publication["published_by"],
+            )
+            if row is None:
+                return False
+            await add_in(tx, audit.event(**audit_event))
+            return True
+
+        return await self.postgres.write(work)
 
     # -- what the server's own jobs read of a project, not for a member ---------------------------------------
 
@@ -674,9 +676,7 @@ class PostgresSelectionSessionRepository:
 
 
 def document_store(graph: Graph, postgres: Postgres | None) -> DocumentStore:
-    if postgres is not None:
-        return PostgresDocumentRepository(postgres, audit_graph=graph)
-    return DocumentRepository(graph)
+    return PostgresDocumentRepository(postgres) if postgres is not None else DocumentRepository(graph)
 
 
 def upload_session_store(graph: Graph, postgres: Postgres | None, settings: Settings) -> UploadSessionStore:

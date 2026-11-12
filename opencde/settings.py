@@ -231,10 +231,10 @@ class Settings(BaseSettings):
     store_url: str | None = Field(
         None,
         description="PostgreSQL for the server's own data instead of a graph (ADR 0029), as "
-        "postgresql://user@host:5432/database without the password. The accounts, OAuth2, the Documents API, BCF and "
-        "the jobs have followed; the audit and request logs, the sign-in throttle, the administration's figures, the "
-        "command line, the seed, the backup and some of the IFC-DB service's reads are still the graph's, so it is "
-        "accepted in the test environment alone; it excludes OPENCDE_STORE_GRAPH_URI.",
+        "postgresql://user@host:5432/database without the password. The accounts, OAuth2, the Documents API, BCF, "
+        "the jobs, the audit and request logs, the sign-in throttle and the administration's figures have followed; "
+        "the command line, the seed, the backup and some of the IFC-DB service's reads are still the graph's, so it "
+        "is accepted in the test environment alone; it excludes OPENCDE_STORE_GRAPH_URI.",
     )
     store_password: SecretStr = SecretStr("")
     cleanup_interval_seconds: int = Field(

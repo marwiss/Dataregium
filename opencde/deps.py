@@ -11,9 +11,7 @@ from opencde.graph.graph import Graph
 from opencde.postgres.database import Postgres
 from opencde.settings import Settings
 from opencde.storage import LocalStorage
-from opencde.store.logbook.audit import AuditLogRepository
-from opencde.store.logbook.requests import RequestLogRepository
-from opencde.store.logbook.throttle import SignInThrottleRepository
+from opencde.store.logbook.postgres import audit_log_store, request_log_store, sign_in_throttle_store
 from opencde.store.oauth2.postgres import client_store
 from opencde.store.protocols import (
     AuditLogStore,
@@ -74,16 +72,22 @@ def get_clients(
     return client_store(graph, postgres, settings)
 
 
-def get_audit_log(graph: Annotated[Graph, Depends(get_graph)]) -> AuditLogStore:
-    return AuditLogRepository(graph)
+def get_audit_log(
+    graph: Annotated[Graph, Depends(get_graph)], postgres: Annotated[Postgres | None, Depends(get_postgres)]
+) -> AuditLogStore:
+    return audit_log_store(graph, postgres)
 
 
-def get_request_log(graph: Annotated[Graph, Depends(get_graph)]) -> RequestLogStore:
-    return RequestLogRepository(graph)
+def get_request_log(
+    graph: Annotated[Graph, Depends(get_graph)], postgres: Annotated[Postgres | None, Depends(get_postgres)]
+) -> RequestLogStore:
+    return request_log_store(graph, postgres)
 
 
-def get_sign_in_throttle(graph: Annotated[Graph, Depends(get_graph)]) -> SignInThrottleStore:
-    return SignInThrottleRepository(graph)
+def get_sign_in_throttle(
+    graph: Annotated[Graph, Depends(get_graph)], postgres: Annotated[Postgres | None, Depends(get_postgres)]
+) -> SignInThrottleStore:
+    return sign_in_throttle_store(graph, postgres)
 
 
 def client_ip(request: Request) -> str | None:

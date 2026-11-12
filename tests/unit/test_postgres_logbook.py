@@ -6,13 +6,17 @@ store. ``test_postgres_store.py`` reads the module's syntax tree for statements 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 
 from opencde import audit, requestlog
 from opencde.auth import throttle
+from opencde.deps import get_audit_log, get_request_log, get_sign_in_throttle
 from opencde.logging import REDACTED
+from opencde.main import create_app
 from opencde.postgres import schema
 from opencde.postgres.database import Postgres
 from opencde.store.logbook import postgres as logbook
@@ -131,3 +135,34 @@ def test_the_graph_holds_the_logbook_unless_postgresql_is_named() -> None:
 @pytest.mark.parametrize("statement", [logbook.AUDIT_RECENT, logbook.REQUESTS])
 def test_a_prefix_is_compared_by_code_point_and_never_a_pattern(statement: str) -> None:
     assert "LIKE" not in statement and "left(" in statement and 'COLLATE "C" DESC' in statement
+
+
+def test_the_routes_the_writer_and_the_mcp_endpoint_keep_the_logbook_where_the_store_is(tmp_path: Path) -> None:
+    graph: Any = object()
+    postgres = Postgres(URL, "", connect_timeout_seconds=1.0)
+    for choose, on_graph, on_postgres in (
+        (get_audit_log, AuditLogRepository, PostgresAuditLogRepository),
+        (get_request_log, RequestLogRepository, PostgresRequestLogRepository),
+        (get_sign_in_throttle, SignInThrottleRepository, PostgresSignInThrottleRepository),
+    ):
+        assert isinstance(choose(graph, None), on_graph)
+        assert isinstance(choose(graph, postgres), on_postgres)
+    settings = make_settings(tmp_path, store_url=URL, request_log_enabled=True)
+    with TestClient(create_app(settings, startup_wait_seconds=0)) as client:
+        assert isinstance(client.app.state.requestlog.store, PostgresRequestLogRepository)  # ty: ignore[unresolved-attribute]
+    with TestClient(create_app(make_settings(tmp_path, request_log_enabled=True), startup_wait_seconds=0)) as client:
+        assert isinstance(client.app.state.requestlog.store, RequestLogRepository)  # ty: ignore[unresolved-attribute]
+
+
+async def test_an_mcp_event_goes_to_the_logbook_where_the_store_is(tmp_path: Path) -> None:
+    from opencde.mcp.registry import ToolContext
+    from tests.mcp_support import principal
+
+    fake = FakePostgres()
+    context = ToolContext(
+        principal=principal(), settings=make_settings(tmp_path), graph=object(), tool="list_models", postgres=fake
+    )  # ty: ignore[invalid-argument-type]
+    await context.record("mcp.denied", reason="policy")
+    ((statement, args),) = fake.statements
+    assert statement == logbook.AUDIT_INSERT and args[1] == "mcp.denied" and args[3] == "u-anna"
+    assert json.loads(args[6]) == {"reason": "policy", "tool": "list_models"}

@@ -66,7 +66,7 @@ from opencde.postgres.schema import migrate
 from opencde.ratelimit import PathRateLimitMiddleware, install_rate_limiting
 from opencde.requestlog import RequestLogMiddleware, RequestLogWriter
 from opencde.settings import LOOPBACK_HOSTS, Settings
-from opencde.store.logbook.requests import RequestLogRepository
+from opencde.store.logbook.postgres import request_log_store
 from opencde.ui.templating import STATIC_DIR, render
 from opencde.web import account as account_routes
 from opencde.web import routes as web_routes
@@ -151,7 +151,9 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
             app.state.store, settings.cleanup_interval_seconds, app.state.storage, each_round=each_round
         )
         app.state.requestlog = (
-            RequestLogWriter(RequestLogRepository(app.state.store), settings.request_log_retention_hours)
+            RequestLogWriter(
+                request_log_store(app.state.store, app.state.postgres), settings.request_log_retention_hours
+            )
             if settings.request_log_enabled
             else None
         )

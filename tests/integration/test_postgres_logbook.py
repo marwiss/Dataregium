@@ -1,11 +1,11 @@
 # This file was generated with the assistance of an AI coding tool.
 """The logbook area in PostgreSQL (ADR 0029) against a real database: the same tests on the graph's repositories and on
-PostgreSQL's (the audit log, the request log, the sign-in throttle), and PostgreSQL's own: the migration and the
-cleaner.
+PostgreSQL's (the audit log, the request log, the sign-in throttle), PostgreSQL's own (the migration and the
+cleaner), and the app keeping its logbook and reading the administrators' figures in PostgreSQL.
 
 PostgreSQL runs in a container of its own (``postgres_target`` and ``pg`` in the conftest), one per test session;
 every test starts from empty tables with the migrations applied. Each case runs once on the graph and once on
-PostgreSQL, which needs no graph: ``-k on_postgresql`` starts PostgreSQL alone.
+PostgreSQL, which needs no graph: ``-k on_postgresql`` starts PostgreSQL alone; the app needs both.
 """
 
 from __future__ import annotations
@@ -14,19 +14,28 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 import structlog
+from fastapi.testclient import TestClient
+from neo4j import GraphDatabase
+from pydantic import SecretStr
 
 from opencde import audit, requestlog
 from opencde.auth import throttle
 from opencde.graph.cleanup import delete_expired as delete_expired_nodes
 from opencde.graph.graph import Graph
+from opencde.ids import new_id
 from opencde.logging import REDACTED
+from opencde.main import create_app
 from opencde.postgres.cleanup import delete_expired as delete_expired_rows
 from opencde.postgres.database import Postgres
 from opencde.postgres.schema import migrate, migrations
 from opencde.requestlog import RequestLogWriter
+from opencde.settings import Settings
+from opencde.store.accounts.postgres import PostgresProjectRepository, PostgresUserRepository
+from opencde.store.documents.postgres import PostgresDocumentRepository
 from opencde.store.logbook.audit import AuditLogRepository
 from opencde.store.logbook.postgres import (
     PostgresAuditLogRepository,
@@ -35,9 +44,13 @@ from opencde.store.logbook.postgres import (
 )
 from opencde.store.logbook.requests import RequestLogRepository
 from opencde.store.logbook.throttle import SignInThrottleRepository
+from opencde.store.oauth2.postgres import PostgresClientRepository
 from opencde.store.protocols import AuditLogStore, RequestLogStore, SignInThrottleStore
 from opencde.timeutil import later_iso, now_iso
 from tests.conftest import test_settings as make_settings
+from tests.integration.conftest import GraphTarget, PostgresTarget, emptied_postgres
+from tests.integration.conftest_accounts import World, login_with_scope, populate
+from tests.integration.test_web_signin import form_token, web_sign_in
 
 pytestmark = pytest.mark.integration
 
@@ -249,3 +262,125 @@ async def test_on_postgresql_failures_at_once_each_count(pg: Postgres) -> None:
     await asyncio.gather(*(throttle.record_failure(throttles, "cecilia", THROTTLED) for _ in range(4)))
     assert await pg.one("SELECT failures FROM sign_in_throttles") == {"failures": 4}
     assert 59 <= await throttle.wait_seconds(throttles, "cecilia") <= 61
+
+
+# -- the app ---------------------------------------------------------------------------------------------------------
+
+
+def _signing_in(client: TestClient, username: str, password: str) -> Any:
+    client.cookies.clear()  # a browser that is already signed in does not get the form
+    page = client.get("/signin")
+    data = {"form_token": form_token(page.text), "username": username, "password": password}
+    return client.post("/signin", data=data, follow_redirects=False)
+
+
+def test_the_app_keeps_its_logbook_and_reads_its_figures_in_postgresql(
+    settings: Settings, clean_database: None, graph_target: GraphTarget, postgres_target: PostgresTarget
+) -> None:
+    """With ``OPENCDE_STORE_URL`` the sign-in's wait, the audit log and the request log are PostgreSQL's, the
+    administration's pages and ``/admin/api`` read their figures there, and so do a manager's role and a team's IDS
+    document; the graph holds none of it."""
+
+    async def seed() -> tuple[World, str]:
+        postgres = await emptied_postgres(postgres_target)
+        try:
+            world = await populate(
+                PostgresUserRepository(postgres),
+                PostgresProjectRepository(postgres),
+                PostgresClientRepository(postgres),
+            )
+            ids = await PostgresDocumentRepository(postgres).create_version(
+                project_id=world.project_id,
+                document_id=None,
+                title="Walls",
+                version_number="1",
+                file_name="walls.ids",
+                size_in_bytes=3,
+                sha256="0" * 64,
+                storage_key=f"documents/{new_id()}",
+                author="manager",
+                metadata=[],
+            )
+            return world, ids.document_id
+        finally:
+            await postgres.close()
+
+    async def stored() -> dict[str, int]:
+        postgres = Postgres(postgres_target.url, postgres_target.password, connect_timeout_seconds=10.0)
+        try:
+            return {
+                "audit_events": (await postgres.one("SELECT count(*) AS n FROM audit_events") or {})["n"],
+                "request_log_entries": (await postgres.one("SELECT count(*) AS n FROM request_log_entries") or {})["n"],
+                "sign_in_throttles": (await postgres.one("SELECT count(*) AS n FROM sign_in_throttles") or {})["n"],
+            }
+        finally:
+            await postgres.close()
+
+    world, ids_document = asyncio.run(seed())
+    apart = settings.model_copy(
+        update={
+            "store_url": postgres_target.url,
+            "store_password": SecretStr(postgres_target.password),
+            "request_log_enabled": True,
+            "sign_in_throttle_enabled": True,
+            "sign_in_free_attempts": 2,
+        }
+    )
+    with TestClient(create_app(apart, startup_wait_seconds=30)) as client:
+        for _ in range(2):
+            assert _signing_in(client, "nobody", "wrong-" + world.password).status_code == 200
+        assert _signing_in(client, "nobody", world.password).status_code == 429, "the name waits"
+
+        admin = login_with_scope(client, world, "admin", "profile admin")
+        manager = login_with_scope(client, world, "manager", "profile bcf project")
+        managed = f"/manage/1.0/projects/{world.project_id}"
+        assert client.get(managed, headers=manager.headers).status_code == 200
+        for username, status in (("editor", 403), ("outsider", 404)):
+            other = login_with_scope(client, world, username, "profile bcf project")
+            assert client.get(managed, headers=other.headers).status_code == status, username
+        team = {"name": "Walls", "responsible": "editor", "members": ["contributor"], "ids_document_id": ids_document}
+        made = client.post(f"{managed}/teams", json=team, headers=manager.headers)
+        assert made.status_code == 201, made.text
+        unknown = client.post(f"{managed}/teams", json={**team, "ids_document_id": new_id()}, headers=manager.headers)
+        assert unknown.status_code == 400
+
+        client.portal.call(client.app.state.requestlog.wait_idle)  # type: ignore[attr-defined]
+        overview = client.get("/admin/api/overview", headers=admin.headers).json()
+        assert overview["graph_ok"] is True and overview["request_log"]["rows"] > 0
+        assert (overview["users"], overview["projects"], overview["clients"], overview["documents"]) == (6, 2, 2, 1)
+        assert overview["sessions"] >= 4, "the refresh tokens of the four who signed in"
+        types = {event["type"] for event in client.get("/admin/api/audit", headers=admin.headers).json()["items"]}
+        assert {"web.sign_in.failed", "web.sign_in.throttled", "auth.code.issued", "manage.team.set"} <= types
+        sessions = client.get("/admin/api/sessions", params={"user": "manager"}, headers=admin.headers).json()
+        assert sessions["total"] >= 1 and {row["username"] for row in sessions["items"]} == {"manager"}
+        projects = client.get("/admin/api/projects", headers=admin.headers).json()["items"]
+        building = next(project for project in projects if project["project_id"] == world.project_id)
+        assert len(building["members"]) == 4 and building["documents"] == 1
+        users = client.get("/admin/api/users", headers=admin.headers).json()["items"]
+        manager_row = next(user for user in users if user["username"] == "manager")
+        assert manager_row["projects"] == [{"project_id": world.project_id, "role": "manager"}]
+        logged = client.get("/admin/api/requests", params={"path": managed}, headers=admin.headers).json()
+        assert {row["username"] for row in logged["requests"]} == {"manager", "editor", "outsider"}
+
+        web_sign_in(client, world, "admin")
+        for page, words in (
+            ("/admin", "web.sign_in"),
+            ("/admin/sessions", "Native app"),
+            ("/admin/users", "outsider"),
+            ("/admin/projects", "Building permit"),
+            ("/admin/audit", "manage.team.set"),
+            ("/admin/requests", managed),
+            ("/account", "admin"),
+        ):
+            answer = client.get(page)
+            assert answer.status_code == 200 and words in answer.text, page
+
+    counts = asyncio.run(stored())
+    assert counts["audit_events"] > 0 and counts["request_log_entries"] > 0
+    assert counts["sign_in_throttles"] == 1, "the failures of the one name that failed, kept by its hash"
+    with GraphDatabase.driver(graph_target.uri, auth=(graph_target.user, graph_target.password)) as driver:
+        records, _, _ = driver.execute_query(
+            "MATCH (n) WHERE n:AuditEvent OR n:RequestLog OR n:SignInThrottle OR n:User RETURN count(n) AS n",
+            database_=settings.database_name,
+        )
+    assert records[0]["n"] == 0, "the graph holds none of it"

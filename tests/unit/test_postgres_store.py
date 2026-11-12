@@ -6,6 +6,7 @@ and the choice of store in the app."""
 from __future__ import annotations
 
 import ast
+import json
 import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -22,6 +23,7 @@ from opencde.auth.dependencies import get_tokens
 from opencde.bcf.schemas import CommentPOST, TopicPOST
 from opencde.deps import get_clients, get_projects, get_users
 from opencde.ids import hash_secret
+from opencde.logging import REDACTED
 from opencde.main import create_app
 from opencde.odata import compile_odata
 from opencde.postgres import cleanup, database, schema
@@ -73,6 +75,7 @@ from opencde.store.documents.sessions import (
     upload_sessions,
 )
 from opencde.store.documents.versions import DocumentRepository, default_metadata, document_repository
+from opencde.store.logbook import postgres as logbook
 from opencde.store.oauth2 import postgres as oauth2
 from opencde.store.oauth2.clients import ClientError, ClientRepository
 from opencde.store.oauth2.postgres import PostgresClientRepository, PostgresTokenRepository, client_store, token_store
@@ -871,30 +874,22 @@ async def test_a_version_is_refused_as_the_graph_refuses_it() -> None:
         await PostgresDocumentRepository(no_author).create_version(document_id=None, **VERSION_FIELDS)  # ty: ignore[invalid-argument-type]
 
 
-class FakeAuditGraph:
-    def __init__(self) -> None:
-        self.events: list[dict[str, Any]] = []
-
-    async def run(self, query: str, **parameters: Any) -> list[dict[str, Any]]:
-        self.events.append(parameters)
-        return []
-
-
-async def test_a_version_is_published_once_and_audited_when_it_is() -> None:
-    event = {"type": "documents.publish", "actor": "u-1", "client_id": "c-1", "ip": None, "details": {"x": 1}}
-    graph = FakeAuditGraph()
-    taken = PostgresDocumentRepository(FakePostgres(), audit_graph=graph)  # ty: ignore[invalid-argument-type]
-    assert not await taken.publish(
+async def test_a_version_is_published_once_and_audited_with_it_in_one_transaction() -> None:
+    event = {"type": "documents.publish", "actor": "u-1", "client_id": "c-1", "ip": None, "details": {"token": "t"}}
+    taken = FakePostgres()
+    assert not await PostgresDocumentRepository(taken).publish(  # ty: ignore[invalid-argument-type]
         user_id="u-1", document_id="d-1", version_index=1, publication=PUBLISHED, audit_event=event
     ), "ON CONFLICT DO NOTHING: published already, or by another meanwhile"
-    assert graph.events == []
+    assert [query for query, _ in taken.statements] == [documents.PUBLISH], "no event for what was not published"
     fake = FakePostgres(lambda query, args: {"version_id": "v-1"} if query == documents.PUBLISH else None)
-    published = PostgresDocumentRepository(fake, audit_graph=graph)  # ty: ignore[invalid-argument-type]
-    assert await published.publish(
+    assert await PostgresDocumentRepository(fake).publish(  # ty: ignore[invalid-argument-type]
         user_id="u-1", document_id="d-1", version_index=1, publication=PUBLISHED, audit_event=event
     )
-    assert fake.statements == [(documents.PUBLISH, ("u-1", "d-1", 1, *PUBLISHED.values()))]
-    assert [(e["type"], e["actor"]) for e in graph.events] == [("documents.publish", "u-1")]
+    assert fake.transactions == 1
+    (publish, published), (recorded, args) = fake.statements
+    assert (publish, published) == (documents.PUBLISH, ("u-1", "d-1", 1, *PUBLISHED.values()))
+    assert recorded == logbook.AUDIT_INSERT and args[1] == "documents.publish" and args[3] == "u-1"
+    assert json.loads(args[6]) == {"token": REDACTED}, "masked as every event is"
 
 
 async def test_a_versions_change_set_and_check_are_read_as_the_graph_reads_them() -> None:
@@ -1026,7 +1021,7 @@ def test_the_graph_holds_the_documents_unless_postgresql_is_named(tmp_path: Path
     assert isinstance(document_repository(graph, None), DocumentRepository)  # ty: ignore[invalid-argument-type]
     postgres = Postgres(URL, "", connect_timeout_seconds=1.0)
     chosen = document_repository(graph, postgres)  # ty: ignore[invalid-argument-type]
-    assert isinstance(chosen, PostgresDocumentRepository) and chosen.audit_graph is graph, "the audit log stays"
+    assert isinstance(chosen, PostgresDocumentRepository)
     uploads = upload_sessions(graph, postgres, settings)  # ty: ignore[invalid-argument-type]
     assert isinstance(uploads, PostgresUploadSessionRepository)
     assert uploads.upload_ttl_seconds == settings.upload_session_ttl_seconds
