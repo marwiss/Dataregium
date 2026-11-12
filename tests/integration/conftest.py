@@ -96,6 +96,7 @@ def graph_target(request: pytest.FixtureRequest) -> Iterator[GraphTarget]:
     else:
         container = (
             DockerContainer(MEMGRAPH_IMAGE)
+            .with_command("--telemetry-enabled=false")
             .with_exposed_ports(7687)
             .waiting_for(LogMessageWaitStrategy(re.compile(r"You are running Memgraph")).with_startup_timeout(120))
         )

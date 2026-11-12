@@ -31,6 +31,7 @@ pytest.importorskip("ifcopenshell", reason="the ifc-db extra is not installed")
 def workcopy_uri() -> Iterator[str]:
     container = (
         DockerContainer(MEMGRAPH_IMAGE)
+        .with_command("--telemetry-enabled=false")
         .with_exposed_ports(7687)
         .waiting_for(LogMessageWaitStrategy(re.compile(r"You are running Memgraph")).with_startup_timeout(120))
     )

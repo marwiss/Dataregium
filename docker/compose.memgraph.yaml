@@ -13,7 +13,14 @@ services:
       NEO4J_AUTH: ""
       MEMGRAPH_USER: "${OPENCDE_GRAPH_USER:-memgraph}"
       MEMGRAPH_PASSWORD: "${OPENCDE_GRAPH_PASSWORD:?Set OPENCDE_GRAPH_PASSWORD in .env}"
-    command: ["--log-level=WARNING", "--storage-snapshot-interval-sec=300", "--storage-wal-enabled=true"]
+    # No usage statistics to the vendor (the server sends none either), and every transaction in the write-ahead
+    # log on disk before it is answered, not after 100,000 (Memgraph's defaults; found by Hemsidor, 2026-11-12).
+    command:
+      - "--log-level=WARNING"
+      - "--storage-snapshot-interval-sec=300"
+      - "--storage-wal-enabled=true"
+      - "--storage-wal-file-flush-every-n-tx=1"
+      - "--telemetry-enabled=false"
     volumes:
       - graph-data:/var/lib/memgraph
       - graph-logs:/var/log/memgraph

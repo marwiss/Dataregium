@@ -7,7 +7,7 @@ services:
   workcopy:
     image: docker.io/memgraph/memgraph:3.14.0
     restart: unless-stopped
-    command: ["--log-level=WARNING", "--storage-wal-enabled=false", "--storage-snapshot-interval-sec=0"]
+    command: ["--log-level=WARNING", "--storage-wal-enabled=false", "--storage-snapshot-interval-sec=0", "--telemetry-enabled=false"]
     volumes:
       - workcopy-data:/var/lib/memgraph
     networks:

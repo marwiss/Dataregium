@@ -47,7 +47,7 @@ RUN apt-get update && apt-get -y upgrade --no-install-recommends && rm -rf /var/
     && python -m pip uninstall -y pip \
     && groupadd --system --gid 10001 opencde \
     && useradd --system --uid 10001 --gid opencde --home-dir /app --shell /usr/sbin/nologin opencde \
-    && mkdir -p /data && chown opencde:opencde /data
+    && mkdir -p /data /backups && chown opencde:opencde /data /backups
 WORKDIR /app
 COPY --from=builder --chown=opencde:opencde /app /app
 # Owned by root, so that the server can run the rules but not change them. Empty when they were left out.

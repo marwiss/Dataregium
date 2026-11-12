@@ -52,6 +52,8 @@ services:
       graph:
         condition: service_healthy
         required: false  # compose.external-db.yaml leaves the container out
+      api:
+        condition: service_healthy  # the server makes /data's folders before the first backup reads them
     env_file:
       - ../.env
     environment:
@@ -69,12 +71,15 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    # One backup a day into /backups, keeping the newest 14 folders. Copy the volume off the host.
+    # One backup a day into /backups, keeping the newest 14 folders, and none at a start within 20 hours of the
+    # last, so that a restart makes no new one. Copy the volume off the host.
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         while true; do
-          opencde backup /backups || echo "backup failed"
+          if [ -z "$$(find /backups -maxdepth 1 -name 'opencde-backup-*' -mmin -1200 2>/dev/null)" ]; then
+            opencde backup /backups || echo "backup failed"
+          fi
           ls -1dt /backups/opencde-backup-* 2>/dev/null | tail -n +15 | xargs -r rm -rf
           sleep 86400
         done
