@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from neo4j.exceptions import ServiceUnavailable
+from neo4j.exceptions import Neo4jError, ServiceUnavailable
 
 from opencde.graph.graph import DatabaseFull
 from opencde.main import create_app
@@ -166,11 +166,17 @@ def test_a_full_database_is_a_503_without_driver_details(settings: Settings) -> 
     async def full() -> None:
         raise DatabaseFull from RuntimeError("Memory limit exceeded! Current use is 200.01MiB")
 
+    @app.get("/bcf/3.0/query")
+    async def query() -> None:  # a named query's own transaction, past the graph's check
+        raise Neo4jError._hydrate_neo4j(
+            code="Memgraph.TransientError.MemgraphError.MemgraphError", message="Memory limit exceeded! 200.01MiB"
+        )
+
     with TestClient(app) as client:
-        response = client.post("/bcf/3.0/full")
-    assert response.status_code == 503
-    assert response.json() == {"message": "The database is full and takes no changes", "code": "unavailable"}
-    assert "MiB" not in response.text
+        for response in (client.post("/bcf/3.0/full"), client.get("/bcf/3.0/query")):
+            assert response.status_code == 503
+            assert response.json() == {"message": "The database is full and takes no changes", "code": "unavailable"}
+            assert "MiB" not in response.text
 
 
 def test_icons_are_served_with_image_types(client: TestClient) -> None:

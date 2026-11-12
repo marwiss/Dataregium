@@ -26,7 +26,8 @@ from neo4j.exceptions import ServiceUnavailable
 from opencde.auth.resources import MCP_PATH
 from opencde.deps import GraphDep, SettingsDep, client_ip, get_postgres, get_storage
 from opencde.errors import CODE_FORBIDDEN, CODE_PAYLOAD_TOO_LARGE, ApiError, error_response
-from opencde.graph.graph import Graph
+from opencde.graph.dialect import refused_for_memory
+from opencde.graph.graph import DatabaseFull, Graph
 from opencde.ifcgraph.service import ifcgraph_service
 from opencde.logging import get_logger
 from opencde.mcp import protocol, registry
@@ -148,9 +149,11 @@ async def mcp_endpoint(request: Request, caller: McpPrincipal, settings: Setting
         result = await _answer(request, caller, settings, graph, method, params, modern)
     except McpError as failure:
         return _error(request_id, failure, modern)
-    except (ApiError, ServiceUnavailable):
+    except (ApiError, ServiceUnavailable, DatabaseFull):
         raise
     except Exception as exc:  # the answer names no cause; the log has the type and the method, never the body
+        if refused_for_memory(exc):  # a named query's own transaction at a full graph: 503, as the routes answer
+            raise DatabaseFull from exc
         log.exception("mcp_internal_error", operation=request.state.mcp_operation, error_type=type(exc).__name__)
         return _error(request_id, McpError(INTERNAL_ERROR, "Internal error"), modern)
     return JSONResponse({"jsonrpc": "2.0", "id": request_id, "result": result})

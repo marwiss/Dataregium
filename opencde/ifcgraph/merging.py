@@ -19,7 +19,6 @@ F32, ``RESOLUTIONS``); a copy with issues that B did not have is not made, and t
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import json
 import tempfile
@@ -27,7 +26,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ifc_db.files import Limits
-from ifc_db.importer import delete_model
 from ifc_db.merge import (
     RESOLUTIONS,
     MergeConflict,
@@ -42,6 +40,7 @@ from ifc_db.validation import pack_report, unpack_report
 
 from opencde.documents.schemas import DocumentMetadataEntry
 from opencde.ids import new_id
+from opencde.ifcgraph.maintenance import drop_partial
 from opencde.logging import get_logger
 from opencde.storage import make_key
 from opencde.store.accounts.postgres import project_store
@@ -199,8 +198,7 @@ async def prepared(
 
 async def _drop(service: IfcGraphService, model_id: str) -> None:
     """C out of the graph: its file is the version now, and the version gets a model of its own when converted."""
-    with contextlib.suppress(Exception):
-        await delete_model(service.graph, model_id)
+    await drop_partial(service.graph, model_id)
 
 
 async def _as_version(

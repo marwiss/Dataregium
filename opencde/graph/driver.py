@@ -8,6 +8,7 @@ import re
 from typing import TYPE_CHECKING
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
+from neo4j.exceptions import TransientError
 
 from opencde.logging import get_logger
 from opencde.settings import Settings
@@ -66,14 +67,18 @@ def make_driver(uri: str, user: str, password: str, connect_timeout_seconds: flo
 
 
 async def ping(driver: AsyncDriver, database: str) -> bool:
-    """True when the database answers a trivial query.
+    """True when the database answers a trivial query, once and without the driver's tries: a transient refusal (a
+    Memgraph at its memory limit, a storage held by a snapshot) is an answer too.
 
     Callers bound the wait with ``asyncio.timeout(...)``; a timeout counts as
     "not reachable" like any other failure.
     """
     try:
-        records, _summary, _keys = await driver.execute_query("RETURN 1 AS ok", database_=database)
-        return bool(records) and records[0]["ok"] == 1
+        async with driver.session(database=database) as session:
+            record = await (await session.run("RETURN 1 AS ok")).single()
+        return record is not None and record["ok"] == 1
+    except TransientError:
+        return True
     except Exception as exc:  # the driver raises several unrelated types; all of them mean "unreachable"
         log.warning("graph_ping_failed", error_type=type(exc).__name__)
         return False
@@ -104,7 +109,9 @@ async def full_within(graph: Graph, seconds: float) -> bool:
     try:
         async with asyncio.timeout(seconds):
             rows = await graph.schema_rows(statement)
-    except Exception as exc:  # as with the ping, every failure only means that nothing is known
+    except Exception as exc:  # as with the ping, every other failure only means that nothing is known
+        if graph.dialect.is_full(exc):
+            return True  # refused for want of memory: full, whatever the figures would have said
         log.warning("graph_storage_info_failed", error_type=type(exc).__name__)
         return False
     figures = {row.get("storage info"): row.get("value") for row in rows}

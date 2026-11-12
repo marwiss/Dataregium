@@ -45,7 +45,7 @@ from ifc_db.validation import MAX_REPORTED, pack_report, unpack_report
 
 from opencde.admin.graph_query import ReadingGraph
 from opencde.documents.validation import IfcRooms
-from opencde.graph.graph import DatabaseFull, Graph
+from opencde.graph.graph import Graph
 from opencde.graph.schema import SchemaGraph, library_dialect
 from opencde.ids import new_id
 from opencde.ifcgraph import merging
@@ -53,6 +53,7 @@ from opencde.ifcgraph.bsdd import BsddClient, BsddUnavailable
 from opencde.ifcgraph.bsdd import check as check_bsdd
 from opencde.ifcgraph.bsdd import ruleset as bsdd_ruleset
 from opencde.ifcgraph.gltf import LODS, build_glb
+from opencde.ifcgraph.maintenance import drop_partial
 from opencde.logging import get_logger
 from opencde.postgres.database import Postgres
 from opencde.settings import Settings
@@ -92,27 +93,11 @@ MAX_RECHECKS = 500  # the IFC documents of a project checked again at once when 
 MAX_SPECIFICATIONS = 1_000
 ROOMS_SECONDS = 120  # the rooms only inform, so they never hold an upload or the jobs behind it longer
 MAX_IDS_READ = 1_000  # IDS versions whose bSDD URIs a server process keeps, each read once (OB-42)
-DROP_ROUNDS = 5  # rounds of deleting a failed import's part from a full database, each after it gave memory back
 
 
 def _failure(exc: Exception) -> dict[str, Any]:
     """The fields of a check that could not run; the message is cut, as it may quote the file."""
     return {"checked_at": now_iso(), "error": f"{type(exc).__name__}: {exc}"[:300]}
-
-
-async def _drop_partial(graph: Graph, model_id: str, *, keep_model: bool = False) -> None:
-    """Remove what a failed import wrote. A full database refuses the deletes too, until it has given back the memory
-    of those before, which each refusal asks of it (``Graph.free_memory``): so a few rounds, each a step further."""
-    for _ in range(DROP_ROUNDS):
-        try:
-            await delete_model(graph, model_id, keep_model=keep_model)
-            return
-        except DatabaseFull:
-            continue
-        except Exception as exc:
-            log.warning("ifcgraph_partial_left", model_id=model_id, error_type=type(exc).__name__)
-            return
-    log.warning("ifcgraph_partial_left", model_id=model_id, error_type=DatabaseFull.__name__)
 
 
 def _issue_key(issue: dict[str, Any]) -> tuple[Any, ...]:
@@ -295,7 +280,7 @@ class IfcGraphService:
             if f"ifcgraph-{row['id']}" in waiting_here:
                 continue
             if row["state"] == STATE_RUNNING:
-                await delete_model(self.graph, row["id"], keep_model=True)
+                await drop_partial(self.graph, row["id"], keep_model=True)
                 await self._set_state(row["id"], STATE_QUEUED)
             log.info("ifcgraph_resumed", model_id=row["id"])
             self._start(row["id"], row["storage_key"], row["file_name"])
@@ -353,7 +338,7 @@ class IfcGraphService:
                         await self._copy_to_workcopy(model_id, header, records)
                 except Exception as exc:
                     log.warning("ifcgraph_failed", model_id=model_id, error=f"{type(exc).__name__}: {exc}"[:500])
-                    await _drop_partial(self.graph, model_id, keep_model=True)
+                    await drop_partial(self.graph, model_id, keep_model=True)
                     await self._set_state(model_id, STATE_FAILED, error=f"{type(exc).__name__}: {exc}"[:500])
                     return
                 facts = {name: counts.get(name, header.get(name)) for name in FACTS}
@@ -506,7 +491,7 @@ class IfcGraphService:
             )
         except Exception as exc:
             log.warning("ifcgraph_workcopy_failed", model_id=model_id, error=f"{type(exc).__name__}: {exc}"[:300])
-            await _drop_partial(workcopy, model_id)  # the archive is untouched; the copy can be made again
+            await drop_partial(workcopy, model_id)  # the archive is untouched; the copy can be made again
 
     async def in_workcopy(self, model_id: str) -> bool:
         """Whether a version's model is in the working copy, so that a query can run there."""

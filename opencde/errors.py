@@ -25,10 +25,11 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from neo4j.exceptions import ServiceUnavailable
+from neo4j.exceptions import ServiceUnavailable, TransientError
 from starlette import status
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from opencde.graph.dialect import refused_for_memory
 from opencde.graph.graph import DatabaseFull
 from opencde.logging import get_logger
 
@@ -191,6 +192,14 @@ def install_error_handlers(app: FastAPI) -> None:
         # The database had no memory left for the statement and rolled it back; its operator raises the limit.
         log.error("database_full", path=request.url.path)
         return error_response(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc))
+
+    @app.exception_handler(TransientError)
+    async def _transient(request: Request, exc: TransientError) -> JSONResponse:
+        # A refusal for want of memory from a transaction of its own (the named queries), past the graph's check;
+        # any other transient error goes on to the error middleware, which answers 500 as before.
+        if not refused_for_memory(exc):
+            raise exc
+        return await _database_full(request, DatabaseFull())
 
     @app.exception_handler(Exception)
     async def _unexpected(request: Request, exc: Exception) -> JSONResponse:

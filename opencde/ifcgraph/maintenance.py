@@ -14,16 +14,42 @@ store's: in PostgreSQL when a ``postgres`` is given (ADR 0029), else in the grap
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from ifc_db.importer import delete_model
 
-from opencde.graph.graph import Graph
+from opencde.graph.graph import FREE_MEMORY_INTERVAL, DatabaseFull, Graph
+from opencde.logging import get_logger
 from opencde.storage import LocalStorage
 
 if TYPE_CHECKING:
     from opencde.postgres.database import Postgres
     from opencde.store.protocols import ConversionStore, ProjectStore
+
+log = get_logger(__name__)
+
+DROP_ROUNDS = 5  # rounds of deleting a failed import's part from a full database, each after it gave memory back
+
+
+async def drop_partial(graph: Graph, model_id: str, *, keep_model: bool = False) -> bool:
+    """Remove what a failed import or merge wrote; True when it is gone. A full database refuses the deletes too,
+    until it has given back the memory of those before, which each refusal asks of it (``Graph.free_memory``): so a
+    few rounds, each after a pause and a step further. Any other failure is logged and left, as the import's own
+    error is what counts."""
+    for round in range(DROP_ROUNDS):
+        if round:
+            await asyncio.sleep(FREE_MEMORY_INTERVAL)
+        try:
+            await delete_model(graph, model_id, keep_model=keep_model)
+            return True
+        except DatabaseFull:
+            continue
+        except Exception as exc:
+            log.warning("ifcgraph_partial_left", model_id=model_id, error_type=type(exc).__name__)
+            return False
+    log.warning("ifcgraph_partial_left", model_id=model_id, error_type=DatabaseFull.__name__)
+    return False
 
 
 def _conversions(graph: Graph, postgres: Postgres | None) -> ConversionStore:

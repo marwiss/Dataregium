@@ -18,6 +18,7 @@ from opencde import health
 from opencde.graph import driver as driver_module
 from opencde.graph.dialect import MEMGRAPH, NEO4J
 from opencde.graph.graph import DatabaseFull, Graph
+from opencde.ifcgraph import maintenance
 from tests.conftest import test_settings as make_settings  # aliased so pytest does not collect it as a test
 
 MEMGRAPH_FULL = "Memgraph.TransientError.MemgraphError.MemgraphError"
@@ -45,7 +46,8 @@ class Tx:
 
 
 class Session:
-    """Calls the transaction function as the driver does, and tries it again as the driver would."""
+    """Calls the transaction function as the driver does, tries it again as the driver would, and raises the last
+    error when the tries are spent; ``at_commit`` is an error the commit raises after the function."""
 
     def __init__(self, driver: Driver) -> None:
         self.driver = driver
@@ -57,14 +59,16 @@ class Session:
         return None
 
     async def execute_write(self, work: Any) -> Any:
-        for _ in range(3):
+        for attempt in range(3):
             self.driver.attempts += 1
             try:
-                return await work(Tx(self.driver.error))
+                done = await work(Tx(self.driver.error))
+                if self.driver.at_commit is not None:
+                    raise self.driver.at_commit
+                return done
             except Neo4jError as exc:
-                if not exc.is_retryable():
+                if not exc.is_retryable() or attempt == 2:
                     raise
-        raise RuntimeError("retried in vain")
 
     execute_read = execute_write
 
@@ -77,8 +81,9 @@ class Session:
 
 
 class Driver:
-    def __init__(self, error: Exception | None) -> None:
+    def __init__(self, error: Exception | None, at_commit: Exception | None = None) -> None:
         self.error = error
+        self.at_commit = at_commit
         self.attempts = 0
         self.execute_query_bookmark_manager = object()
         self.sessions: list[dict[str, Any]] = []
@@ -89,14 +94,17 @@ class Driver:
         return Session(self)
 
 
+NEO4J_FULL = "Neo.TransientError.General.MemoryPoolOutOfMemoryError"
+
+
 @pytest.mark.parametrize(
-    ("dialect", "code", "message"),
-    [
-        (MEMGRAPH, MEMGRAPH_FULL, FULL_MESSAGE),
-        (NEO4J, "Neo.TransientError.General.MemoryPoolOutOfMemoryError", "The allocation of an extra 2.0 MiB ..."),
-    ],
+    ("dialect", "code", "message", "attempts"),
+    [(MEMGRAPH, MEMGRAPH_FULL, FULL_MESSAGE, 1), (NEO4J, NEO4J_FULL, "The allocation of an extra 2.0 MiB ...", 3)],
 )
-async def test_a_full_database_is_refused_at_once_and_not_tried_again(dialect: Any, code: str, message: str) -> None:
+async def test_a_full_database_is_refused_with_its_own_error(
+    dialect: Any, code: str, message: str, attempts: int
+) -> None:
+    """Memgraph at once; Neo4j after the driver's tries, since its pool frees as other transactions end."""
     for call in ("run", "write", "read"):
         driver = Driver(refusal(code, message))
         graph = Graph(driver, "db", dialect)  # type: ignore[arg-type]
@@ -105,22 +113,98 @@ async def test_a_full_database_is_refused_at_once_and_not_tried_again(dialect: A
                 await graph.run("CREATE (n:Probe)")
             else:
                 await getattr(graph, call)(lambda tx: tx.run("CREATE (n:Probe)"))
-        assert driver.attempts == 1, f"{call} was tried again"
+        assert driver.attempts == attempts, call
         assert str(raised.value) == "The database is full and takes no changes"
         assert driver.statements == (["FREE MEMORY"] if dialect is MEMGRAPH else []), "the memory is given back"
 
 
-async def test_other_transient_errors_are_still_tried_again() -> None:
-    driver = Driver(refusal("Neo.TransientError.Transaction.DeadlockDetected", "deadlock"))
-    with pytest.raises(RuntimeError, match="in vain"):
-        await Graph(driver, "db", NEO4J).run("MATCH (n) RETURN n")  # type: ignore[arg-type]
-    assert driver.attempts == 3
+async def test_a_refusal_at_the_commit_is_the_same_refusal() -> None:
+    driver = Driver(None, at_commit=refusal(MEMGRAPH_FULL, FULL_MESSAGE))
+    with pytest.raises(DatabaseFull):
+        await Graph(driver, "db", MEMGRAPH).write(lambda tx: tx.run("CREATE (n:Probe)"))  # type: ignore[arg-type]
+    assert driver.statements == ["FREE MEMORY"]
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        ("Neo.TransientError.Transaction.DeadlockDetected", "deadlock"),
+        ("Neo.ClientError.Schema.ConstraintValidationFailed", "Node already exists with name = 'OutOfMemoryError'"),
+        ("Memgraph.ClientError.MemgraphError.MemgraphError", "Memory limit exceeded! quoted from a value"),
+        ("Memgraph.TransientError.MemgraphError.MemgraphError", "Cannot get unique access: Memory limit exceeded!"),
+    ],
+)
+async def test_other_errors_stay_what_they_are(code: str, message: str) -> None:
+    """Retried as before when transient, and never full because a value or a message quotes the words."""
+    for dialect in (NEO4J, MEMGRAPH):
+        driver = Driver(refusal(code, message))
+        with pytest.raises(Neo4jError):
+            await Graph(driver, "db", dialect).run("MATCH (n) RETURN n")  # type: ignore[arg-type]
+        assert driver.attempts == (3 if "TransientError" in code else 1)
+        assert driver.statements == []
+
+
+async def test_a_burst_of_refusals_asks_for_one_collection() -> None:
+    driver = Driver(refusal(MEMGRAPH_FULL, FULL_MESSAGE))
+    graph = Graph(driver, "db", MEMGRAPH)  # type: ignore[arg-type]
+    for _ in range(5):
+        with pytest.raises(DatabaseFull):
+            await graph.run("CREATE (n:Probe)")
+    assert driver.statements == ["FREE MEMORY"], "at most one per interval"
 
 
 async def test_a_statement_keeps_the_bookmarks_execute_query_had() -> None:
     driver = Driver(None)
     assert await Graph(driver, "db", NEO4J).run("RETURN 1") == []  # type: ignore[arg-type]
     assert driver.sessions == [{"database": "db", "bookmark_manager": driver.execute_query_bookmark_manager}]
+
+
+async def test_a_partial_model_is_removed_in_rounds(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    async def delete_model(graph: object, model_id: str, *, keep_model: bool = False) -> None:
+        calls.append(model_id)
+        if len(calls) < 3:
+            raise DatabaseFull
+
+    async def pause(seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(maintenance, "delete_model", delete_model)
+    monkeypatch.setattr(maintenance.asyncio, "sleep", pause)
+    assert await maintenance.drop_partial(object(), "m1") is True  # type: ignore[arg-type]
+    assert calls == ["m1"] * 3
+    calls.clear()
+
+    async def broken(graph: object, model_id: str, *, keep_model: bool = False) -> None:
+        calls.append(model_id)
+        raise RuntimeError("no")
+
+    monkeypatch.setattr(maintenance, "delete_model", broken)
+    assert await maintenance.drop_partial(object(), "m2") is False, "another failure is left, once"  # type: ignore[arg-type]
+    assert calls == ["m2"]
+
+
+class PingDriver:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def session(self, **options: Any) -> PingDriver:
+        return self
+
+    async def __aenter__(self) -> PingDriver:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    async def run(self, statement: str) -> Any:
+        raise self.error
+
+
+async def test_a_graph_that_refuses_for_want_of_memory_still_answers_the_ping() -> None:
+    assert await driver_module.ping(PingDriver(refusal(MEMGRAPH_FULL, FULL_MESSAGE)), "db") is True  # type: ignore[arg-type]
+    assert await driver_module.ping(PingDriver(OSError("no route")), "db") is False  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -165,6 +249,7 @@ def info(tracked: str, limit: str) -> list[dict[str, Any]]:
         (InfoGraph(MEMGRAPH, info("100.00MiB", "0B")), False),
         (InfoGraph(MEMGRAPH, [{"storage info": "memory_tracked", "value": "1.00GiB"}]), False),
         (InfoGraph(MEMGRAPH, RuntimeError("no answer")), False),
+        (InfoGraph(MEMGRAPH, refusal(MEMGRAPH_FULL, FULL_MESSAGE)), True),
         (InfoGraph(NEO4J, RuntimeError("never asked")), False),
     ],
 )

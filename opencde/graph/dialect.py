@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from neo4j.exceptions import TransientError
+
 from opencde.settings import GraphDialect
 
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -85,11 +87,23 @@ class Dialect:
         """Substrings of the error a product raises when DDL is repeated. Treated as success."""
         return ("already exists", "AlreadyExists", "EquivalentSchemaRuleAlreadyExists", "ConstraintAlreadyExists")
 
+    def is_full(self, exc: Exception) -> bool:
+        """Whether the product refused a statement for want of memory: Memgraph at its ``--memory-limit`` by the start
+        of its message, Neo4j by the code of its transaction memory pool or heap. Both are transient errors; the
+        message alone is never enough, since another error can quote a value that holds the words."""
+        if not isinstance(exc, TransientError):
+            return False
+        if self.name is GraphDialect.MEMGRAPH:
+            return (exc.message or "").startswith("Memory limit exceeded")
+        return (exc.code or "").startswith("Neo.TransientError.General.") and (exc.code or "").endswith(
+            "OutOfMemoryError"
+        )
+
     @property
-    def full_markers(self) -> tuple[str, ...]:
-        """Substrings of the error a product raises when it has no memory left for a statement: Memgraph at its
-        ``--memory-limit``, Neo4j at its transaction memory pool. Both call it transient; trying again does not help."""
-        return ("Memory limit exceeded", "OutOfMemoryError")
+    def full_at_once(self) -> bool:
+        """Whether a refusal for want of memory ends the transaction at once instead of after the driver's tries:
+        Memgraph's limit holds until something is deleted, while Neo4j's pool frees as other transactions end."""
+        return self.name is GraphDialect.MEMGRAPH
 
     @property
     def storage_info(self) -> str | None:
@@ -116,3 +130,9 @@ DIALECTS: dict[GraphDialect, Dialect] = {NEO4J.name: NEO4J, MEMGRAPH.name: MEMGR
 
 def get_dialect(name: GraphDialect) -> Dialect:
     return DIALECTS[name]
+
+
+def refused_for_memory(exc: Exception) -> bool:
+    """Whether either product refused a statement for want of memory, for code that runs a transaction of its own
+    (the named queries, the administrators' query) and does not know which graph it was."""
+    return any(dialect.is_full(exc) for dialect in DIALECTS.values())

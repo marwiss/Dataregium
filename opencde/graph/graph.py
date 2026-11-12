@@ -18,6 +18,7 @@ node objects. Never build Cypher from user input: parameters only.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any, LiteralString, TypeVar, cast
 
@@ -34,12 +35,14 @@ T = TypeVar("T")
 DDL_ATTEMPTS = 30  # schema statements that meet a transient error: about two minutes in all, at growing intervals
 DDL_RETRY_SECONDS = 0.5
 DDL_RETRY_MAX_SECONDS = 5.0
+FREE_MEMORY_INTERVAL = 2.0  # seconds between two of Memgraph's collections asked for after refusals
+FREE_MEMORY_SECONDS = 30.0  # the longest wait for one
 
 
 class DatabaseFull(Exception):
-    """The graph database has no memory left for a statement. The driver would try again for half a minute, as with
-    any transient error, so the transaction function raises this instead, which it does not retry; the transaction
-    is rolled back, so nothing of it is written."""
+    """The graph database has no memory left for a statement. The driver would try Memgraph's refusal again for half
+    a minute, as any transient error, so the transaction function raises this instead, which it does not retry; the
+    transaction is rolled back, so nothing of it is written."""
 
     def __init__(self) -> None:
         super().__init__("The database is full and takes no changes")
@@ -73,6 +76,8 @@ class Graph:
         self.driver = driver
         self.database = database
         self.dialect = dialect
+        self._freeing = asyncio.Lock()
+        self._freed_at = float("-inf")
 
     async def run(self, query: str, /, **params: Any) -> list[dict[str, Any]]:
         """One statement in a transaction of its own, as ``execute_query`` runs it, with its bookmarks."""
@@ -90,8 +95,9 @@ class Graph:
         return await self._transaction(False, work)
 
     async def _transaction(self, writes: bool, work: Callable[[Tx], Awaitable[T]], **options: Any) -> T:
-        """``work`` in a transaction the driver tries again after a transient error, but for a refusal for want of
-        memory: that is :class:`DatabaseFull` at once, after the database has been asked to give back what the
+        """``work`` in a transaction the driver tries again after a transient error. A refusal for want of memory is
+        :class:`DatabaseFull`: at once where the product says to (Memgraph), after the driver's tries otherwise, and
+        also when it comes at the beginning or the commit, after the database has been asked to give back what the
         refused transaction held, which Memgraph otherwise does only at its next collection."""
         try:
             async with self.driver.session(database=self.database, **options) as session:
@@ -100,25 +106,37 @@ class Graph:
         except DatabaseFull:
             await self.free_memory()
             raise
+        except Neo4jError as exc:
+            if not self.dialect.is_full(exc):
+                raise
+            await self.free_memory()
+            raise DatabaseFull from exc
 
     async def _guarded(self, work: Callable[[Tx], Awaitable[T]], tx: AsyncManagedTransaction) -> T:
         try:
             return await work(Tx(tx))
         except Neo4jError as exc:
-            if any(marker in f"{exc.code} {exc.message}" for marker in self.dialect.full_markers):
+            if self.dialect.full_at_once and self.dialect.is_full(exc):
                 raise DatabaseFull from exc
             raise
 
     async def free_memory(self) -> None:
-        """Ask the database to collect what deleted and refused transactions left in memory now, where it says how."""
+        """Ask the database to collect what deleted and refused transactions left in memory now, where it says how;
+        one collection at a time and at most one per ``FREE_MEMORY_INTERVAL``, so that a burst of refusals asks once."""
         statement = self.dialect.free_memory
-        if statement is None:
+        if statement is None or self._freeing.locked():
             return
-        try:
-            async with self.driver.session(database=self.database) as session:
-                await (await session.run(cast("LiteralString", statement))).consume()
-        except Exception as exc:  # only a help; the refusal is what the caller hears about
-            log.warning("graph_free_memory_failed", error_type=type(exc).__name__)
+        async with self._freeing:
+            if time.monotonic() - self._freed_at < FREE_MEMORY_INTERVAL:
+                return
+            try:
+                async with asyncio.timeout(FREE_MEMORY_SECONDS):
+                    async with self.driver.session(database=self.database) as session:
+                        await (await session.run(cast("LiteralString", statement))).consume()
+            except Exception as exc:  # only a help; the refusal is what the caller hears about
+                log.warning("graph_free_memory_failed", error_type=type(exc).__name__)
+            finally:
+                self._freed_at = time.monotonic()
 
     async def ddl(self, statement: str) -> bool:
         """Run a schema statement outside any transaction; True if it changed something.
