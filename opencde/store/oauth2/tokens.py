@@ -485,3 +485,35 @@ class TokenRepository:
             )
         )
         return counters.nodes_deleted > 0
+
+    # -- the administrators' figures ---------------------------------------------
+
+    async def live_families(self, *, limit: int = 500) -> list[dict[str, Any]]:
+        """Live refresh-token families on the server, newest first: who authorised which application, until when."""
+        return await self.graph.run(
+            """
+            MATCH (rt:RefreshToken {spent: false})-[:FOR]->(u:User), (rt)-[:ISSUED_TO]->(c:Client)
+            WHERE rt.expires_at > $now
+            RETURN rt.family_id AS family_id, u.id AS user_id, u.username AS username, c.client_id AS client_id,
+                   c.name AS client_name, rt.scope AS scope, rt.created_at AS created_at, rt.expires_at AS expires_at
+            ORDER BY rt.created_at DESC
+            LIMIT $limit
+            """,
+            now=now_iso(),
+            limit=limit,
+        )
+
+    async def live_count(self) -> int:
+        """The live refresh tokens on the server: the applications' sessions."""
+        row = await self.graph.one(
+            "MATCH (rt:RefreshToken {spent: false}) WHERE rt.expires_at > $now RETURN count(rt) AS n", now=now_iso()
+        )
+        return int(row["n"]) if row else 0
+
+    async def family_user(self, family_id: str) -> str | None:
+        """The user of a refresh-token family, or None when no token of it is left."""
+        row = await self.graph.one(
+            "MATCH (rt:RefreshToken {family_id: $family_id})-[:FOR]->(u:User) RETURN u.id AS user_id LIMIT 1",
+            family_id=family_id,
+        )
+        return row["user_id"] if row else None

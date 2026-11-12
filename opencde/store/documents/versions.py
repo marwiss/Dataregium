@@ -524,6 +524,16 @@ class DocumentRepository:
         )
         return [_record(row) for row in rows]
 
+    async def counts_per_project(self) -> dict[str, int]:
+        """The documents of each project, for the administrators; one that no project holds counts under ``""``."""
+        rows = await self.graph.run(
+            """
+            MATCH (d:Document) OPTIONAL MATCH (p:Project)-[:HAS_DOCUMENT]->(d)
+            RETURN p.project_id AS project_id, count(d) AS n
+            """
+        )
+        return {str(row["project_id"] or ""): int(row["n"]) for row in rows}
+
 
 def default_metadata(
     *, file_name: str, size_in_bytes: int, sha256: str, author: str, project_name: str

@@ -129,6 +129,17 @@ class BcfDocumentRepository:
         )
         return entries
 
+    async def counts_per_project(self) -> dict[str, int]:
+        """The BCF documents of each project, for the administrators; one that no project holds counts under
+        ``""``."""
+        rows = await self.graph.run(
+            """
+            MATCH (d:BcfDocument) OPTIONAL MATCH (p:Project)-[:HAS_DOCUMENT]->(d)
+            RETURN p.project_id AS project_id, count(d) AS n
+            """
+        )
+        return {str(row["project_id"] or ""): int(row["n"]) for row in rows}
+
 
 def _entry(
     *,

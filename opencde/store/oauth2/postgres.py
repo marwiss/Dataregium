@@ -321,6 +321,17 @@ FROM refresh_tokens r JOIN oauth_clients c ON c.client_id = r.client_id
 WHERE r.user_id = $1 AND NOT r.spent AND r.expires_at > $2
 ORDER BY r.created_at DESC, r.family_id COLLATE "C"
 """
+#: The live refresh-token families on the server, for the administrators, who see the whole server.
+LIVE_FAMILIES = """
+SELECT r.family_id, u.id AS user_id, u.username, c.client_id, c.name AS client_name, r.scope, r.created_at,
+       r.expires_at
+FROM refresh_tokens r JOIN users u ON u.id = r.user_id JOIN oauth_clients c ON c.client_id = r.client_id
+WHERE NOT r.spent AND r.expires_at > $1
+ORDER BY r.created_at DESC, r.family_id COLLATE "C"
+LIMIT $2
+"""
+LIVE_COUNT = "SELECT count(*) AS n FROM refresh_tokens WHERE NOT spent AND expires_at > $1"
+FAMILY_USER = "SELECT user_id FROM refresh_tokens WHERE family_id = $1 LIMIT 1"
 REVOKE_FAMILY_OF_USER = """
 WITH a AS (DELETE FROM access_tokens WHERE family_id = $1 AND user_id = $2 RETURNING 1),
      r AS (DELETE FROM refresh_tokens WHERE family_id = $1 AND user_id = $2 RETURNING 1)
@@ -514,6 +525,21 @@ class PostgresTokenRepository:
 
     async def revoke_family(self, family_id: str, *, user_id: str) -> bool:
         return _count(await self.postgres.one(REVOKE_FAMILY_OF_USER, family_id, user_id)) > 0
+
+    # -- the administrators' figures ---------------------------------------------
+
+    async def live_families(self, *, limit: int = 500) -> list[dict[str, Any]]:
+        """Live refresh-token families on the server, newest first: who authorised which application, until when."""
+        return await self.postgres.run(LIVE_FAMILIES, now_iso(), limit)
+
+    async def live_count(self) -> int:
+        """The live refresh tokens on the server: the applications' sessions."""
+        return _count(await self.postgres.one(LIVE_COUNT, now_iso()))
+
+    async def family_user(self, family_id: str) -> str | None:
+        """The user of a refresh-token family, or None when no token of it is left."""
+        row = await self.postgres.one(FAMILY_USER, family_id)
+        return row["user_id"] if row else None
 
 
 # -- where OAuth2 is ---------------------------------------------------------------------------------------------

@@ -9,7 +9,6 @@ from fastapi import APIRouter, Path, Request
 from fastapi.responses import Response
 
 from opencde.accounts.roles import Role
-from opencde.admin import queries
 from opencde.admin.access import (
     AdminDep,
     AdminForm,
@@ -20,7 +19,8 @@ from opencde.admin.access import (
     redirect_with_notice,
     text,
 )
-from opencde.deps import AuditLogDep, GraphDep, ModelGraphDep, ProjectsDep, StorageDep, UsersDep
+from opencde.admin.queries import FiguresDep
+from opencde.deps import AuditLogDep, ModelGraphDep, ProjectsDep, StorageDep, UsersDep
 from opencde.ids import is_uuid, normalize_guid
 from opencde.ifcgraph.maintenance import delete_project
 from opencde.store.accounts.projects import AI_POLICIES, EXTENSION_LISTS, PRAXI_STATUSES, AccountError, Project
@@ -70,13 +70,11 @@ async def _project_page(
 
 
 @router.get("")
-async def projects_list(request: Request, admin: AdminDep, projects: ProjectsDep, graph: GraphDep) -> Response:
+async def projects_list(request: Request, admin: AdminDep, projects: ProjectsDep, figures: FiguresDep) -> Response:
     return render(
         request,
         "admin/projects.html",
-        admin_context(
-            request, admin, "projects", projects=await projects.all(), stats=await queries.project_stats(graph)
-        ),
+        admin_context(request, admin, "projects", projects=await projects.all(), stats=await figures.project_stats()),
     )
 
 

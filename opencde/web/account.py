@@ -13,13 +13,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
 
 from opencde import audit
-from opencde.admin import queries
 from opencde.admin.access import NOTICES, SignedInDep, redirect_with_notice, text
 from opencde.auth.dependencies import TokensDep
 from opencde.auth.forms import FormTokenError
-from opencde.deps import AuditLogDep, GraphDep, UsersDep, client_ip
+from opencde.deps import AuditLogDep, UsersDep, client_ip
 from opencde.store.accounts.sessions import WebSessionsDep
 from opencde.store.accounts.users import AccountError
+from opencde.store.protocols import WebSessionStore
 from opencde.ui.i18n import tr, tr_error
 from opencde.ui.templating import render
 from opencde.web.dependencies import NO_STORE, form_tokens, page_context, require_same_origin, safe_next
@@ -46,7 +46,7 @@ async def _page(
     request: Request,
     web_user: SignedInDep,
     tokens: TokensDep,
-    graph: GraphDep,
+    sessions: WebSessionStore,
     error: str | None = None,
     status_code: int = 200,
 ) -> Response:
@@ -60,7 +60,7 @@ async def _page(
             web_user,
             change_password_action="/account" + (f"?{urlencode({'next': going_on})}" if going_on != "/" else ""),
             apps=await tokens.sessions_for_user(web_user.user.id),
-            web_sessions=await queries.web_sessions(graph, web_user.user.id),
+            web_sessions=await sessions.live(user_id=web_user.user.id),
             form_token=form_tokens(request).sign(PURPOSE, {"session": web_user.session_hash}),
             # The page says it itself to someone who has to change the password.
             notice=None
@@ -75,8 +75,10 @@ async def _page(
 
 
 @router.get("/account")
-async def account_page(request: Request, web_user: SignedInDep, tokens: TokensDep, graph: GraphDep) -> Response:
-    return await _page(request, web_user, tokens, graph)
+async def account_page(
+    request: Request, web_user: SignedInDep, tokens: TokensDep, sessions: WebSessionsDep
+) -> Response:
+    return await _page(request, web_user, tokens, sessions)
 
 
 @router.post("/account")
@@ -86,7 +88,6 @@ async def account_action(
     users: UsersDep,
     tokens: TokensDep,
     sessions: WebSessionsDep,
-    graph: GraphDep,
     audit_log: AuditLogDep,
 ) -> Response:
     require_same_origin(request)
@@ -109,12 +110,12 @@ async def account_action(
             return _back_to_account(request, "wrong_password")
         if new != repeat:
             return await _page(
-                request, web_user, tokens, graph, error=tr(request, "account.error.mismatch"), status_code=400
+                request, web_user, tokens, sessions, error=tr(request, "account.error.mismatch"), status_code=400
             )
         try:
             await users.set_password(web_user.user.id, new, must_change=False)
         except AccountError as exc:
-            return await _page(request, web_user, tokens, graph, error=tr_error(request, exc), status_code=400)
+            return await _page(request, web_user, tokens, sessions, error=tr_error(request, exc), status_code=400)
         await audit.record(audit_log, "account.password.changed", actor=web_user.user.id, ip=ip)
         going_on = _going_on(request)
         if going_on != "/":
@@ -129,9 +130,9 @@ async def account_action(
     if action == "revoke_web":
         session_id = text(data, "session_id", max_length=128)
         if session_id != web_user.session_hash:
-            owned = {row["id"] for row in await queries.web_sessions(graph, web_user.user.id)}
+            owned = {row["id"] for row in await sessions.live(user_id=web_user.user.id)}
             if session_id in owned:
-                await queries.delete_web_session(graph, session_id)
+                await sessions.delete_by_id(session_id)
         return redirect_with_notice("/account", "revoked")
 
     if action == "sign_out_everywhere":

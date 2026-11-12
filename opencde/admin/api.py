@@ -31,6 +31,7 @@ from opencde import __version__, audit
 from opencde.accounts.roles import Role
 from opencde.admin import queries
 from opencde.admin.doctor import run_checks
+from opencde.admin.queries import Figures, FiguresDep
 from opencde.admin.routes_overview import SAFE_SETTINGS
 from opencde.auth.dependencies import AdminPrincipal, FreshAdminPrincipal, TokensDep, fresh_admin_principal
 from opencde.deps import (
@@ -38,14 +39,13 @@ from opencde.deps import (
     ClientsDep,
     GraphDep,
     ModelGraphDep,
+    PostgresDep,
     ProjectsDep,
     SettingsDep,
     StorageDep,
     UsersDep,
     client_ip,
 )
-from opencde.graph.driver import ping_within
-from opencde.graph.graph import Graph
 from opencde.ifcgraph import maintenance
 from opencde.settings import Settings, env_name
 from opencde.store.accounts.projects import AiPolicy, Project
@@ -149,12 +149,17 @@ def _bad_request(exc: Exception) -> HTTPException:
 
 @router.get("/overview", summary="Administration (extension): counts and the state of the server")
 async def overview(
-    request: Request, principal: AdminPrincipal, graph: GraphDep, settings: SettingsDep
+    request: Request,
+    principal: AdminPrincipal,
+    graph: GraphDep,
+    postgres: PostgresDep,
+    figures: FiguresDep,
+    settings: SettingsDep,
 ) -> dict[str, Any]:
-    reachable = await ping_within(graph.driver, graph.database, settings.graph_connect_timeout_seconds)
-    counts = await queries.counts(graph) if reachable else {}
-    models = (await queries.model_counts(graph)).get("", 0) if reachable else 0
-    rows = await queries.request_log_rows(graph) if reachable else 0
+    reachable = await queries.store_answers(graph, postgres, settings)
+    counts = await figures.counts() if reachable else {}
+    models = (await figures.model_counts()).get("", 0) if reachable else 0
+    rows = await figures.request_log.count() if reachable else 0
     started = getattr(request.app.state, "started_at", None)
     return {
         "version": __version__,
@@ -176,12 +181,12 @@ async def overview(
 async def list_users(
     principal: AdminPrincipal,
     users: UsersDep,
-    graph: GraphDep,
+    figures: FiguresDep,
     q: SearchQuery = None,
     limit: LimitQuery = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
     found = await users.search(query=q, limit=limit)
-    memberships = await queries.memberships_by_user(graph)
+    memberships = await figures.memberships_by_user()
     total = len(found) if q else await users.count()
     return _listing([_user(user, memberships.get(user.id)) for user in found], total)
 
@@ -200,10 +205,10 @@ async def get_user(principal: AdminPrincipal, user_id: IdPath, users: UsersDep) 
     )
 
 
-async def _project_rows(projects: ProjectsDep, graph: Graph, selection: list[Project]) -> list[dict[str, Any]]:
-    stats = await queries.project_stats(graph)
-    members = await queries.members_by_project(graph)
-    models = await queries.model_counts(graph)
+async def _project_rows(figures: Figures, selection: list[Project]) -> list[dict[str, Any]]:
+    stats = await figures.project_stats()
+    members = await figures.members_by_project()
+    models = await figures.model_counts()
     return [
         _project(
             project,
@@ -217,26 +222,26 @@ async def _project_rows(projects: ProjectsDep, graph: Graph, selection: list[Pro
 
 @router.get("/projects", summary="Administration (extension): projects with members and counts")
 async def list_projects(
-    principal: AdminPrincipal, projects: ProjectsDep, graph: GraphDep, q: SearchQuery = None
+    principal: AdminPrincipal, projects: ProjectsDep, figures: FiguresDep, q: SearchQuery = None
 ) -> dict[str, Any]:
     selection = [p for p in await projects.all() if not q or q.lower() in p.name.lower()]
-    return _listing(await _project_rows(projects, graph, selection))
+    return _listing(await _project_rows(figures, selection))
 
 
-async def _project_detail(project: Project, projects: ProjectsDep, graph: Graph) -> dict[str, Any]:
-    data = (await _project_rows(projects, graph, [project]))[0]
+async def _project_detail(project: Project, projects: ProjectsDep, figures: Figures) -> dict[str, Any]:
+    data = (await _project_rows(figures, [project]))[0]
     data["extensions"] = await projects.extensions(project.project_id) or {}
     return data
 
 
 @router.get("/projects/{project_id}", summary="Administration (extension): one project with its extensions")
 async def get_project(
-    principal: AdminPrincipal, project_id: IdPath, projects: ProjectsDep, graph: GraphDep
+    principal: AdminPrincipal, project_id: IdPath, projects: ProjectsDep, figures: FiguresDep
 ) -> dict[str, Any]:
     project = await projects.get(project_id)
     if project is None:
         raise HTTPException(404, "No such project")
-    return await _project_detail(project, projects, graph)
+    return await _project_detail(project, projects, figures)
 
 
 @router.get("/clients", summary="Administration (extension): OAuth2 clients")
@@ -289,11 +294,13 @@ def _session_rows(families: list[dict[str, Any]], browsers: list[dict[str, Any]]
 
 @router.get("/sessions", summary="Administration (extension): application and browser sessions")
 async def list_sessions(
-    principal: AdminPrincipal, graph: GraphDep, user: UserQuery = None, limit: LimitQuery = DEFAULT_LIMIT
+    principal: AdminPrincipal,
+    tokens: TokensDep,
+    sessions: WebSessionsDep,
+    user: UserQuery = None,
+    limit: LimitQuery = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
-    rows = _session_rows(
-        await queries.active_families(graph, limit=limit), await queries.web_sessions(graph, limit=limit)
-    )
+    rows = _session_rows(await tokens.live_families(limit=limit), await sessions.live(limit=limit))
     if user:
         rows = [row for row in rows if user in (row["user_id"], row["username"])]
     return _listing(rows[:limit], len(rows))
@@ -558,7 +565,7 @@ async def create_project(
     principal: AdminPrincipal,
     body: ProjectCreate,
     projects: ProjectsDep,
-    graph: GraphDep,
+    figures: FiguresDep,
     audit_log: AuditLogDep,
 ) -> dict[str, Any]:
     try:
@@ -566,7 +573,7 @@ async def create_project(
     except AccountError as exc:
         raise _bad_request(exc) from None
     await _record(request, audit_log, principal, "project.create", project_id=project.project_id, name=project.name)
-    return await _project_detail(project, projects, graph)
+    return await _project_detail(project, projects, figures)
 
 
 @router.put("/projects/{project_id}", summary="Administration (extension): rename a project or set its extensions")
@@ -577,7 +584,7 @@ async def update_project(
     project_id: IdPath,
     body: ProjectUpdate,
     projects: ProjectsDep,
-    graph: GraphDep,
+    figures: FiguresDep,
     audit_log: AuditLogDep,
 ) -> dict[str, Any]:
     project = await projects.get(project_id)
@@ -605,7 +612,7 @@ async def update_project(
         block_on_validation_errors=body.block_on_validation_errors,
         ai_policy=body.ai_policy,
     )
-    return await _project_detail(project, projects, graph)
+    return await _project_detail(project, projects, figures)
 
 
 @router.delete("/projects/{project_id}", status_code=204, summary="Administration (extension): delete a project")
@@ -827,15 +834,15 @@ async def revoke_session(
     principal: AdminPrincipal,
     session_id: IdPath,
     tokens: TokensDep,
-    graph: GraphDep,
+    sessions: WebSessionsDep,
     audit_log: AuditLogDep,
 ) -> Response:
     """``session_id`` is the ``id`` of the listing: a refresh-token family or a browser session."""
-    user_id = await queries.family_user(graph, session_id)
+    user_id = await tokens.family_user(session_id)
     if user_id is not None and await tokens.revoke_family(session_id, user_id=user_id):
         await _record(request, audit_log, principal, "session.revoke_family", user_id=user_id, family_id=session_id)
         return NO_CONTENT
-    if await queries.delete_web_session(graph, session_id):
+    if await sessions.delete_by_id(session_id):
         await _record(request, audit_log, principal, "session.revoke_web", session_id=session_id)
         return NO_CONTENT
     raise HTTPException(404, "No such session")

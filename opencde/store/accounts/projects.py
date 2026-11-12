@@ -353,3 +353,16 @@ class ProjectRepository:
         if result is None:
             raise AccountError("no such project", key="error.project.not_found")
         return result
+
+    # -- the administrators' figures ---------------------------------------------
+
+    async def all_memberships(self) -> list[dict[str, str]]:
+        """Every membership on the server, for the administrators, who see the whole server: the user's id and name,
+        the project's id and name, and the role."""
+        return await self.graph.run(
+            """
+            MATCH (u:User)-[m:MEMBER_OF]->(p:Project)
+            RETURN u.id AS user_id, u.username AS username, p.project_id AS project_id, p.name AS project_name,
+                   m.role AS role
+            """
+        )

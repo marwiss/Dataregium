@@ -259,6 +259,11 @@ FROM projects p
 WHERE p.project_id = $1
 """
 EXTENSIONS_SET = "UPDATE projects SET extensions = extensions || $2::jsonb WHERE project_id = $1 RETURNING project_id"
+#: Every membership on the server, for the administrators, who see the whole server.
+ALL_MEMBERSHIPS = """
+SELECT u.id AS user_id, u.username, p.project_id, p.name AS project_name, m.role
+FROM memberships m JOIN users u ON u.id = m.user_id JOIN projects p ON p.project_id = m.project_id
+"""
 
 
 class PostgresProjectRepository:
@@ -383,6 +388,11 @@ class PostgresProjectRepository:
             raise _no_project()
         return result
 
+    # -- the administrators' figures ---------------------------------------------
+
+    async def all_memberships(self) -> list[dict[str, str]]:
+        return await self.postgres.run(ALL_MEMBERSHIPS)
+
 
 # -- teams -------------------------------------------------------------------------------------------------------
 
@@ -483,6 +493,13 @@ WHERE s.id = $1 AND u.id = s.user_id AND s.expires_at > $2 AND s.idle_expires_at
 RETURNING u.id, u.username, u.email, u.full_name, u.is_admin, u.disabled, u.created_at, u.must_change_password,
        u.last_sign_in_at
 """
+SESSIONS_LIVE = """
+SELECT s.id, u.id AS user_id, u.username, s.created_at, s.expires_at, s.idle_expires_at, s.ip
+FROM web_sessions s JOIN users u ON u.id = s.user_id
+WHERE s.expires_at > $1 AND s.idle_expires_at > $1 AND ($2::text IS NULL OR u.id = $2)
+ORDER BY s.created_at COLLATE "C" DESC, s.id COLLATE "C"
+LIMIT $3
+"""
 
 
 class PostgresWebSessionRepository:
@@ -518,6 +535,14 @@ class PostgresWebSessionRepository:
 
     async def delete_for_user(self, user_id: str) -> int:
         return await self.postgres.execute("DELETE FROM web_sessions WHERE user_id = $1", user_id)
+
+    async def live(self, *, user_id: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
+        """Live sessions, newest first, of one user or, for the administrators, of all."""
+        return await self.postgres.run(SESSIONS_LIVE, now_iso(), user_id, limit)
+
+    async def delete_by_id(self, session_id: str) -> bool:
+        """End the session the listing shows by its id."""
+        return await self.postgres.execute("DELETE FROM web_sessions WHERE id = $1", session_id) > 0
 
 
 # -- where the accounts are --------------------------------------------------------------------------------------

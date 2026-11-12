@@ -312,3 +312,13 @@ class TopicRepository:
         if keys is None:
             raise HTTPException(404, "Topic not found")
         return keys
+
+    async def counts_per_project(self) -> dict[str, int]:
+        """The topics of each project, for the administrators; one that no project holds counts under ``""``."""
+        rows = await self.graph.run(
+            """
+            MATCH (t:Topic) OPTIONAL MATCH (p:Project)-[:HAS_TOPIC]->(t)
+            RETURN p.project_id AS project_id, count(t) AS n
+            """
+        )
+        return {str(row["project_id"] or ""): int(row["n"]) for row in rows}

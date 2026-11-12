@@ -10,7 +10,7 @@ with an absolute lifetime and an idle timeout. Signing out deletes it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, Response
 
@@ -84,6 +84,30 @@ class WebSessionRepository:
             )
         )
         return counters.nodes_deleted
+
+    async def live(self, *, user_id: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
+        """Live sessions, newest first, of one user or, for the administrators, of all: the id (the cookie's hash),
+        the user, when it began, when it ends and the address."""
+        return await self.graph.run(
+            """
+            MATCH (s:WebSession)-[:FOR]->(u:User)
+            WHERE s.expires_at > $now AND s.idle_expires_at > $now AND ($user_id IS NULL OR u.id = $user_id)
+            RETURN s.id AS id, u.id AS user_id, u.username AS username, s.created_at AS created_at,
+                   s.expires_at AS expires_at, s.idle_expires_at AS idle_expires_at, s.ip AS ip
+            ORDER BY s.created_at DESC
+            LIMIT $limit
+            """,
+            now=now_iso(),
+            user_id=user_id,
+            limit=limit,
+        )
+
+    async def delete_by_id(self, session_id: str) -> bool:
+        """End the session the listing shows by its id."""
+        counters = await self.graph.write(
+            lambda tx: tx.counters("MATCH (s:WebSession {id: $id}) DETACH DELETE s", id=session_id)
+        )
+        return counters.nodes_deleted > 0
 
 
 def set_session_cookie(response: Response, token: str, settings: Settings) -> None:

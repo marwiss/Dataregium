@@ -15,10 +15,11 @@ from opencde import audit
 from opencde.admin import queries
 from opencde.admin.access import AdminDep, AdminForm, admin_context, redirect_with_notice, text
 from opencde.admin.doctor import run_checks
+from opencde.admin.queries import FiguresDep
 from opencde.auth.dependencies import TokensDep
-from opencde.deps import AuditLogDep, GraphDep, ModelGraphDep, SettingsDep, StorageDep
-from opencde.graph.driver import ping_within
+from opencde.deps import AuditLogDep, GraphDep, ModelGraphDep, PostgresDep, SettingsDep, StorageDep
 from opencde.settings import env_name
+from opencde.store.accounts.sessions import WebSessionsDep
 from opencde.ui.templating import render
 
 router = APIRouter(prefix="/admin", include_in_schema=False)
@@ -72,10 +73,16 @@ SAFE_SETTINGS = (
 
 @router.get("")
 async def overview(
-    request: Request, admin: AdminDep, graph: GraphDep, audit_log: AuditLogDep, settings: SettingsDep
+    request: Request,
+    admin: AdminDep,
+    graph: GraphDep,
+    postgres: PostgresDep,
+    figures: FiguresDep,
+    audit_log: AuditLogDep,
+    settings: SettingsDep,
 ) -> Response:
-    reachable = await ping_within(graph.driver, graph.database, settings.graph_connect_timeout_seconds)
-    counts = await queries.counts(graph) if reachable else {}
+    reachable = await queries.store_answers(graph, postgres, settings)
+    counts = await figures.counts() if reachable else {}
     recent = await audit.recent(audit_log, limit=10) if reachable else []
     return render(
         request,
@@ -96,7 +103,7 @@ async def overview(
 
 
 @router.get("/sessions")
-async def sessions_page(request: Request, admin: AdminDep, graph: GraphDep) -> Response:
+async def sessions_page(request: Request, admin: AdminDep, tokens: TokensDep, sessions: WebSessionsDep) -> Response:
     form = AdminForm(request, admin, "admin-sessions")
     return render(
         request,
@@ -105,8 +112,8 @@ async def sessions_page(request: Request, admin: AdminDep, graph: GraphDep) -> R
             request,
             admin,
             "sessions",
-            families=await queries.active_families(graph),
-            web_sessions=await queries.web_sessions(graph),
+            families=await tokens.live_families(),
+            web_sessions=await sessions.live(),
             form_token=form.token(),
         ),
     )
@@ -114,7 +121,7 @@ async def sessions_page(request: Request, admin: AdminDep, graph: GraphDep) -> R
 
 @router.post("/sessions")
 async def sessions_action(
-    request: Request, admin: AdminDep, graph: GraphDep, audit_log: AuditLogDep, tokens: TokensDep
+    request: Request, admin: AdminDep, audit_log: AuditLogDep, tokens: TokensDep, sessions: WebSessionsDep
 ) -> Response:
     form = AdminForm(request, admin, "admin-sessions")
     data = await request.form()
@@ -127,7 +134,7 @@ async def sessions_action(
         await form.record(audit_log, "session.revoke_family", user_id=user_id)
     elif action == "revoke_web":
         session_id = text(data, "session_id", max_length=128)
-        await queries.delete_web_session(graph, session_id)
+        await sessions.delete_by_id(session_id)
         await form.record(audit_log, "session.revoke_web")
     elif action == "revoke_user":
         user_id = text(data, "user_id", max_length=64)

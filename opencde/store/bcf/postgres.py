@@ -362,6 +362,11 @@ class PostgresTopicRepository:
             raise HTTPException(404, "Topic not found")
         return keys
 
+    async def counts_per_project(self) -> dict[str, int]:
+        """The topics of each project, for the administrators."""
+        rows = await self.postgres.run("SELECT project_id, count(*) AS n FROM topics GROUP BY project_id")
+        return {row["project_id"]: int(row["n"]) for row in rows}
+
 
 # -- comments (BCF 3.4) ------------------------------------------------------------------------------------------
 
@@ -1179,6 +1184,11 @@ class PostgresBcfDocumentRepository:
             for row in await self.postgres.run(LATEST_VERSIONS, user_id, project_id)
         )
         return entries
+
+    async def counts_per_project(self) -> dict[str, int]:
+        """The BCF documents of each project, for the administrators."""
+        rows = await self.postgres.run("SELECT project_id, count(*) AS n FROM bcf_documents GROUP BY project_id")
+        return {row["project_id"]: int(row["n"]) for row in rows}
 
 
 # -- where the BCF area is ---------------------------------------------------------------------------------------

@@ -432,6 +432,11 @@ class PostgresDocumentRepository:
         rows = await self.postgres.run(MEMBER_HEADS, user_id, list(project_ids), list(suffixes), limit)
         return [_record(row) for row in rows]
 
+    async def counts_per_project(self) -> dict[str, int]:
+        """The documents of each project, for the administrators."""
+        rows = await self.postgres.run("SELECT project_id, count(*) AS n FROM documents GROUP BY project_id")
+        return {row["project_id"]: int(row["n"]) for row in rows}
+
 
 # -- the upload and selection sessions ---------------------------------------------------------------------------
 

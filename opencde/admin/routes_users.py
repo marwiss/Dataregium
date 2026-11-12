@@ -10,7 +10,6 @@ from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import Response
 
 from opencde.accounts.roles import Role
-from opencde.admin import queries
 from opencde.admin.access import (
     AdminDep,
     AdminForm,
@@ -21,11 +20,13 @@ from opencde.admin.access import (
     redirect_with_notice,
     text,
 )
+from opencde.admin.queries import FiguresDep
 from opencde.auth.dependencies import TokensDep
-from opencde.deps import AuditLogDep, GraphDep, ProjectsDep, UsersDep
+from opencde.deps import AuditLogDep, ProjectsDep, UsersDep
 from opencde.ids import is_uuid
+from opencde.store.accounts.sessions import WebSessionsDep
 from opencde.store.accounts.users import AccountError, User
-from opencde.store.protocols import ProjectStore, UserStore
+from opencde.store.protocols import ProjectStore, UserStore, WebSessionStore
 from opencde.ui.i18n import tr, tr_error
 from opencde.ui.templating import render
 
@@ -45,7 +46,7 @@ async def _user_page(
     user: User,
     users: UserStore,
     projects: ProjectStore,
-    graph: GraphDep,
+    sessions: WebSessionStore,
     error: str | None = None,
     status_code: int = 200,
 ) -> Response:
@@ -63,7 +64,7 @@ async def _user_page(
             memberships=memberships,
             other_projects=[p for p in await projects.all() if p.project_id not in member_of],
             roles=ROLES,
-            web_sessions=await queries.web_sessions(graph, user.id),
+            web_sessions=await sessions.live(user_id=user.id),
             form_token=form.token(),
             is_self=user.id == admin.user.id,
             error=error,
@@ -74,15 +75,13 @@ async def _user_page(
 
 @router.get("")
 async def users_list(
-    request: Request, admin: AdminDep, users: UsersDep, graph: GraphDep, q: str | None = Query(None, max_length=100)
+    request: Request, admin: AdminDep, users: UsersDep, figures: FiguresDep, q: str | None = Query(None, max_length=100)
 ) -> Response:
     found = await users.search(query=(q or "").strip() or None)
     return render(
         request,
         "admin/users.html",
-        admin_context(
-            request, admin, "users", users=found, q=q or "", memberships=await queries.membership_counts(graph)
-        ),
+        admin_context(request, admin, "users", users=found, q=q or "", memberships=await figures.membership_counts()),
     )
 
 
@@ -141,12 +140,17 @@ async def user_create(request: Request, admin: AdminDep, users: UsersDep, audit_
 
 @router.get("/{user_id}")
 async def user_page(
-    request: Request, admin: AdminDep, user_id: UserId, users: UsersDep, projects: ProjectsDep, graph: GraphDep
+    request: Request,
+    admin: AdminDep,
+    user_id: UserId,
+    users: UsersDep,
+    projects: ProjectsDep,
+    sessions: WebSessionsDep,
 ) -> Response:
     user = await users.get(user_id) if is_uuid(user_id) else None
     if user is None:
         raise not_found()
-    return await _user_page(request, admin, user, users, projects, graph)
+    return await _user_page(request, admin, user, users, projects, sessions)
 
 
 @router.post("/{user_id}")
