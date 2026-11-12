@@ -172,7 +172,7 @@ def server_query_tool() -> Tool:
             if values["name"] is None:
                 if asked:
                     raise ToolRefusal("The listing takes no parameters: name a query to give them")
-                listed = await list_queries(context.graph, documents, context.settings, context.ifcgraph, **where)
+                listed = await list_queries(documents, context.settings, context.ifcgraph, **where)
                 return {
                     "model_state": listed["model_state"],
                     "workcopy": listed["workcopy"],
@@ -182,7 +182,6 @@ def server_query_tool() -> Tool:
             if values["name"] == CHANGED_SINCE:
                 return _answer(await _changes(documents, context, where, asked))
             found = await ask_query(
-                context.graph,
                 documents,
                 context.settings,
                 context.ifcgraph,

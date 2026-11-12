@@ -17,7 +17,7 @@ from fastapi import APIRouter, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from opencde.auth.dependencies import DocumentsPrincipal
-from opencde.deps import GraphDep, SettingsDep
+from opencde.deps import SettingsDep
 from opencde.ids import is_uuid, normalize_guid
 from opencde.ifcgraph.queries import CHANGED_SINCE, MAX_ROWS, ask_query, changed_since, list_queries
 from opencde.ifcgraph.service import IfcGraphDep
@@ -73,14 +73,12 @@ async def ifc_queries(
     document_id: DocumentId,
     version_index: VersionIndex,
     documents: DocumentsDep,
-    graph: GraphDep,
     settings: SettingsDep,
     ifcgraph: IfcGraphDep,
 ) -> IfcQueries:
     """The queries, their parameters and columns, and how far the model's conversion has come."""
     document_id = normalize_guid(document_id) if is_uuid(document_id) else document_id
     listed = await list_queries(
-        graph,
         documents,
         settings,
         ifcgraph,
@@ -136,7 +134,6 @@ async def ifc_query(
     version_index: VersionIndex,
     name: QueryName,
     documents: DocumentsDep,
-    graph: GraphDep,
     settings: SettingsDep,
     ifcgraph: IfcGraphDep,
 ) -> IfcQueryAnswer:
@@ -144,7 +141,6 @@ async def ifc_query(
     working copy answers when it holds the model (ADR 0024)."""
     document_id = normalize_guid(document_id) if is_uuid(document_id) else document_id
     answer = await ask_query(
-        graph,
         documents,
         settings,
         ifcgraph,

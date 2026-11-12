@@ -1,7 +1,9 @@
 # This file was generated with the assistance of an AI coding tool.
 """What the tests of ``server_query``, ``get_publication`` and the clash tools share: a graph that also answers the
-documents' versions, publications, conversions and change sets for the projects the user is a member of, and stand-ins
-for the IFC-DB module's service and its IFC graph, which the endpoint is given in place of its own.
+documents' versions, publications and change sets for the projects the user is a member of, with a stand-in of the
+jobs' store that answers their conversions, and stand-ins for the IFC-DB module's service and its IFC graph, which the
+endpoint is given in place of its own; the service's conversions are the graph's stand-in, as the module's service
+keeps its conversions in the server's own store.
 
 The database's own side is in ``tests/integration/test_mcp_server_query.py`` and ``tests/integration/test_mcp_clash.py``.
 """
@@ -58,10 +60,38 @@ def version(index: int = 3, project_id: str = CLOUD, document_id: str = DOCUMENT
     }
 
 
+class MemberConversions:
+    """The jobs' store as the queries ask it (``ConversionStore.for_member``): the newest conversion of a version of a
+    project the user is a member of, from the graph's ``conversions``; each lookup is kept."""
+
+    def __init__(self, graph: DocumentsGraph | None) -> None:
+        self.graph = graph
+        self.lookups: list[dict[str, Any]] = []
+
+    async def for_member(
+        self,
+        *,
+        user_id: str,
+        document_id: str,
+        version_index: int,
+        project_id: str | None = None,
+        done_only: bool = False,
+    ) -> dict[str, Any] | None:
+        asked = {"user_id": user_id, "document_id": document_id, "version_index": version_index}
+        self.lookups.append(asked | {"project_id": project_id, "done_only": done_only})
+        if self.graph is None or not self.graph._reached(document_id):
+            return None
+        found = self.graph.conversions.get(version_index)
+        if found is None:
+            return None
+        state, model_id = found
+        return {"id": model_id, "state": state, "document_id": document_id, "version_index": version_index}
+
+
 class DocumentsGraph(FakeGraph):
     """The server's own graph with the versions of the member's projects, their conversions (by version index, the
-    state and the model's id), their publications (by version index) and the versions' change sets (``since``, as
-    ``DocumentRepository.versions_since`` gives them)."""
+    state and the model's id, which ``conversion_store`` answers), their publications (by version index) and the
+    versions' change sets (``since``, as ``DocumentRepository.versions_since`` gives them)."""
 
     def __init__(
         self,
@@ -76,6 +106,7 @@ class DocumentsGraph(FakeGraph):
         self.conversions = conversions if conversions is not None else {3: ("done", MODEL)}
         self.publications = publications or {}
         self.since = since or []
+        self.conversion_store = MemberConversions(self)
 
     def _reached(self, document_id: Any) -> list[dict[str, Any]]:
         """The versions of the document in a project the user is a member of, oldest first."""
@@ -96,11 +127,6 @@ class DocumentsGraph(FakeGraph):
         return rows[-1]
 
     async def run(self, query: str, **params: Any) -> list[dict[str, Any]]:
-        if "(m:Conversion)" in query:
-            self.calls.append((query, params))
-            known = self._reached(params["document_id"])
-            state = self.conversions.get(params["version_index"]) if known else None
-            return [{"state": state[0], "id": state[1]}] if state else []
         if "v.version_index > $since" in query:
             self.calls.append((query, params))
             return [
@@ -112,7 +138,8 @@ class DocumentsGraph(FakeGraph):
         return await super().run(query, **params)
 
     def conversion_lookups(self) -> list[dict[str, Any]]:
-        return [params for query, params in self.calls if "(m:Conversion)" in query]
+        """What the jobs' store was asked of the conversions: the user, the document and the version index."""
+        return list(self.conversion_store.lookups)
 
 
 class IfcGraph:
@@ -157,8 +184,9 @@ def pair(name: str | None = "Wall 1", storey: str | None = "Level 1") -> dict[st
 
 
 class FakeService:
-    """The IFC-DB module's service as far as the tools ask it: its IFC graph, the working copy, and the clash checks,
-    whose reports come back in the order given and the last one ever after."""
+    """The IFC-DB module's service as far as the tools ask it: its IFC graph, the working copy, its conversions (none
+    until ``tools`` gives it the graph's), and the clash checks, whose reports come back in the order given and the
+    last one ever after."""
 
     def __init__(
         self,
@@ -168,6 +196,7 @@ class FakeService:
         reports: list[dict[str, Any]] | None = None,
     ) -> None:
         self.graph = ifc or IfcGraph()
+        self.conversions: MemberConversions = MemberConversions(None)
         self.workcopy = workcopy
         self.held = held
         self.reports = list(reports or [])
@@ -201,12 +230,16 @@ def tools(
     service: FakeService | None = None,
     **overrides: Any,
 ) -> Iterator[TestClient]:
-    """The endpoint with the IFC-DB module and the clash check on, the graph and the service standing in; the
-    module's settings can be turned off through ``overrides``. The stand-in IFC graph is asked as the library asks
-    any graph, without the driver's read transaction."""
+    """The endpoint with the IFC-DB module and the clash check on, the graph and the service standing in, the
+    service's conversions those of the graph; the module's settings can be turned off through ``overrides``. The
+    stand-in IFC graph is asked as the library asks any graph, without the driver's read transaction."""
     settings = {"ifcgraph_enabled": True, "ifcgraph_clash_enabled": True, **overrides}
+    store = graph if graph is not None else DocumentsGraph()
+    module = service if service is not None else FakeService()
+    if isinstance(store, DocumentsGraph):
+        module.conversions = store.conversion_store
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(server_queries, "ReadingGraph", lambda graph: graph)
-        with endpoint(tmp_path, graph if graph is not None else DocumentsGraph(), **settings) as client:
-            client.app.state.ifcgraph = service if service is not None else FakeService()  # type: ignore[attr-defined]
+        with endpoint(tmp_path, store, **settings) as client:
+            client.app.state.ifcgraph = module  # type: ignore[attr-defined]
             yield client

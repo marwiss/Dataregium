@@ -33,7 +33,6 @@ from opencde.admin.graph_query import ReadingGraph
 from opencde.ids import is_uuid
 
 if TYPE_CHECKING:
-    from opencde.graph.graph import Graph
     from opencde.ifcgraph.service import IfcGraphService
     from opencde.settings import Settings
     from opencde.store.protocols import DocumentStore
@@ -74,34 +73,35 @@ def named_queries() -> list[dict[str, Any]]:
     return [*catalogue(), changes]
 
 
-async def model_state(
-    graph: Graph, documents: DocumentStore, settings: Settings, user_id: str, document_id: str, version_index: int
-) -> tuple[str, str]:
-    """How far the version's model has come, and its id; 404 when the user may not see the version or it has no
-    model."""
-    if not settings.ifcgraph_enabled:
+def _module(settings: Settings, ifcgraph: IfcGraphService | None) -> IfcGraphService:
+    """The IFC-DB module's service; 404 while the module is off."""
+    if ifcgraph is None or not settings.ifcgraph_enabled:
         raise HTTPException(404, "The IFC-DB module is off on this server")
+    return ifcgraph
+
+
+async def model_state(
+    ifcgraph: IfcGraphService | None,
+    documents: DocumentStore,
+    settings: Settings,
+    user_id: str,
+    document_id: str,
+    version_index: int,
+) -> tuple[str, str]:
+    """How far the version's model has come, and its id, from the server's record of its newest conversion in a
+    project of the user's (the jobs area's); 404 when the user may not see the version or it has no model."""
+    service = _module(settings, ifcgraph)
     if not is_uuid(document_id):
         raise HTTPException(404, "Document version not found")
-    rows = await graph.run(
-        """
-        MATCH (:User {id: $user_id})-[:MEMBER_OF]->(:Project)-[:HAS_CONVERSION]->(m:Conversion)
-        WHERE m.document_id = $document_id AND m.version_index = $version_index
-        RETURN m.state AS state, m.id AS id ORDER BY m.created_at DESC LIMIT 1
-        """,
-        user_id=user_id,
-        document_id=document_id,
-        version_index=version_index,
-    )
-    if rows:
-        return str(rows[0]["state"]), str(rows[0]["id"])
+    found = await service.conversions.for_member(user_id=user_id, document_id=document_id, version_index=version_index)
+    if found is not None:
+        return str(found["state"]), str(found["id"])
     if await documents.version(user_id=user_id, document_id=document_id, version_index=version_index):
         raise HTTPException(404, "This version has no IFC graph: it is not an IFC file, or came before the module")
     raise HTTPException(404, "Document version not found")
 
 
 async def list_queries(
-    graph: Graph,
     documents: DocumentStore,
     settings: Settings,
     ifcgraph: IfcGraphService | None,
@@ -112,7 +112,7 @@ async def list_queries(
 ) -> dict[str, Any]:
     """The queries a member may ask of the version, with how far its model has come and whether the working copy
     holds it (ADR 0024); 404 as :func:`model_state`."""
-    state, model_id = await model_state(graph, documents, settings, user_id, document_id, version_index)
+    state, model_id = await model_state(ifcgraph, documents, settings, user_id, document_id, version_index)
     return {
         "workcopy": ifcgraph is not None and await ifcgraph.in_workcopy(model_id),
         "model_state": state,
@@ -121,7 +121,6 @@ async def list_queries(
 
 
 async def ask_query(
-    graph: Graph,
     documents: DocumentStore,
     settings: Settings,
     ifcgraph: IfcGraphService | None,
@@ -138,7 +137,8 @@ async def ask_query(
     that is no query, 400 for parameters that do not fit and for a query past its time, 409 while the model is still
     being converted."""
     query = QUERIES.get(name)
-    state, model_id = await model_state(graph, documents, settings, user_id, document_id, version_index)
+    service = _module(settings, ifcgraph)
+    state, model_id = await model_state(service, documents, settings, user_id, document_id, version_index)
     if query is None:
         raise HTTPException(404, f"There is no named query {name}")
     try:
@@ -147,9 +147,9 @@ async def ask_query(
         raise HTTPException(400, str(exc)) from None
     if state != "done":
         raise HTTPException(409, f"The IFC graph of this version is {state}, not done")
-    target = ifcgraph.graph if ifcgraph is not None else graph
-    if ifcgraph is not None and ifcgraph.workcopy is not None and await ifcgraph.in_workcopy(model_id):
-        target = ifcgraph.workcopy
+    target = service.graph
+    if service.workcopy is not None and await service.in_workcopy(model_id):
+        target = service.workcopy
     try:
         return await run_query(
             ReadingGraph(target), model_id, name, values, max_rows=MAX_ROWS, timeout_seconds=TIMEOUT_SECONDS
