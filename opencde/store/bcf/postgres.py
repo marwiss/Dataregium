@@ -663,6 +663,21 @@ FROM viewpoints v
 WHERE v.topic_guid = $1 AND v.guid = $2
 FOR UPDATE
 """
+# The GTIN the IFC-DB service copies onto the components from the models, by the project its job is in: of every
+# viewpoint of the project, or of one ($2 null for every one).
+COMPONENT_GUIDS = """
+SELECT DISTINCT c.ifc_guid AS guid
+FROM components c
+JOIN viewpoints v ON v.guid = c.viewpoint_guid
+JOIN topics t ON t.guid = v.topic_guid
+WHERE t.project_id = $1 AND ($2::text IS NULL OR v.guid = $2) AND c.ifc_guid IS NOT NULL
+"""
+COMPONENT_GTINS_SET = """
+UPDATE components c SET gtin = g.gtin
+FROM unnest($3::text[], $4::text[]) AS g (guid, gtin), viewpoints v, topics t
+WHERE c.ifc_guid = g.guid AND v.guid = c.viewpoint_guid AND t.guid = v.topic_guid AND t.project_id = $1
+  AND ($2::text IS NULL OR v.guid = $2)
+"""
 
 _COMPONENT_COLUMNS = (
     "id",
@@ -862,6 +877,16 @@ class PostgresViewpointRepository:
         if keys is None:
             raise HTTPException(404, "Viewpoint not found")
         return keys
+
+    # -- the GTIN the IFC-DB service copies onto the components, not for a member ----------------------------
+
+    async def component_guids(self, *, project_id: str, viewpoint_guid: str | None = None) -> list[str]:
+        """The GlobalIds the components of the project's viewpoints name, or of one viewpoint's, each once."""
+        return [str(row["guid"]) for row in await self.postgres.run(COMPONENT_GUIDS, project_id, viewpoint_guid)]
+
+    async def set_gtins(self, *, project_id: str, gtins: dict[str, str], viewpoint_guid: str | None = None) -> None:
+        """Each GTIN onto the components that name its GlobalId, as the graph's ``set_gtins``."""
+        await self.postgres.execute(COMPONENT_GTINS_SET, project_id, viewpoint_guid, list(gtins), list(gtins.values()))
 
 
 # -- what a topic points at (BCF 3.3, 3.6, 3.7, 3.2.6) ----------------------------------------------------------

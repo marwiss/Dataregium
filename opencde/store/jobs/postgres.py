@@ -169,6 +169,16 @@ WHERE ranked.place > 1 OR ranked.state = 'failed'
 """
 CONVERSION_DELETE = "DELETE FROM conversions WHERE id = $1"
 CONVERSION_COUNTS = "SELECT project_id, count(*) AS n FROM conversions GROUP BY project_id"
+# The newest conversion of each listed version under its project, for a member of it: the versions are three arrays
+# of the same length, one row each.
+CONVERSIONS_FOR_MEMBER_VERSIONS = """
+SELECT DISTINCT ON (w.place) c.*, c.id AS model_id
+FROM unnest($2::text[], $3::text[], $4::integer[]) WITH ORDINALITY AS w (project_id, document_id, version_index, place)
+JOIN conversions c ON c.project_id = w.project_id AND c.document_id = w.document_id
+                  AND c.version_index = w.version_index
+JOIN memberships m ON m.project_id = c.project_id AND m.user_id = $1
+ORDER BY w.place, c.created_at COLLATE "C" DESC
+"""
 
 
 class PostgresConversionRepository:
@@ -274,6 +284,17 @@ class PostgresConversionRepository:
 
     async def counts_per_project(self) -> dict[str, int]:
         return {str(row["project_id"] or ""): int(row["n"]) for row in await self.postgres.run(CONVERSION_COUNTS)}
+
+    async def for_member_versions(self, *, user_id: str, versions: list[tuple[str, str, int]]) -> list[dict[str, Any]]:
+        """The newest conversion of each listed version under its project, for a member of it, as the graph's."""
+        rows = await self.postgres.run(
+            CONVERSIONS_FOR_MEMBER_VERSIONS,
+            user_id,
+            [project_id for project_id, _, _ in versions],
+            [document_id for _, document_id, _ in versions],
+            [version_index for _, _, version_index in versions],
+        )
+        return _nodes(rows)
 
 
 # -- checks and prechecks ----------------------------------------------------------------------------------------

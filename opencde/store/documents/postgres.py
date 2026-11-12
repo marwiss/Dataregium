@@ -38,6 +38,7 @@ from opencde.store.documents.versions import (
     _change_set,
     _validation,
 )
+from opencde.store.jobs.conversions import STATE_DONE
 from opencde.timeutil import later_iso, now_iso
 
 if TYPE_CHECKING:
@@ -211,6 +212,63 @@ WHERE d.document_id = $2
 ON CONFLICT (version_id) DO NOTHING
 RETURNING version_id
 """
+# What the server's own jobs read of a project, by the project they were started in, not for a member.
+HEAD = """
+SELECT d.document_id, p.project_id, p.name AS project_name, v.id, v.version_index, v.version_number,
+       v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
+FROM documents d
+JOIN projects p ON p.project_id = d.project_id
+JOIN document_versions v ON v.document_id = d.document_id
+WHERE d.project_id = $1 AND d.document_id = $2
+ORDER BY v.version_index DESC
+LIMIT 1
+"""
+VERSION_FILE = """
+SELECT v.storage_key, v.file_name, r.report, r.checks
+FROM documents d
+JOIN document_versions v ON v.document_id = d.document_id AND v.version_index = $3
+LEFT JOIN LATERAL (
+    SELECT c.report, c.checks FROM version_validations c
+    WHERE c.version_id = v.id AND c.state = $4
+    ORDER BY c.created_at COLLATE "C" DESC LIMIT 1
+) r ON true
+WHERE d.project_id = $1 AND d.document_id = $2
+"""
+PROJECT_HEADS = """
+SELECT h.* FROM (
+    SELECT DISTINCT ON (d.document_id)
+           d.document_id, p.project_id, p.name AS project_name, v.id, v.version_index, v.version_number,
+           v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
+    FROM documents d
+    JOIN projects p ON p.project_id = d.project_id
+    JOIN document_versions v ON v.document_id = d.document_id
+    WHERE d.project_id = $1
+    ORDER BY d.document_id, v.version_index DESC
+) h
+WHERE EXISTS (
+    SELECT 1 FROM unnest($2::text[]) s (suffix) WHERE right(lower(h.file_name), length(s.suffix)) = s.suffix
+)
+ORDER BY h.document_id COLLATE "C"
+LIMIT $3
+"""
+MEMBER_HEADS = """
+SELECT h.* FROM (
+    SELECT DISTINCT ON (d.document_id)
+           d.document_id, p.project_id, p.name AS project_name, v.id, v.version_index, v.version_number,
+           v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
+    FROM documents d
+    JOIN memberships m ON m.project_id = d.project_id AND m.user_id = $1
+    JOIN projects p ON p.project_id = d.project_id
+    JOIN document_versions v ON v.document_id = d.document_id
+    WHERE d.project_id = ANY($2::text[])
+    ORDER BY d.document_id, v.version_index DESC
+) h
+WHERE EXISTS (
+    SELECT 1 FROM unnest($3::text[]) s (suffix) WHERE right(lower(h.file_name), length(s.suffix)) = s.suffix
+)
+ORDER BY h.project_name COLLATE "C", h.project_id COLLATE "C", h.title COLLATE "C", h.document_id COLLATE "C"
+LIMIT $4
+"""
 
 
 class PostgresDocumentRepository:
@@ -348,6 +406,30 @@ class PostgresDocumentRepository:
         if self.audit_graph is not None:
             await audit.record(self.audit_graph, **audit_event)
         return True
+
+    # -- what the server's own jobs read of a project, not for a member ---------------------------------------
+
+    async def head(self, *, project_id: str, document_id: str) -> VersionRecord | None:
+        """The latest version of a document of the project, as the graph's ``head``."""
+        row = await self.postgres.one(HEAD, project_id, document_id)
+        return _record(row) if row else None
+
+    async def version_file(self, *, project_id: str, document_id: str, version_index: int) -> dict[str, Any] | None:
+        """A version's file with the report and checks of its newest finished check, as the graph's
+        ``version_file``; the checks are the jobs area's, read through the view ``version_validations``."""
+        return await self.postgres.one(VERSION_FILE, project_id, document_id, version_index, STATE_DONE)
+
+    async def project_heads(self, *, project_id: str, suffixes: list[str], limit: int) -> list[VersionRecord]:
+        """The latest version of each document of the project with one of the suffixes, as the graph's."""
+        return [_record(row) for row in await self.postgres.run(PROJECT_HEADS, project_id, list(suffixes), limit)]
+
+    async def member_heads(
+        self, *, user_id: str, project_ids: list[str], suffixes: list[str], limit: int
+    ) -> list[VersionRecord]:
+        """The latest version of each document of the user's listed projects with one of the suffixes, as the
+        graph's ``member_heads``."""
+        rows = await self.postgres.run(MEMBER_HEADS, user_id, list(project_ids), list(suffixes), limit)
+        return [_record(row) for row in rows]
 
 
 # -- the upload and selection sessions ---------------------------------------------------------------------------

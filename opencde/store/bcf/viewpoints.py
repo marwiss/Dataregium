@@ -416,6 +416,59 @@ class ViewpointRepository:
             raise HTTPException(404, "Viewpoint not found")
         return keys
 
+    # -- the GTIN the IFC-DB service copies onto the components, not for a member ----------------------------
+
+    async def component_guids(self, *, project_id: str, viewpoint_guid: str | None = None) -> list[str]:
+        """The GlobalIds the components of the project's viewpoints name, or of one viewpoint's, each once."""
+        if viewpoint_guid is None:
+            rows = await self.graph.run(
+                """
+                MATCH (:Project {project_id: $project_id})-[:HAS_TOPIC]->(:Topic)-[:HAS_VIEWPOINT]->(:Viewpoint)
+                      -[:HAS_COMPONENT]->(c:Component)
+                WHERE c.ifc_guid IS NOT NULL RETURN DISTINCT c.ifc_guid AS guid
+                """,
+                project_id=project_id,
+            )
+        else:
+            rows = await self.graph.run(
+                """
+                MATCH (:Project {project_id: $project_id})-[:HAS_TOPIC]->(:Topic)-[:HAS_VIEWPOINT]->(:Viewpoint {guid: $guid})
+                      -[:HAS_COMPONENT]->(c:Component)
+                WHERE c.ifc_guid IS NOT NULL RETURN DISTINCT c.ifc_guid AS guid
+                """,
+                project_id=project_id,
+                guid=viewpoint_guid,
+            )
+        return [str(row["guid"]) for row in rows]
+
+    async def set_gtins(self, *, project_id: str, gtins: dict[str, str], viewpoint_guid: str | None = None) -> None:
+        """Each GTIN, by the GlobalId it was found for, onto the components that name it, of the project's viewpoints
+        or of one viewpoint's; a component whose GlobalId is not given keeps its GTIN."""
+        rows = [{"guid": guid, "gtin": gtin} for guid, gtin in gtins.items()]
+        if viewpoint_guid is None:
+            await self.graph.run(
+                """
+                UNWIND $gtins AS gtin
+                MATCH (:Project {project_id: $project_id})-[:HAS_TOPIC]->(:Topic)-[:HAS_VIEWPOINT]->(:Viewpoint)
+                      -[:HAS_COMPONENT]->(c:Component)
+                WHERE c.ifc_guid = gtin.guid SET c.gtin = gtin.gtin
+                """,
+                gtins=rows,
+                project_id=project_id,
+            )
+        else:
+            await self.graph.run(
+                """
+                UNWIND $gtins AS gtin
+                MATCH (:Project {project_id: $project_id})-[:HAS_TOPIC]->(:Topic)-[:HAS_VIEWPOINT]->(:Viewpoint {guid: $guid})
+                      -[:HAS_COMPONENT]->(c:Component)
+                WHERE c.ifc_guid = gtin.guid SET c.gtin = gtin.gtin
+                """,
+                gtins=rows,
+                project_id=project_id,
+                guid=viewpoint_guid,
+            )
+
 
 def viewpoint_repository(
     graph: GraphDep, postgres: PostgresDep, storage: StorageDep, topics: TopicsDep, settings: SettingsDep

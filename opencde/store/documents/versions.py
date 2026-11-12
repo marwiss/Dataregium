@@ -24,6 +24,7 @@ from opencde.documents.schemas import DocumentMetadataEntry, DocumentVersion, Fi
 from opencde.documents.validation import Validation, with_graph_findings
 from opencde.graph.graph import Graph, Tx
 from opencde.ids import new_id
+from opencde.store.jobs.conversions import STATE_DONE
 from opencde.store.protocols import DocumentStore
 from opencde.timeutil import now_iso
 
@@ -438,6 +439,90 @@ class DocumentRepository:
             return True
 
         return await self.graph.write(work)
+
+    # -- what the server's own jobs read of a project, not for a member ---------------------------------------
+
+    async def head(self, *, project_id: str, document_id: str) -> VersionRecord | None:
+        """The latest version of a document of the project, as the server's jobs read it (a trial on the latest
+        version, a merge): by the project they were started in, not by a member."""
+        row = await self.graph.one(
+            """
+            MATCH (p:Project {project_id: $project_id})-[:HAS_DOCUMENT]->(d:Document {document_id: $document_id})
+                  -[:HAS_VERSION]->(v:DocumentVersion)
+            WITH p, d, v ORDER BY v.version_index DESC LIMIT 1
+            RETURN d.document_id AS document_id, p.project_id AS project_id, p.name AS project_name,
+                   properties(v) AS version
+            """,
+            project_id=project_id,
+            document_id=document_id,
+        )
+        return _record(row) if row else None
+
+    async def version_file(self, *, project_id: str, document_id: str, version_index: int) -> dict[str, Any] | None:
+        """A version of a document of the project as the server's jobs read it (a trial's base, a side of a clash
+        check): its ``storage_key`` and ``file_name``, and the packed ``report`` and the ``checks`` of its newest
+        finished check, None without one. None when the project has no such version."""
+        return await self.graph.one(
+            """
+            MATCH (:Project {project_id: $project_id})-[:HAS_DOCUMENT]->(:Document {document_id: $document_id})
+                  -[:HAS_VERSION]->(v:DocumentVersion {version_index: $version_index})
+            OPTIONAL MATCH (v)-[:HAS_VALIDATION]->(r:Validation {state: $done})
+            WITH v, r ORDER BY r.created_at DESC
+            RETURN v.storage_key AS storage_key, v.file_name AS file_name, r.report AS report, r.checks AS checks
+            LIMIT 1
+            """,
+            project_id=project_id,
+            document_id=document_id,
+            version_index=version_index,
+            done=STATE_DONE,
+        )
+
+    async def project_heads(self, *, project_id: str, suffixes: list[str], limit: int) -> list[VersionRecord]:
+        """The latest version of each document of the project whose file name ends, in lower case, with one of the
+        ``suffixes``, by document id, at most ``limit``: what the server's checks read of a project (its IDS
+        documents, its IFC documents to check again)."""
+        rows = await self.graph.run(
+            """
+            MATCH (p:Project {project_id: $project_id})-[:HAS_DOCUMENT]->(d:Document)-[:HAS_VERSION]->(v:DocumentVersion)
+            WITH p, d, v ORDER BY v.version_index DESC
+            WITH p, d, collect(v)[0] AS v
+            WHERE any(suffix IN $suffixes WHERE toLower(v.file_name) ENDS WITH suffix)
+            RETURN d.document_id AS document_id, p.project_id AS project_id, p.name AS project_name,
+                   properties(v) AS version
+            ORDER BY document_id
+            LIMIT $limit
+            """,
+            project_id=project_id,
+            suffixes=list(suffixes),
+            limit=limit,
+        )
+        return [_record(row) for row in rows]
+
+    async def member_heads(
+        self, *, user_id: str, project_ids: list[str], suffixes: list[str], limit: int
+    ) -> list[VersionRecord]:
+        """The latest version of each document of the listed projects of the user whose file name ends, in lower
+        case, with one of the ``suffixes``, in the order of :meth:`latest_in_projects`, at most ``limit`` (the
+        MCP tool ``list_models``)."""
+        rows = await self.graph.run(
+            """
+            MATCH (:User {id: $user_id})-[:MEMBER_OF]->(p:Project)
+            WHERE p.project_id IN $project_ids
+            MATCH (p)-[:HAS_DOCUMENT]->(d:Document)-[:HAS_VERSION]->(v:DocumentVersion)
+            WITH p, d, v ORDER BY v.version_index DESC
+            WITH p, d, collect(v)[0] AS v
+            WHERE any(suffix IN $suffixes WHERE toLower(v.file_name) ENDS WITH suffix)
+            WITH p, d, v ORDER BY p.name, p.project_id, v.title, d.document_id
+            LIMIT $limit
+            RETURN d.document_id AS document_id, p.project_id AS project_id, p.name AS project_name,
+                   properties(v) AS version
+            """,
+            user_id=user_id,
+            project_ids=list(project_ids),
+            suffixes=list(suffixes),
+            limit=limit,
+        )
+        return [_record(row) for row in rows]
 
 
 def default_metadata(

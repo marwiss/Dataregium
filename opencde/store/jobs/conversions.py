@@ -262,6 +262,28 @@ class ConversionRepository:
         rows = await self.graph.run("MATCH (c:Conversion) RETURN c.project_id AS project_id, count(c) AS n")
         return {str(row["project_id"] or ""): int(row["n"]) for row in rows}
 
+    async def for_member_versions(self, *, user_id: str, versions: list[tuple[str, str, int]]) -> list[dict[str, Any]]:
+        """The newest conversion of each listed version, ``(project_id, document_id, version_index)``, under its
+        project when the user is a member of it; a version without one is left out (the MCP tool ``list_models``)."""
+        rows = await self.graph.run(
+            """
+            UNWIND $versions AS asked
+            MATCH (:User {id: $user_id})-[:MEMBER_OF]->(:Project {project_id: asked.project_id})
+                  -[:HAS_CONVERSION]->(c:Conversion {document_id: asked.document_id, version_index: asked.version_index})
+            WITH asked.project_id AS project_id, asked.document_id AS document_id,
+                 asked.version_index AS version_index, c
+            ORDER BY c.created_at DESC
+            WITH project_id, document_id, version_index, collect(c)[0] AS c
+            RETURN properties(c) AS c
+            """,
+            user_id=user_id,
+            versions=[
+                {"project_id": project_id, "document_id": document_id, "version_index": version_index}
+                for project_id, document_id, version_index in versions
+            ],
+        )
+        return [dict(row["c"]) for row in rows]
+
 
 _MOVE = ", ".join(f"{name}: m.{name}" for name in MOVED)
 _FACTS = ", ".join(f"{name}: m.{name}" for name in (*FACTS, *SPATIAL_FACTS))
