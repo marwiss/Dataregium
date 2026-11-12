@@ -58,6 +58,8 @@ from opencde.postgres.database import Postgres
 from opencde.settings import Settings
 from opencde.storage import LocalStorage, make_key
 from opencde.store.accounts.postgres import team_store
+from opencde.store.bcf.postgres import topic_store, viewpoint_store
+from opencde.store.documents.postgres import document_store
 from opencde.store.jobs.conversions import FACTS, SPATIAL_FACTS, STATE_DONE, STATE_FAILED, STATE_QUEUED, STATE_RUNNING
 from opencde.store.jobs.postgres import (
     clash_store,
@@ -66,7 +68,15 @@ from opencde.store.jobs.postgres import (
     proposal_store,
     validation_store,
 )
-from opencde.store.protocols import ClashStore, ConversionStore, MergeStore, ProposalStore, ValidationStore
+from opencde.store.protocols import (
+    ClashStore,
+    ConversionStore,
+    DocumentStore,
+    MergeStore,
+    ProposalStore,
+    ValidationStore,
+    ViewpointStore,
+)
 from opencde.timeutil import later_iso, now_iso
 
 log = get_logger(__name__)
@@ -191,6 +201,11 @@ class IfcGraphService:
         self.proposals: ProposalStore = proposal_store(self.store, postgres)
         self.clashes: ClashStore = clash_store(self.store, postgres)
         self.merges: MergeStore = merge_store(self.store, postgres)
+        self.documents: DocumentStore = document_store(self.store, postgres)  # the versions the jobs read and make
+        topics = topic_store(self.store, postgres, id_prefix=settings.server_assigned_id_prefix)
+        self.viewpoints: ViewpointStore = viewpoint_store(  # the components the GTIN is copied onto
+            self.store, postgres, storage, topics, max_image_bytes=settings.max_image_bytes
+        )
         self.storage = storage
         self.settings = settings
         self.bsdd: BsddClient | None = None  # made on the first check against bSDD; its cache lives on (OB-42)
@@ -749,31 +764,11 @@ class IfcGraphService:
         if base_version_index is not None:
             base["version_index"] = base_version_index
         elif change_set.get("keep_theirs"):
-            latest = await self.store.one(
-                """
-                MATCH (:Project {project_id: $project_id})-[:HAS_DOCUMENT]->(:Document {document_id: $document_id})
-                      -[:HAS_VERSION]->(v:DocumentVersion)
-                RETURN max(v.version_index) AS latest
-                """,
-                project_id=project_id,
-                document_id=str(base["document_id"]),
-            )
-            if latest is not None and latest["latest"] is not None:
-                base["version_index"] = int(latest["latest"])
-        version = await self.store.one(
-            """
-            MATCH (:Project {project_id: $project_id})-[:HAS_DOCUMENT]->(:Document {document_id: $document_id})
-                  -[:HAS_VERSION]->(v:DocumentVersion {version_index: $version_index})
-            OPTIONAL MATCH (v)-[:HAS_VALIDATION]->(r:Validation {state: $done})
-            WITH v, r ORDER BY r.created_at DESC
-            RETURN v.storage_key AS storage_key, v.file_name AS file_name, r.report AS base_report,
-                   r.checks AS base_checks
-            LIMIT 1
-            """,
-            project_id=project_id,
-            document_id=str(base["document_id"]),
-            version_index=int(base["version_index"]),
-            done=STATE_DONE,
+            latest = await self.documents.head(project_id=project_id, document_id=str(base["document_id"]))
+            if latest is not None:
+                base["version_index"] = latest.version_index
+        version = await self.documents.version_file(
+            project_id=project_id, document_id=str(base["document_id"]), version_index=int(base["version_index"])
         )
         if version is None:
             raise RuntimeError("the base version is not in this project")
@@ -812,16 +807,16 @@ class IfcGraphService:
             # A base checked before bSDD was asked, or while it was out of reach, is asked about now, so that the
             # trial keeps only the findings the change set brings (OB-42).
             base_bsdd = None
-            if version["base_report"] is not None and not _made(version["base_checks"], "bsdd"):
+            if version["report"] is not None and not _made(version["checks"], "bsdd"):
                 base_bsdd = await self._bsdd(source)
         checked = await self._run_checks(key, "proposal.ifc", project_id)
-        if version["base_report"] is None:
+        if version["report"] is None:
             checked_base = await self._run_checks(
                 str(version["storage_key"]), str(version["file_name"]), project_id, rooms=False
             )
             base_issues = unpack_report(checked_base["report"])
         else:
-            base_issues = unpack_report(version["base_report"]) + (base_bsdd["issues"] if base_bsdd else [])
+            base_issues = unpack_report(version["report"]) + (base_bsdd["issues"] if base_bsdd else [])
         known = {_issue_key(issue) for issue in base_issues}
         new = [
             issue
@@ -914,26 +909,17 @@ class IfcGraphService:
             return state
 
     async def values_in(
-        self, *, document_id: str, version_index: int, changes: list[dict[str, Any]]
+        self, *, user_id: str, document_id: str, version_index: int, changes: list[dict[str, Any]]
     ) -> list[dict[str, Any]] | None:
-        """What each change's attribute holds in a stored version of a document, read by the apply worker; each entry
-        ``{"value"}`` or ``{"error"}``. None when the version's file is not there."""
-        row = await self.store.one(
-            """
-            MATCH (:Document {document_id: $document_id})-[:HAS_VERSION]->(v:DocumentVersion {version_index: $index})
-            RETURN v.storage_key AS storage_key, v.file_name AS file_name
-            """,
-            document_id=document_id,
-            index=version_index,
-        )
-        if row is None or not changes:
+        """What each change's attribute holds in a stored version of a document of one of the user's projects, read
+        by the apply worker; each entry ``{"value"}`` or ``{"error"}``. None when the user has no such version."""
+        record = await self.documents.version(user_id=user_id, document_id=document_id, version_index=version_index)
+        if record is None or not changes:
             return None
         async with self._lock:
             with tempfile.TemporaryDirectory(prefix="ifcvalues-") as tmp:
                 workdir = Path(tmp)
-                source = await asyncio.to_thread(
-                    self._prepare_input, str(row["storage_key"]), str(row["file_name"]), workdir
-                )
+                source = await asyncio.to_thread(self._prepare_input, record.storage_key, record.file_name, workdir)
                 listed = workdir / "changes.json"
                 listed.write_text(json.dumps({"changes": changes}), encoding="utf-8")
                 command = [
@@ -1122,42 +1108,29 @@ class IfcGraphService:
         the reports show the newest check, and the checks run one at a time behind the others."""
         if not self.settings.ifcgraph_validate_uploads:
             return 0
-        rows = await self.store.run(
-            """
-            MATCH (:Project {project_id: $id})-[:HAS_DOCUMENT]->(d:Document)-[:HAS_VERSION]->(v:DocumentVersion)
-            WITH d, v ORDER BY v.version_index DESC
-            WITH d, collect(v)[0] AS v
-            WHERE any(suffix IN $suffixes WHERE toLower(v.file_name) ENDS WITH suffix)
-            RETURN v.id AS id, v.storage_key AS storage_key, v.file_name AS file_name
-            ORDER BY d.document_id
-            LIMIT $limit
-            """,
-            id=project_id,
-            suffixes=list(IFC_SUFFIXES[:2]),
-            limit=MAX_RECHECKS,
+        heads = await self.documents.project_heads(
+            project_id=project_id, suffixes=list(IFC_SUFFIXES[:2]), limit=MAX_RECHECKS
         )
-        for row in rows:
-            await self._queue_validation(str(row["id"]), str(row["storage_key"]), str(row["file_name"]))
-        log.info("ifc_recheck_after_ids", project_id=project_id, versions=len(rows))
-        return len(rows)
+        for head in heads:
+            await self._queue_validation(head.version_id, head.storage_key, head.file_name)
+        log.info("ifc_recheck_after_ids", project_id=project_id, versions=len(heads))
+        return len(heads)
 
     async def _ids_documents(self, project_id: str) -> list[dict[str, Any]]:
-        """The latest version of every IDS document in the project of the file being checked (ADR 0015)."""
-        return await self.store.run(
-            """
-            MATCH (:Project {project_id: $id})-[:HAS_DOCUMENT]->(d:Document)-[:HAS_VERSION]->(v:DocumentVersion)
-            WITH d, v ORDER BY v.version_index DESC
-            WITH d, collect(v)[0] AS v
-            WHERE toLower(v.file_name) ENDS WITH $suffix
-            RETURN d.document_id AS document_id, v.version_index AS version_index, d.title AS title,
-                   v.storage_key AS storage_key
-            ORDER BY document_id
-            LIMIT $limit
-            """,
-            id=project_id,
-            suffix=IDS_SUFFIX,
-            limit=MAX_IDS_DOCUMENTS,
+        """The latest version of every IDS document in the project of the file being checked (ADR 0015); a
+        document's title is its latest version's."""
+        heads = await self.documents.project_heads(
+            project_id=project_id, suffixes=[IDS_SUFFIX], limit=MAX_IDS_DOCUMENTS
         )
+        return [
+            {
+                "document_id": head.document_id,
+                "version_index": head.version_index,
+                "title": head.title,
+                "storage_key": head.storage_key,
+            }
+            for head in heads
+        ]
 
     async def _ids(self, source: Path, documents: list[dict[str, Any]]) -> dict[str, Any] | None:
         """The file against the project's IDS documents, with IFC-DB's check (ADR 0015). None when there are none.
@@ -1444,7 +1417,7 @@ class IfcGraphService:
         """The GTIN onto one viewpoint's components from the project's finished models (at viewpoint POST)."""
         found = 0
         for model_id in await self.conversions.done_model_ids(project_id):
-            found += await self._copy_gtin(model_id, _VIEWPOINT_COMPONENTS, project_id=project_id, guid=viewpoint_guid)
+            found += await self._copy_gtin(model_id, project_id, viewpoint_guid=viewpoint_guid)
         return found
 
     async def _link_model(self, model_id: str) -> int:
@@ -1452,15 +1425,15 @@ class IfcGraphService:
         conversion = await self.conversions.get(model_id)
         if conversion is None or not conversion.get("project_id"):
             return 0
-        return await self._copy_gtin(model_id, _PROJECT_COMPONENTS, project_id=str(conversion["project_id"]))
+        return await self._copy_gtin(model_id, str(conversion["project_id"]))
 
-    async def _copy_gtin(self, model_id: str, scope: str, **params: Any) -> int:
-        """Look the GlobalIds of the components a scope matches up in the model (IFC-DB's ``property_values``)
-        and copy the configured property, the GTIN, onto the components that name them; a component keeps its
-        GTIN where the model lacks the property. No relationship into the model is made: the element is found by
-        its ``GlobalId``. Returns how many of the GlobalIds the model has."""
-        rows = await self.store.run(scope + "WHERE c.ifc_guid IS NOT NULL RETURN DISTINCT c.ifc_guid AS guid", **params)
-        guids = [str(row["guid"]) for row in rows if _GUID.match(str(row["guid"]))]
+    async def _copy_gtin(self, model_id: str, project_id: str, *, viewpoint_guid: str | None = None) -> int:
+        """Look the GlobalIds of the components of the project's viewpoints, or of one viewpoint's, up in the model
+        (IFC-DB's ``property_values``) and copy the configured property, the GTIN, onto the components that name
+        them; a component keeps its GTIN where the model lacks the property. No relationship into the model is made:
+        the element is found by its ``GlobalId``. Returns how many of the GlobalIds the model has."""
+        named = await self.viewpoints.component_guids(project_id=project_id, viewpoint_guid=viewpoint_guid)
+        guids = [guid for guid in named if _GUID.match(guid)]
         found = 0
         for start in range(0, len(guids), MAX_GLOBAL_IDS):
             values = await property_values(
@@ -1471,13 +1444,9 @@ class IfcGraphService:
                 global_ids=guids[start : start + MAX_GLOBAL_IDS],
             )
             found += len(values)
-            gtins = [{"guid": v["global_id"], "gtin": str(v["value"])} for v in values if v["value"] is not None]
+            gtins = {str(v["global_id"]): str(v["value"]) for v in values if v["value"] is not None}
             if gtins:
-                await self.store.run(
-                    "UNWIND $gtins AS gtin\n" + scope + "WHERE c.ifc_guid = gtin.guid SET c.gtin = gtin.gtin",
-                    gtins=gtins,
-                    **params,
-                )
+                await self.viewpoints.set_gtins(project_id=project_id, gtins=gtins, viewpoint_guid=viewpoint_guid)
         return found
 
     async def status(self, project_id: str) -> list[dict[str, Any]]:
@@ -1499,21 +1468,16 @@ class IfcGraphService:
 
     async def _clash_input(self, project_id: str, side: dict[str, Any], workdir: Path) -> Path:
         """The file of one side of a check, from the project's own document versions."""
-        rows = await self.store.run(
-            """
-            MATCH (:Project {project_id: $project_id})-[:HAS_DOCUMENT]->(:Document {document_id: $document_id})
-                  -[:HAS_VERSION]->(v:DocumentVersion {version_index: $version_index})
-            RETURN v.storage_key AS storage_key, v.file_name AS file_name
-            """,
-            project_id=project_id,
-            document_id=side["document_id"],
-            version_index=side["version_index"],
+        version = await self.documents.version_file(
+            project_id=project_id, document_id=str(side["document_id"]), version_index=int(side["version_index"])
         )
-        if not rows:
+        if version is None:
             raise ValueError(f"document version {side['document_id']}/{side['version_index']} not found")
-        if not self.wants(str(rows[0]["file_name"])):
+        if not self.wants(str(version["file_name"])):
             raise ValueError(f"document version {side['document_id']}/{side['version_index']} is not an IFC file")
-        return await asyncio.to_thread(self._prepare_clash_input, rows[0]["storage_key"], rows[0]["file_name"], workdir)
+        return await asyncio.to_thread(
+            self._prepare_clash_input, str(version["storage_key"]), str(version["file_name"]), workdir
+        )
 
     def _prepare_clash_input(self, storage_key: str, file_name: str, workdir: Path) -> Path:
         workdir.mkdir(exist_ok=True)
@@ -1612,15 +1576,6 @@ class IfcGraphService:
         return row
 
 
-# The components a GTIN is copied onto, one viewpoint's or the project's; ``c`` is the component.
-_VIEWPOINT_COMPONENTS = """
-MATCH (:Project {project_id: $project_id})-[:HAS_TOPIC]->(:Topic)-[:HAS_VIEWPOINT]->(:Viewpoint {guid: $guid})
-      -[:HAS_COMPONENT]->(c:Component)
-"""
-_PROJECT_COMPONENTS = """
-MATCH (:Project {project_id: $project_id})-[:HAS_TOPIC]->(:Topic)-[:HAS_VIEWPOINT]->(:Viewpoint)
-      -[:HAS_COMPONENT]->(c:Component)
-"""
 _GUID = re.compile(r"^[0-9A-Za-z_$]{22}$")  # a component's ifc_guid that is no GlobalId has nothing to look up
 
 

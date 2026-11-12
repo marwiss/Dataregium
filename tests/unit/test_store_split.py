@@ -86,6 +86,14 @@ async def answer(command: list[str], what: str, answers: tuple[int, ...] = (0,))
     return json.dumps({"ruleset": "IfcOpenShell x", "issue_count": 0, "truncated": False, "issues": []})
 
 
+def _latest(document_id: str, project_id: str, index: int) -> dict[str, Any]:
+    """A document's latest version as the store's documents read it (``DocumentRepository.head``)."""
+    version = {"id": f"version-{index}", "version_index": index, "version_number": str(index), "title": "A"}
+    version |= {"creation_date": "2026-11-01T00:00:00.000Z", "file_name": "a.ifc", "size_in_bytes": 1}
+    version |= {"sha256": "0" * 64, "storage_key": "documents/a.ifc", "author": "anna"}
+    return {"document_id": document_id, "project_id": project_id, "project_name": "Building permit", "version": version}
+
+
 def service_with(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -206,8 +214,8 @@ async def test_a_trial_and_its_approval_run_on_the_store_and_the_keys_on_the_ifc
             ("CREATE (t)-[:HAS_PROPOSAL]", [{"id": "proposal-1"}]),
             ("p.snippet_key AS snippet_key, p.author", [{"project_id": "p1", "snippet_key": snippet, "author": "a"}]),
             (
-                "r.report AS base_report",
-                [{"storage_key": "k", "file_name": "base.ifc", "base_report": pack_report([]), "base_checks": None}],
+                "r.report AS report",
+                [{"storage_key": "k", "file_name": "base.ifc", "report": pack_report([]), "checks": None}],
             ),
             ("RETURN p.snippet_key AS snippet_key", [{"snippet_key": snippet}]),
             ("RETURN properties(p) AS node", [{"node": {"id": "proposal-1", "state": "clean"}}]),
@@ -224,7 +232,7 @@ async def test_a_trial_and_its_approval_run_on_the_store_and_the_keys_on_the_ifc
     await service.approve(proposal_id=proposal_id, approved_by="manager", version_index=2)
     assert await service.proposal(user_id="u", project_id="p1", topic_guid="topic-1") is not None
     assert await service.change_set_of(project_id="p1", topic_guid="topic-1") == change_set
-    assert await service.values_in(document_id="doc-1", version_index=1, changes=[]) is None
+    assert await service.values_in(user_id="u", document_id="doc-1", version_index=1, changes=[]) is None
     assert not ifc.statements, "a trial reads files and the server's own nodes alone"
     change = {"guid": GUID, "path": "", "attribute": "Name"}
     keys = await service.canonical_keys(document_id="doc-1", version_index=1, changes=[change])
@@ -281,7 +289,7 @@ async def test_a_merge_runs_its_job_on_the_store_and_its_model_on_the_ifc_graph(
                 "MATCH (j:Merge {id: $id, state: $queued})",
                 [{"project_id": "p1", "request": json.dumps(request), "author": "anna", "kind": "merge"}],
             ),
-            ("ORDER BY v.version_index DESC LIMIT 1", [{"version_index": 1, "title": "A", "file_name": "a.ifc"}]),
+            ("ORDER BY v.version_index DESC LIMIT 1", [_latest("doc-a", "p1", 1)]),
             ("RETURN p.name AS name", [{"name": "Building permit"}]),
             ("WHERE j.expires_at <= $now", [{"id": "prepare-1", "model_id": "prepared-1"}]),
             ("RETURN properties(j) AS merge", [{"merge": {"id": "merge-1", "state": "done"}}]),
@@ -302,10 +310,16 @@ async def test_a_merge_runs_its_job_on_the_store_and_its_model_on_the_ifc_graph(
         return 1
 
     class Documents:
-        def __init__(self, graph: Any) -> None:
-            given.append(("DocumentRepository", graph))
+        """The store's documents, which give the latest version, with the merged version made as they would."""
+
+        def __init__(self, kept: Any) -> None:
+            self.kept = kept
+
+        async def head(self, **where: Any) -> Any:
+            return await self.kept.head(**where)
 
         async def create_version(self, **fields: Any) -> SimpleNamespace:
+            given.append(("create_version", self.kept.graph))
             return SimpleNamespace(
                 storage_key=fields["storage_key"],
                 file_name=fields["file_name"],
@@ -320,7 +334,7 @@ async def test_a_merge_runs_its_job_on_the_store_and_its_model_on_the_ifc_graph(
 
     monkeypatch.setattr(merging, "merge_building", merge_building)
     monkeypatch.setattr(merging, "merge_report", merge_report)
-    monkeypatch.setattr(merging, "DocumentRepository", Documents)
+    monkeypatch.setattr(service, "documents", Documents(service.documents))
     monkeypatch.setattr(service, "export", export)
     monkeypatch.setattr(service, "schedule", schedule)
 
@@ -333,7 +347,7 @@ async def test_a_merge_runs_its_job_on_the_store_and_its_model_on_the_ifc_graph(
     assert given == [
         ("merge_report", ifc),
         ("merge_building", ifc),
-        ("DocumentRepository", store),
+        ("create_version", store),
         ("schedule", 2),
     ], "the library merges on the IFC graph; the version is the store's"
     dropped = [s for s in ifc.statements if s.startswith("MATCH (m:Model") and "DETACH DELETE m" in s]

@@ -456,9 +456,10 @@ async def _collisions(
         return [], []
     ours = [colliding[key] for key in keys]
     base_values = await ifcgraph.values_in(
-        document_id=latest.document_id, version_index=base_index, changes=[_locator(c) for c in ours]
+        user_id=user_id, document_id=latest.document_id, version_index=base_index, changes=[_locator(c) for c in ours]
     )
     latest_values = await ifcgraph.values_in(
+        user_id=user_id,
         document_id=latest.document_id,
         version_index=latest.version_index,
         changes=[_locator(theirs[key][1]) for key in keys],

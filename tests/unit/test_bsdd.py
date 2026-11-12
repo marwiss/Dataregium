@@ -647,12 +647,12 @@ class TrialGraph:
         self.row = {
             "storage_key": "documents/base.ifc",
             "file_name": "base.ifc",
-            "base_report": pack_report(SCHEMA_ANSWER["issues"]),
-            "base_checks": json.dumps([{"name": name, "state": "done"} for name in checks]),
+            "report": pack_report(SCHEMA_ANSWER["issues"]),
+            "checks": json.dumps([{"name": name, "state": "done"} for name in checks]),
         }
 
     async def one(self, query: str, **params: Any) -> dict[str, Any] | None:
-        return self.row if "base_report" in query else None
+        return self.row if "r.report AS report" in query else None
 
     async def run(self, query: str, **params: Any) -> list[dict[str, Any]]:
         return []

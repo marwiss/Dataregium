@@ -434,11 +434,15 @@ class Versions:
         return []  # no teams, no IDS documents
 
     async def one(self, query: str, **params: Any) -> dict[str, Any] | None:
-        if "max(v.version_index)" in query:
-            return {"latest": max(self.keys)}
+        if "version_index" not in params:  # the latest version (``DocumentRepository.head``)
+            index = max(self.keys)
+            version = {"id": f"version-{index}", "version_index": index, "version_number": str(index)}
+            version |= {"creation_date": "2026-11-01T00:00:00.000Z", "title": "Walls", "file_name": "walls.ifc"}
+            version |= {"size_in_bytes": 1, "sha256": "0" * 64, "storage_key": self.keys[index], "author": "anna"}
+            return {"document_id": params["document_id"], "project_id": "p", "project_name": "P", "version": version}
         self.asked.append(int(params["version_index"]))
         key = self.keys.get(int(params["version_index"]))
-        row = {"storage_key": key, "file_name": "walls.ifc", "base_report": pack_report([]), "base_checks": None}
+        row = {"storage_key": key, "file_name": "walls.ifc", "report": pack_report([]), "checks": None}
         return row if key else None
 
 

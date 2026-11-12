@@ -45,7 +45,7 @@ from opencde.ids import new_id
 from opencde.logging import get_logger
 from opencde.storage import make_key
 from opencde.store.accounts.postgres import project_store
-from opencde.store.documents.versions import DocumentRepository, default_metadata
+from opencde.store.documents.versions import default_metadata
 from opencde.store.jobs.merges import KIND_MERGE, KIND_PREPARE, STATE_DONE, STATE_RUNNING
 from opencde.timeutil import later_iso
 
@@ -213,22 +213,12 @@ async def _as_version(
 ) -> int:
     """C written out as the next version of A's document, when the document has not moved on since A's version."""
     base = request["base"]
-    documents = DocumentRepository(service.store)
-    latest = await service.store.one(
-        """
-        MATCH (:Project {project_id: $project_id})-[:HAS_DOCUMENT]->(:Document {document_id: $document_id})
-              -[:HAS_VERSION]->(v:DocumentVersion)
-        RETURN v.version_index AS version_index, v.title AS title, v.file_name AS file_name
-        ORDER BY v.version_index DESC LIMIT 1
-        """,
-        project_id=project_id,
-        document_id=base["document_id"],
-    )
+    latest = await service.documents.head(project_id=project_id, document_id=str(base["document_id"]))
     if latest is None:
         raise MergeError("the base document is gone")
-    if int(latest["version_index"]) != int(base["version_index"]):
+    if latest.version_index != int(base["version_index"]):
         raise MergeError(
-            f"the document's latest version is {latest['version_index']}, not version {base['version_index']} that "
+            f"the document's latest version is {latest.version_index}, not version {base['version_index']} that "
             "the merge builds on; merge into the latest"
         )
     key = make_key("documents", new_id())
@@ -238,7 +228,7 @@ async def _as_version(
         size, sha256 = await asyncio.to_thread(_copy_hashed, service, written, key)
     project = await project_store(service.store, service.postgres).get(project_id)
     metadata = default_metadata(
-        file_name=str(latest["file_name"]),
+        file_name=latest.file_name,
         size_in_bytes=size,
         sha256=sha256,
         author=author,
@@ -253,12 +243,12 @@ async def _as_version(
         DocumentMetadataEntry(name="approved_by", value=[author], data_type="string"),
     ]
     try:
-        record = await documents.create_version(
+        record = await service.documents.create_version(
             project_id=project_id,
             document_id=str(base["document_id"]),
-            title=str(latest["title"]),
+            title=latest.title,
             version_number=str(int(base["version_index"]) + 1),
-            file_name=str(latest["file_name"]),
+            file_name=latest.file_name,
             size_in_bytes=size,
             sha256=sha256,
             storage_key=key,
