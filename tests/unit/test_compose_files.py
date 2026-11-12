@@ -63,6 +63,17 @@ def test_the_working_copy_joins_the_private_network_unpublished(tmp_path: Path) 
     assert services["api"]["depends_on"]["workcopy"]["condition"] == "service_healthy"
 
 
+def test_a_small_server_caps_memgraph_and_limits_the_containers(tmp_path: Path) -> None:
+    stack = ("compose.prod.yaml", "compose.memgraph.yaml")
+    flags = _config(tmp_path / "memgraph", *stack)["graph"]["command"]
+    services = _config(tmp_path / "small", *stack, "compose.small.yaml")
+    assert services["graph"]["command"] == [
+        "--memory-limit=1536" if flag == "--memory-limit=0" else flag for flag in flags
+    ], "compose.memgraph.yaml's flags, with a cap"
+    mib = 1024 * 1024
+    assert int(services["graph"]["mem_limit"]) == 2048 * mib and int(services["api"]["mem_limit"]) == 1024 * mib
+
+
 def test_an_external_database_leaves_the_container_out(tmp_path: Path) -> None:
     address = "neo4j+s://xxxx.databases.neo4j.io"
     services = _config(

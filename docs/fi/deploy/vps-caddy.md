@@ -42,7 +42,7 @@ käyttäjät ja OAuth2-asiakkaat, joita sovelluksesi tarvitsevat.
 
 | Tehtävä | Komento |
 |---|---|
-| Päivitä uusimpaan imageen | `docker compose pull && docker compose -f docker/compose.yaml -f docker/compose.prod.yaml up -d` |
+| Päivitä uusimpaan imageen | `docker compose pull && docker compose up -d` |
 | Kiinnitä versio | `OPENCDE_IMAGE_TAG=3.0.0` `.env`-tiedostossa (tagit seuraavat GitHub-julkaisuja) |
 | Tarjoa vain osa rajapinnoista | `OPENCDE_APIS=["bcf-2.1"]` tiedostossa `.env` palvelimelle, joka tarjoaa vain BCF API 2.1:n, `["documents"]` dokumenttipalvelimelle; oletuksena kaikki kolme |
 | Lokit | `docker compose logs -f api` (JSON-rivejä) |
@@ -78,3 +78,49 @@ käyttäjät ja OAuth2-asiakkaat, joita sovelluksesi tarvitsevat.
 - Aja `testssl.sh https://cde.example.org` ja tarkista
   <https://observatory.mozilla.org> ensimmäisen käynnistyksen jälkeen.
 - Palomuuri: salli vain 22 (omista osoitteistasi), 80 ja 443.
+
+## Pieni palvelin
+
+Kun käytät Memgraphia koneella, jossa on 4 Gt muistia, lisää
+`docker/compose.small.yaml` tiedoston `docker/compose.memgraph.yaml` jälkeen.
+Se asettaa Memgraphille katon sekä graafi- ja api-konteille rajan, jotta
+koneelle liian suuri malli epäonnistuu yksinään eikä vie koneen muistia.
+Valitse Memgraph, kun otat palvelimen käyttöön: Memgraph ei lue Neo4j:n
+tietoja.
+
+```sh
+# .env: COMPOSE_FILE=docker/compose.yaml:docker/compose.prod.yaml:docker/compose.memgraph.yaml:docker/compose.small.yaml
+docker compose up -d
+```
+
+| Raja | 4 Gt:lle | `.env`-tiedostossa |
+|---|---|---|
+| Memgraphin katto: graafi ja sen kyselyt | 1536 MiB | `OPENCDE_MEMGRAPH_MEMORY_MIB` |
+| Graafikontti | 2048 MiB | `OPENCDE_GRAPH_CONTAINER_MIB` |
+| Api-kontti: palvelin ja sen IFC-työprosessi | 1024 MiB | `OPENCDE_API_CONTAINER_MIB` |
+| Järjestelmälle, Caddylle ja varmuuskopioinnille jäävä osa | noin 1 Gt | |
+
+Näin valitset ne toiselle koneelle:
+
+- Jätä noin 1 Gt järjestelmälle ja jaa loput konttien kesken, noin kaksi osaa
+  graafille ja yksi api:lle.
+- Pidä graafikontti 512 MiB Memgraphin katon yläpuolella: Memgraph käyttää
+  jonkin verran muistia, jota se ei laske, ja kontti laskee mukaan tiedostojen
+  välimuistin.
+- Mitatut mallit veivät Memgraphissa 2–12 kertaa tiedostonsa koon verran
+  muistia, jokainen säilytetty versio erikseen.
+- Palvelin käyttää levossa noin 150 MiB ja 350 MiB tuodessaan mallia, jossa on
+  40 000 entiteettiä. IFC-työprosessi tarvitsee 10–20 kertaa suuren tiedoston
+  koon verran, joten 1024 MiB riittää noin 40 Mt:n IFC-tiedostoihin asti.
+- Pidä `OPENCDE_IFC_DB_MEMORY_MB` (oletuksena 4096) vähintään 512 api-kontin
+  rajan yläpuolella. Se rajoittaa työprosessin osoiteavaruutta, joka on noin
+  0,5 GiB suurempi kuin työprosessin käyttämä muisti, ja siihen pysähtyvä
+  työprosessi voi jumiutua, kunnes sen aikaraja täyttyy. Kontin rajalla ydin
+  pysäyttää työprosessin, kontin suurimman prosessin, ja tuonti epäonnistuu.
+- Jätä `docker/compose.workcopy.yaml` pois: työkopio on toinen Memgraph, ilman
+  kattoa.
+
+Mitä Memgraph tekee katon kohdalla, kerrotaan sivulla
+[local.md](local.md#memgraph-neo4jn-sijaan). Kerros on Memgraphia varten:
+Neo4j:ssä tietokantaa rajoittavat `NEO4J_HEAP` ja `NEO4J_PAGECACHE` (oletuksena
+512m ja 256m, kontille noin 1 Gt), mikä mahtuu sellaisenaan 4 Gt:hen.

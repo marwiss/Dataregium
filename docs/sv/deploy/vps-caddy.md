@@ -42,7 +42,7 @@ användare och OAuth2-klienter som dina program behöver.
 
 | Uppgift | Kommando |
 |---|---|
-| Uppdatera till senaste image | `docker compose pull && docker compose -f docker/compose.yaml -f docker/compose.prod.yaml up -d` |
+| Uppdatera till senaste image | `docker compose pull && docker compose up -d` |
 | Lås en version | `OPENCDE_IMAGE_TAG=3.0.0` i `.env` (taggarna följer GitHub-releaserna) |
 | Erbjud bara några API:er | `OPENCDE_APIS=["bcf-2.1"]` i `.env` för en server för bara BCF API 2.1, `["documents"]` för en dokumentserver; alla tre som standard |
 | Loggar | `docker compose logs -f api` (JSON-rader) |
@@ -78,3 +78,51 @@ användare och OAuth2-klienter som dina program behöver.
 - Kör `testssl.sh https://cde.example.org` och kontrollera
   <https://observatory.mozilla.org> efter första starten.
 - Brandvägg: tillåt bara 22 (från dina adresser), 80 och 443.
+
+## En liten server
+
+Med Memgraph på en maskin med 4 GB minne lägger du till
+`docker/compose.small.yaml` efter `docker/compose.memgraph.yaml`. Den sätter
+ett tak för Memgraph och en gräns för graf- och api-containrarna, så att en
+modell som är för stor för maskinen misslyckas ensam i stället för att ta
+maskinens minne. Välj Memgraph när du sätter upp servern: Memgraph läser inte
+Neo4j:s data.
+
+```sh
+# .env: COMPOSE_FILE=docker/compose.yaml:docker/compose.prod.yaml:docker/compose.memgraph.yaml:docker/compose.small.yaml
+docker compose up -d
+```
+
+| Gräns | För 4 GB | I `.env` |
+|---|---|---|
+| Memgraphs tak: grafen och dess frågor | 1536 MiB | `OPENCDE_MEMGRAPH_MEMORY_MIB` |
+| Grafcontainern | 2048 MiB | `OPENCDE_GRAPH_CONTAINER_MIB` |
+| Api-containern: servern och dess IFC-arbetsprocess | 1024 MiB | `OPENCDE_API_CONTAINER_MIB` |
+| Kvar åt systemet, Caddy och säkerhetskopieringen | ungefär 1 GB | |
+
+Så väljer du dem för en annan maskin:
+
+- Lämna ungefär 1 GB åt systemet och dela resten mellan containrarna, ungefär
+  två delar åt grafen och en åt api:t.
+- Håll grafcontainern 512 MiB över Memgraphs tak: Memgraph använder en del
+  minne som den inte räknar, och containern räknar cachen för dess filer.
+- Memgraph höll de uppmätta modellerna på 2 till 12 gånger storleken på deras
+  filer, för varje version den behåller.
+- Servern använder ungefär 150 MiB i vila och 350 MiB medan den importerar en
+  modell med 40 000 entiteter. IFC-arbetsprocessen behöver 10 till 20 gånger
+  storleken på en stor fil, så 1024 MiB räcker till IFC-filer upp till ungefär
+  40 MB.
+- Håll `OPENCDE_IFC_DB_MEMORY_MB` (4096 som standard) minst 512 över
+  api-containerns gräns. Den begränsar arbetsprocessens adressrymd, som ligger
+  ungefär 0,5 GiB över det minne arbetsprocessen använder, och en arbetsprocess
+  som stoppas där kan hänga tills dess tidsgräns har gått ut. Vid containerns
+  gräns stoppar kärnan arbetsprocessen, den största processen i containern, och
+  importen misslyckas.
+- Utelämna `docker/compose.workcopy.yaml`: arbetskopian är en andra Memgraph,
+  utan tak.
+
+Vad Memgraph gör vid sitt tak står i
+[local.md](local.md#memgraph-i-stället-för-neo4j). Överlagringen är till för
+Memgraph: med Neo4j begränsar `NEO4J_HEAP` och `NEO4J_PAGECACHE` databasen
+(512m och 256m som standard, ungefär 1 GB för containern), vilket ryms i 4 GB
+som det är.

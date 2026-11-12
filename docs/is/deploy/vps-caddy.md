@@ -42,7 +42,7 @@ notendur og OAuth2-biðlara sem forritin þín þurfa.
 
 | Verk | Skipun |
 |---|---|
-| Uppfæra í nýjasta image | `docker compose pull && docker compose -f docker/compose.yaml -f docker/compose.prod.yaml up -d` |
+| Uppfæra í nýjasta image | `docker compose pull && docker compose up -d` |
 | Festa útgáfu | `OPENCDE_IMAGE_TAG=3.0.0` í `.env` (merkin fylgja GitHub-útgáfunum) |
 | Bjóða aðeins sum forritaskil | `OPENCDE_APIS=["bcf-2.1"]` í `.env` fyrir þjón sem býður aðeins BCF API 2.1, `["documents"]` fyrir skjalaþjón; öll þrjú sjálfgefið |
 | Atvikaskrár | `docker compose logs -f api` (JSON-línur) |
@@ -78,3 +78,47 @@ notendur og OAuth2-biðlara sem forritin þín þurfa.
 - Keyrðu `testssl.sh https://cde.example.org` og athugaðu
   <https://observatory.mozilla.org> eftir fyrstu ræsingu.
 - Eldveggur: leyfðu aðeins 22 (frá þínum vistföngum), 80 og 443.
+
+## Lítill þjónn
+
+Með Memgraph á vél með 4 GB minni bætirðu `docker/compose.small.yaml` við á
+eftir `docker/compose.memgraph.yaml`. Yfirlagið setur Memgraph þak og graf- og
+api-gámunum mörk, svo að líkan sem er of stórt fyrir vélina mistakist eitt og
+sér í stað þess að taka minni vélarinnar. Veldu Memgraph þegar þú setur
+þjóninn upp: Memgraph les ekki gögn Neo4j.
+
+```sh
+# .env: COMPOSE_FILE=docker/compose.yaml:docker/compose.prod.yaml:docker/compose.memgraph.yaml:docker/compose.small.yaml
+docker compose up -d
+```
+
+| Mörk | Fyrir 4 GB | Í `.env` |
+|---|---|---|
+| Þak Memgraph: grafinn og fyrirspurnir hans | 1536 MiB | `OPENCDE_MEMGRAPH_MEMORY_MIB` |
+| Grafgámurinn | 2048 MiB | `OPENCDE_GRAPH_CONTAINER_MIB` |
+| Api-gámurinn: þjónninn og IFC-vinnuferli hans | 1024 MiB | `OPENCDE_API_CONTAINER_MIB` |
+| Eftir handa kerfinu, Caddy og öryggisafrituninni | um 1 GB | |
+
+Svona velurðu þau fyrir aðra vél:
+
+- Skildu um 1 GB eftir handa kerfinu og gefðu gámunum afganginn, um tvo hluta
+  grafgámnum og einn api-gámnum.
+- Hafðu grafgáminn 512 MiB yfir þaki Memgraph: Memgraph notar dálítið minni
+  sem það telur ekki, og gámurinn telur með skyndiminni skránna.
+- Mældu líkönin tóku 2 til 12 sinnum stærð skrárinnar sinnar í Memgraph, hver
+  útgáfa sem er geymd.
+- Þjónninn notar um 150 MiB í hvíld og 350 MiB meðan hann flytur inn líkan með
+  40.000 einingum. IFC-vinnuferlið þarf 10 til 20 sinnum stærð stórrar skrár,
+  svo að 1024 MiB duga fyrir IFC-skrár upp að um 40 MB.
+- Hafðu `OPENCDE_IFC_DB_MEMORY_MB` (4096 sjálfgefið) að minnsta kosti 512 yfir
+  mörkum api-gámsins. Stillingin takmarkar vistfangarými vinnuferlisins, sem er
+  um 0,5 GiB yfir minninu sem vinnuferlið notar, og vinnuferli sem stöðvast þar
+  getur frosið þar til tímamörk þess renna út. Við mörk gámsins stöðvar
+  kjarninn vinnuferlið, stærsta ferlið í gámnum, og innflutningurinn mistekst.
+- Slepptu `docker/compose.workcopy.yaml`: vinnueintakið er annað Memgraph, án
+  þaks.
+
+Hvað Memgraph gerir við þakið stendur í
+[local.md](local.md#memgraph-í-stað-neo4j). Yfirlagið er fyrir Memgraph: með
+Neo4j takmarka `NEO4J_HEAP` og `NEO4J_PAGECACHE` gagnagrunninn (512m og 256m
+sjálfgefið, um 1 GB fyrir gáminn), sem kemst fyrir í 4 GB eins og er.

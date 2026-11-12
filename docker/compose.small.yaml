@@ -1,0 +1,28 @@
+# This file was generated with the assistance of an AI coding tool.
+#
+# A small server, such as a virtual machine with 4 GB of memory: a cap on Memgraph's memory and a limit on the graph
+# and api containers, so that a model too large for the machine fails alone instead of taking the machine's memory.
+# For Memgraph only; add it after compose.memgraph.yaml, as the last file:
+#   COMPOSE_FILE=docker/compose.yaml:docker/compose.prod.yaml:docker/compose.memgraph.yaml:docker/compose.small.yaml
+# The defaults are for 4 GB and leave about 1 GB to the system, Caddy and the backup. For another machine set them
+# in .env (docs/en/deploy/vps-caddy.md, "A small server"):
+#   OPENCDE_MEMGRAPH_MEMORY_MIB  Memgraph's --memory-limit: the graph and its queries (1536)
+#   OPENCDE_GRAPH_CONTAINER_MIB  the graph container, 512 above the cap for what Memgraph does not count (2048)
+#   OPENCDE_API_CONTAINER_MIB    the api container: the server and its IFC worker (1024)
+# The IFC worker is held by the api container's limit; keep OPENCDE_IFC_DB_MEMORY_MB, its address space (4096 by
+# default), at least 512 above it. Leave out compose.workcopy.yaml: the working copy is a second Memgraph, uncapped.
+
+services:
+  graph:
+    # compose.memgraph.yaml's flags with a cap by default: Compose replaces a command rather than merging it.
+    command:
+      - "--log-level=WARNING"
+      - "--memory-limit=${OPENCDE_MEMGRAPH_MEMORY_MIB:-1536}"
+      - "--storage-snapshot-interval-sec=300"
+      - "--storage-wal-enabled=true"
+      - "--storage-wal-file-flush-every-n-tx=1"
+      - "--telemetry-enabled=false"
+    mem_limit: "${OPENCDE_GRAPH_CONTAINER_MIB:-2048}m"
+
+  api:
+    mem_limit: "${OPENCDE_API_CONTAINER_MIB:-1024}m"
