@@ -193,6 +193,7 @@ def test_the_migrations_are_numbered_from_one_without_gaps(tmp_path: Path) -> No
         (3, "0003_documents"),
         (4, "0004_bcf"),
         (5, "0005_jobs"),
+        (6, "0006_logs"),
     ], "every area's, in order"
     for names, words in ((["0001_a.sql", "0003_c.sql"], "without gaps"), (["1_a.sql"], "NNNN_name.sql")):
         folder = tmp_path / names[0]
@@ -324,6 +325,8 @@ def test_every_expiring_table_is_in_the_cleaners_round() -> None:
         "upload_parts",
         "validations",
         "change_set_drafts",
+        "request_log_entries",
+        "sign_in_throttles",
     } <= expiring
     statements = (*cleanup.EXPIRING_WITH_FILES, *cleanup.EXPIRING)
     cleaned = {}

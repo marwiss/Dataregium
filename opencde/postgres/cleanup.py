@@ -61,6 +61,13 @@ EXPIRED_CHANGE_SET_DRAFTS = """
 DELETE FROM change_set_drafts
 WHERE changeset_id IN (SELECT changeset_id FROM change_set_drafts WHERE expires_at < $1 LIMIT $2)
 """
+#: Of the logbook only the request log and the sign-in throttle expire; the audit log is kept.
+EXPIRED_REQUEST_LOG_ENTRIES = """
+DELETE FROM request_log_entries WHERE id IN (SELECT id FROM request_log_entries WHERE expires_at < $1 LIMIT $2)
+"""
+EXPIRED_SIGN_IN_THROTTLES = """
+DELETE FROM sign_in_throttles WHERE key IN (SELECT key FROM sign_in_throttles WHERE expires_at < $1 LIMIT $2)
+"""
 #: The statements of the rows that own a file, each returning its key; they run first, so that a row goes before
 #: what owns it (an upload's parts before their session).
 EXPIRING_WITH_FILES = (EXPIRED_UPLOAD_PARTS, EXPIRED_PRECHECKS)
@@ -74,6 +81,8 @@ EXPIRING = (
     EXPIRED_SELECTION_SESSIONS,
     EXPIRED_UPLOAD_SESSIONS,
     EXPIRED_CHANGE_SET_DRAFTS,
+    EXPIRED_REQUEST_LOG_ENTRIES,
+    EXPIRED_SIGN_IN_THROTTLES,
 )
 
 
