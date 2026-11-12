@@ -377,7 +377,7 @@ ilmoittaisi `422`.
 | `upload_too_large` | 413 | Valittu tiedosto tai osa ylittää lähetysrajan (`max_size_in_bytes` lähetysohjeissa) | Kerro käyttäjälle raja |
 | `rate_limited` | 429 | Liian monta pyyntöä yhdestä osoitteesta; `Retry-After` kertoo milloin | Odota ja yritä uudelleen |
 | `internal_error` | 500 | Odottamaton virhe; `message` on aina "Internal server error" | Raportoi `X-Request-ID`:n kanssa |
-| `unavailable` | 503 | Graafitietokantaan ei saada yhteyttä | Yritä myöhemmin uudelleen |
+| `unavailable` | 503 | Graafitietokantaan ei saada yhteyttä tai se on täynnä | Yritä myöhemmin uudelleen |
 
 Lista on suljettu: koodia, jota et tunne, käsitellään kuin puuttuvaa, ja
 näytät `message`-kentän. Tilat, joihin kehys vastaa itse (405, 415), eivät

@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from neo4j.exceptions import ServiceUnavailable
 
+from opencde.graph.graph import DatabaseFull
 from opencde.main import create_app
 from opencde.settings import Settings
 from tests.conftest import test_settings as make_settings  # aliased so pytest does not collect it as a test
@@ -155,6 +156,21 @@ def test_database_outage_is_a_503_without_driver_details(settings: Settings) -> 
     assert response.status_code == 503
     assert response.json() == {"message": "The database is not available right now", "code": "unavailable"}
     assert "7687" not in response.text
+
+
+def test_a_full_database_is_a_503_without_driver_details(settings: Settings) -> None:
+    """Memgraph at its memory limit (or Neo4j out of transaction memory) refuses a change: `unavailable`, at once."""
+    app = create_app(settings, startup_wait_seconds=0)
+
+    @app.post("/bcf/3.0/full")
+    async def full() -> None:
+        raise DatabaseFull from RuntimeError("Memory limit exceeded! Current use is 200.01MiB")
+
+    with TestClient(app) as client:
+        response = client.post("/bcf/3.0/full")
+    assert response.status_code == 503
+    assert response.json() == {"message": "The database is full and takes no changes", "code": "unavailable"}
+    assert "MiB" not in response.text
 
 
 def test_icons_are_served_with_image_types(client: TestClient) -> None:

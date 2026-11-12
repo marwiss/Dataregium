@@ -362,7 +362,7 @@ serveren ikke kan lese, slik serveren svarer, der FastAPI selv ville oppgi `422`
 | `upload_too_large` | 413 | En valgt fil eller del er over opplastingsgrensen (`max_size_in_bytes` i opplastingsinstruksjonene) | Fortell brukeren grensen |
 | `rate_limited` | 429 | For mange forespørsler fra én adresse; `Retry-After` sier når | Vent og prøv igjen |
 | `internal_error` | 500 | En uventet feil; `message` er alltid "Internal server error" | Rapporter med `X-Request-ID` |
-| `unavailable` | 503 | Grafdatabasen kan ikke nås | Prøv igjen senere |
+| `unavailable` | 503 | Grafdatabasen kan ikke nås eller er full | Prøv igjen senere |
 
 Listen er lukket: en kode du ikke kjenner, behandles som en manglende, og du
 viser `message`. Statuser som rammeverket svarer med på egen hånd (405,

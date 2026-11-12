@@ -67,6 +67,13 @@ Aseta `.env`-tiedostoon `OPENCDE_GRAPH_DIALECT=memgraph` ja
 `OPENCDE_GRAPH_USER=memgraph`, kun palvelin ajetaan Dockerin ulkopuolella.
 Memgraph Labin (`memgraph/lab`) voi osoittaa osoitteeseen `127.0.0.1:7697`.
 
+Memgraph pitää graafin muistissa. `.env`-tiedoston `OPENCDE_MEMGRAPH_MEMORY_MIB`
+asettaa sille katon (Memgraphin `--memory-limit`; oletusarvo `0` jättää sen
+Memgraphille: 90 % koneen muistista, tai kaiken, jos swap on käytössä). Katon
+kohdalla Memgraph torjuu sen, mikä tarvitsee enemmän: palvelin vastaa 503
+`unavailable`, tuonti, joka ei mahdu, epäonnistuu jättämättä osaa mallista
+jälkeensä, ja 95 %:sta katosta alkaen `/readyz` vastaa 503 ja `"graph": "full"`.
+
 ## Testaus Dataspatiumin kanssa
 
 [Dataspatium](https://github.com/marwiss/Dataspatium) on selainasiakas, jota

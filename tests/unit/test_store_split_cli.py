@@ -34,7 +34,7 @@ class Graph(Recording):
         super().__init__(name, answers)
         self.driver = name
         self.database = name
-        self.dialect = SimpleNamespace(name=GraphDialect.NEO4J, list_constraints="SHOW CONSTRAINTS")
+        self.dialect = SimpleNamespace(name=GraphDialect.NEO4J, list_constraints="SHOW CONSTRAINTS", storage_info=None)
         self.closed = False
 
     async def close(self) -> None:

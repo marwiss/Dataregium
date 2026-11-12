@@ -66,6 +66,13 @@ Sett `OPENCDE_GRAPH_DIALECT=memgraph` og `OPENCDE_GRAPH_USER=memgraph` i `.env`
 når serveren kjører utenfor Docker. Memgraph Lab (`memgraph/lab`) kan pekes
 mot `127.0.0.1:7697`.
 
+Memgraph holder grafen i minnet. `OPENCDE_MEMGRAPH_MEMORY_MIB` i `.env` setter
+et tak (Memgraphs `--memory-limit`; `0`, standardverdien, overlater det til
+Memgraph: 90 % av maskinens minne, eller alt med swap). Ved taket avviser
+Memgraph det som trenger mer: serveren svarer 503 `unavailable`, en import som
+ikke får plass, mislykkes uten å etterlate en del av modellen, og fra 95 % av
+taket svarer `/readyz` 503 med `"graph": "full"`.
+
 ## Testing med Dataspatium
 
 [Dataspatium](https://github.com/marwiss/Dataspatium) er nettleserklienten

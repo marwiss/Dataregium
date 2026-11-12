@@ -368,7 +368,7 @@ oppgje `422`.
 | `upload_too_large` | 413 | Ei vald fil eller ein del er over opplastingsgrensa (`max_size_in_bytes` i opplastingsinstruksjonane) | Fortel brukaren grensa |
 | `rate_limited` | 429 | For mange førespurnader frå éi adresse; `Retry-After` seier når | Vent og prøv igjen |
 | `internal_error` | 500 | Ein uventa feil; `message` er alltid "Internal server error" | Rapporter med `X-Request-ID` |
-| `unavailable` | 503 | Grafdatabasen kan ikkje nåast | Prøv igjen seinare |
+| `unavailable` | 503 | Grafdatabasen kan ikkje nåast eller er full | Prøv igjen seinare |
 
 Lista er lukka: ein kode du ikkje kjenner, blir handsama som ein manglande,
 og du viser `message`. Statusar som rammeverket svarar med på eiga hand (405,

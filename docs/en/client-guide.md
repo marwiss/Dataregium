@@ -354,7 +354,7 @@ server cannot read, as the server answers, where FastAPI itself would say `422`.
 | `upload_too_large` | 413 | A chosen file or part is over the upload limit (`max_size_in_bytes` in the upload instructions) | Tell the user the limit |
 | `rate_limited` | 429 | Too many requests from one address; `Retry-After` says when | Wait and retry |
 | `internal_error` | 500 | An unexpected error; `message` is always "Internal server error" | Report with the `X-Request-ID` |
-| `unavailable` | 503 | The graph database cannot be reached | Retry later |
+| `unavailable` | 503 | The graph database cannot be reached or is full | Retry later |
 
 The list is closed: a code you do not know is treated like a missing one, and
 you show `message`. Statuses the framework answers on its own (405, 415) carry

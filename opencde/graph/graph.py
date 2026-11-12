@@ -22,7 +22,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, LiteralString, TypeVar, cast
 
 from neo4j import AsyncDriver, AsyncManagedTransaction
-from neo4j.exceptions import ClientError, TransientError
+from neo4j.exceptions import ClientError, Neo4jError, TransientError
 
 from opencde.graph.dialect import Dialect
 from opencde.logging import get_logger
@@ -34,6 +34,15 @@ T = TypeVar("T")
 DDL_ATTEMPTS = 30  # schema statements that meet a transient error: about two minutes in all, at growing intervals
 DDL_RETRY_SECONDS = 0.5
 DDL_RETRY_MAX_SECONDS = 5.0
+
+
+class DatabaseFull(Exception):
+    """The graph database has no memory left for a statement. The driver would try again for half a minute, as with
+    any transient error, so the transaction function raises this instead, which it does not retry; the transaction
+    is rolled back, so nothing of it is written."""
+
+    def __init__(self) -> None:
+        super().__init__("The database is full and takes no changes")
 
 
 class Tx:
@@ -66,22 +75,50 @@ class Graph:
         self.dialect = dialect
 
     async def run(self, query: str, /, **params: Any) -> list[dict[str, Any]]:
-        records, _summary, _keys = await self.driver.execute_query(
-            cast("LiteralString", query), parameters_=params, database_=self.database
-        )
-        return [record.data() for record in records]
+        """One statement in a transaction of its own, as ``execute_query`` runs it, with its bookmarks."""
+        bookmarks = self.driver.execute_query_bookmark_manager
+        return await self._transaction(True, lambda tx: tx.run(query, **params), bookmark_manager=bookmarks)
 
     async def one(self, query: str, /, **params: Any) -> dict[str, Any] | None:
         rows = await self.run(query, **params)
         return rows[0] if rows else None
 
     async def write(self, work: Callable[[Tx], Awaitable[T]]) -> T:
-        async with self.driver.session(database=self.database) as session:
-            return await session.execute_write(lambda tx: work(Tx(tx)))
+        return await self._transaction(True, work)
 
     async def read(self, work: Callable[[Tx], Awaitable[T]]) -> T:
-        async with self.driver.session(database=self.database) as session:
-            return await session.execute_read(lambda tx: work(Tx(tx)))
+        return await self._transaction(False, work)
+
+    async def _transaction(self, writes: bool, work: Callable[[Tx], Awaitable[T]], **options: Any) -> T:
+        """``work`` in a transaction the driver tries again after a transient error, but for a refusal for want of
+        memory: that is :class:`DatabaseFull` at once, after the database has been asked to give back what the
+        refused transaction held, which Memgraph otherwise does only at its next collection."""
+        try:
+            async with self.driver.session(database=self.database, **options) as session:
+                execute = session.execute_write if writes else session.execute_read
+                return await execute(lambda tx: self._guarded(work, tx))
+        except DatabaseFull:
+            await self.free_memory()
+            raise
+
+    async def _guarded(self, work: Callable[[Tx], Awaitable[T]], tx: AsyncManagedTransaction) -> T:
+        try:
+            return await work(Tx(tx))
+        except Neo4jError as exc:
+            if any(marker in f"{exc.code} {exc.message}" for marker in self.dialect.full_markers):
+                raise DatabaseFull from exc
+            raise
+
+    async def free_memory(self) -> None:
+        """Ask the database to collect what deleted and refused transactions left in memory now, where it says how."""
+        statement = self.dialect.free_memory
+        if statement is None:
+            return
+        try:
+            async with self.driver.session(database=self.database) as session:
+                await (await session.run(cast("LiteralString", statement))).consume()
+        except Exception as exc:  # only a help; the refusal is what the caller hears about
+            log.warning("graph_free_memory_failed", error_type=type(exc).__name__)
 
     async def ddl(self, statement: str) -> bool:
         """Run a schema statement outside any transaction; True if it changed something.

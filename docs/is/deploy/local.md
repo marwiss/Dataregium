@@ -66,6 +66,13 @@ Settu `OPENCDE_GRAPH_DIALECT=memgraph` og `OPENCDE_GRAPH_USER=memgraph` í
 `.env` þegar þjónninn keyrir utan Docker. Memgraph Lab (`memgraph/lab`) má
 beina á `127.0.0.1:7697`.
 
+Memgraph geymir grafinn í minni. `OPENCDE_MEMGRAPH_MEMORY_MIB` í `.env` setur
+þak (`--memory-limit` í Memgraph; `0`, sjálfgefna gildið, lætur Memgraph ráða:
+90 % af minni vélarinnar, eða allt með swap). Við þakið hafnar Memgraph því sem
+þarf meira: þjónninn svarar 503 `unavailable`, innflutningur sem kemst ekki
+fyrir mistekst án þess að skilja hluta líkansins eftir, og frá 95 % af þakinu
+svarar `/readyz` 503 með `"graph": "full"`.
+
 ## Prófun með Dataspatium
 
 [Dataspatium](https://github.com/marwiss/Dataspatium) er vafrabiðlarinn sem

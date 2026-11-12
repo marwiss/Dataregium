@@ -363,7 +363,7 @@ gefa upp `422`.
 | `upload_too_large` | 413 | Valin skrá eða hluti fer yfir upphalsmörkin (`max_size_in_bytes` í upphalsfyrirmælunum) | Segðu notandanum mörkin |
 | `rate_limited` | 429 | Of margar beiðnir frá einu vistfangi; `Retry-After` segir hvenær | Bíddu og reyndu aftur |
 | `internal_error` | 500 | Óvænt villa; `message` er alltaf "Internal server error" | Tilkynntu með `X-Request-ID` |
-| `unavailable` | 503 | Ekki næst í grafgagnagrunninn | Reyndu aftur síðar |
+| `unavailable` | 503 | Ekki næst í grafgagnagrunninn eða hann er fullur | Reyndu aftur síðar |
 
 Listinn er lokaður: kóði sem þú þekkir ekki er meðhöndlaður eins og vantandi
 kóði, og þú sýnir `message`. Stöður sem umgjörðin svarar sjálf (405, 415)

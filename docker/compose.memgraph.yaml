@@ -15,8 +15,10 @@ services:
       MEMGRAPH_PASSWORD: "${OPENCDE_GRAPH_PASSWORD:?Set OPENCDE_GRAPH_PASSWORD in .env}"
     # No usage statistics to the vendor (the server sends none either), and every transaction in the write-ahead
     # log on disk before it is answered, not after 100,000 (Memgraph's defaults; found by Hemsidor, 2026-11-12).
+    # OPENCDE_MEMGRAPH_MEMORY_MIB caps the memory it may use; 0 leaves it to Memgraph (90 % of the machine's).
     command:
       - "--log-level=WARNING"
+      - "--memory-limit=${OPENCDE_MEMGRAPH_MEMORY_MIB:-0}"
       - "--storage-snapshot-interval-sec=300"
       - "--storage-wal-enabled=true"
       - "--storage-wal-file-flush-every-n-tx=1"

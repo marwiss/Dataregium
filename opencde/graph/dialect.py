@@ -85,6 +85,24 @@ class Dialect:
         """Substrings of the error a product raises when DDL is repeated. Treated as success."""
         return ("already exists", "AlreadyExists", "EquivalentSchemaRuleAlreadyExists", "ConstraintAlreadyExists")
 
+    @property
+    def full_markers(self) -> tuple[str, ...]:
+        """Substrings of the error a product raises when it has no memory left for a statement: Memgraph at its
+        ``--memory-limit``, Neo4j at its transaction memory pool. Both call it transient; trying again does not help."""
+        return ("Memory limit exceeded", "OutOfMemoryError")
+
+    @property
+    def storage_info(self) -> str | None:
+        """Memgraph's statement answering its memory in use and its limit, one row per figure, outside explicit
+        transactions; Neo4j tells it only through its own procedures."""
+        return "SHOW STORAGE INFO" if self.name is GraphDialect.MEMGRAPH else None
+
+    @property
+    def free_memory(self) -> str | None:
+        """Memgraph's statement that collects deleted and aborted data at once instead of at its next cycle, outside
+        explicit transactions; Neo4j's memory is the JVM's."""
+        return "FREE MEMORY" if self.name is GraphDialect.MEMGRAPH else None
+
 
 NEO4J = Dialect(
     name=GraphDialect.NEO4J, default_database="neo4j", product="Neo4j 5.26 LTS", constraint_implies_index=True

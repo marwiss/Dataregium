@@ -29,6 +29,7 @@ from neo4j.exceptions import ServiceUnavailable
 from starlette import status
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from opencde.graph.graph import DatabaseFull
 from opencde.logging import get_logger
 
 log = get_logger(__name__)
@@ -49,7 +50,7 @@ CODE_PAYLOAD_TOO_LARGE = "payload_too_large"  # 413: the request body is over th
 CODE_UPLOAD_TOO_LARGE = "upload_too_large"  # 413: a chosen file or part is over the upload limit
 CODE_RATE_LIMITED = "rate_limited"  # 429
 CODE_INTERNAL_ERROR = "internal_error"  # 500
-CODE_UNAVAILABLE = "unavailable"  # 503: the graph database cannot be reached
+CODE_UNAVAILABLE = "unavailable"  # 503: the graph database cannot be reached or is full
 
 CODES_BY_STATUS = {
     400: CODE_VALIDATION,
@@ -184,6 +185,12 @@ def install_error_handlers(app: FastAPI) -> None:
         # fault, and the message never repeats the driver's text, which names hosts and ports.
         log.error("database_unavailable", path=request.url.path, error_type=type(exc).__name__)
         return error_response(status.HTTP_503_SERVICE_UNAVAILABLE, "The database is not available right now")
+
+    @app.exception_handler(DatabaseFull)
+    async def _database_full(request: Request, exc: DatabaseFull) -> JSONResponse:
+        # The database had no memory left for the statement and rolled it back; its operator raises the limit.
+        log.error("database_full", path=request.url.path)
+        return error_response(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc))
 
     @app.exception_handler(Exception)
     async def _unexpected(request: Request, exc: Exception) -> JSONResponse:
