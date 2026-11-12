@@ -315,6 +315,13 @@ WITH a AS (DELETE FROM access_tokens WHERE client_id = $1 RETURNING 1),
      ac AS (DELETE FROM authorization_codes WHERE client_id = $1 RETURNING 1)
 SELECT (SELECT count(*) FROM a) + (SELECT count(*) FROM r) + (SELECT count(*) FROM ac) AS n
 """
+REVOKE_ALL = """
+WITH a AS (DELETE FROM access_tokens RETURNING 1),
+     r AS (DELETE FROM refresh_tokens RETURNING 1),
+     ac AS (DELETE FROM authorization_codes RETURNING 1),
+     s AS (DELETE FROM web_sessions RETURNING 1)
+SELECT (SELECT count(*) FROM a) + (SELECT count(*) FROM r) + (SELECT count(*) FROM ac) + (SELECT count(*) FROM s) AS n
+"""
 SESSIONS_OF_USER = """
 SELECT r.family_id, c.client_id, c.name AS client_name, r.scope, r.created_at, r.expires_at
 FROM refresh_tokens r JOIN oauth_clients c ON c.client_id = r.client_id
@@ -518,6 +525,10 @@ class PostgresTokenRepository:
 
     async def revoke_all_for_client(self, client_id: str) -> int:
         return _count(await self.postgres.one(REVOKE_CLIENT, client_id))
+
+    async def revoke_all(self) -> int:
+        """Every code, token and browser session on the server."""
+        return _count(await self.postgres.one(REVOKE_ALL))
 
     async def sessions_for_user(self, user_id: str) -> list[dict]:
         """Active refresh-token families per client, for "my account" and the admin UI."""

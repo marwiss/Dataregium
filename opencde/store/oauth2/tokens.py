@@ -458,6 +458,15 @@ class TokenRepository:
         )
         return counters.nodes_deleted
 
+    async def revoke_all(self) -> int:
+        """Every code, token and browser session on the server: the first step of an incident response."""
+        counters = await self.graph.write(
+            lambda tx: tx.counters(
+                "MATCH (t) WHERE t:AccessToken OR t:RefreshToken OR t:AuthorizationCode OR t:WebSession DETACH DELETE t"
+            )
+        )
+        return counters.nodes_deleted
+
     async def sessions_for_user(self, user_id: str) -> list[dict]:
         """Active refresh-token families per client, for "my account" and the admin UI."""
         return await self.graph.run(
