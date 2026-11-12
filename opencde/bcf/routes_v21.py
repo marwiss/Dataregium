@@ -47,7 +47,7 @@ from opencde.bcf.schemas_v21 import (
     ViewpointPOST21,
 )
 from opencde.bcf.topic_access import TopicCtx, TopicsDep
-from opencde.deps import ClientsDep, GraphDep, ProjectsDep, SettingsDep
+from opencde.deps import AuditLogDep, ClientsDep, ProjectsDep, SettingsDep
 from opencde.foundation.routes import CurrentUser, auth_payload_v21, versions_payload
 from opencde.ifcgraph.service import IfcGraphDep
 from opencde.ratelimit import limiter, registration_limit
@@ -81,11 +81,11 @@ async def auth(settings: SettingsDep) -> dict[str, Any]:
 @router.post("/oauth2/reg", summary="3.2.3 Dynamic Client Registration", status_code=201)
 @limiter.limit(registration_limit)
 async def register_client(
-    request: Request, body: RegistrationRequest, clients: ClientsDep, settings: SettingsDep, graph: GraphDep
+    request: Request, body: RegistrationRequest, clients: ClientsDep, settings: SettingsDep, audit_log: AuditLogDep
 ) -> Response:
     """Register a client, as ``oauth2_dynamic_client_reg_url`` in ``auth`` says. A confidential client registered here
     may sign in as 2.1's example does, without PKCE. Available only when ``OPENCDE_DYNAMIC_CLIENT_REGISTRATION`` is on."""
-    return await registered(request, body, clients, settings, graph, without_pkce=True)
+    return await registered(request, body, clients, settings, audit_log, without_pkce=True)
 
 
 @router.get("/current-user", summary="3.3.1 Get current user", response_model=CurrentUser)

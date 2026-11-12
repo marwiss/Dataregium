@@ -56,6 +56,8 @@ from opencde.store.accounts.sessions import WebUser
 from opencde.store.accounts.users import User
 from opencde.store.bcf.topics import TOPIC_FIELDS
 from opencde.store.documents.versions import VersionRecord
+from opencde.store.logbook.audit import CREATE as AUDIT_EVENT
+from opencde.store.logbook.audit import AuditLogRepository
 from opencde.store.oauth2.clients import Client
 from opencde.ui import i18n
 from opencde.ui.templating import render
@@ -453,9 +455,14 @@ async def test_an_audit_event_holds_the_text_as_one_json_string(text: str) -> No
     """The details of an event are one JSON string on the node, written with parameters; a secret among them is
     masked and the text is not."""
     graph = _Graph()
-    await audit.record(graph, "web.sign_in.failed", ip="127.0.0.1", details={"username": text, "token": text})
+    await audit.record(
+        AuditLogRepository(graph),  # ty: ignore[invalid-argument-type]
+        "web.sign_in.failed",
+        ip="127.0.0.1",
+        details={"username": text, "token": text},
+    )
     ((statement, params),) = graph.calls
-    assert statement == audit.CREATE and params["type"] == "web.sign_in.failed"
+    assert statement == AUDIT_EVENT and params["type"] == "web.sign_in.failed"
     details = params["details"]
     assert isinstance(details, str) and not any(ord(char) < 0x20 for char in details)
     assert json.loads(details) == {"username": text, "token": REDACTED}
@@ -1627,7 +1634,7 @@ def test_the_audit_log_keeps_of_meta_only_the_clients_name_for_itself_cut_short(
             "tool": "list_models",
             "client_info": {"name": text[:100], "version": text[:100]},
         }
-    written = [params["details"] for query, params in graph.calls if query == audit.CREATE]
+    written = [params["details"] for query, params in graph.calls if query == AUDIT_EVENT]
     assert all(isinstance(details, str) and not any(ord(char) < 0x20 for char in details) for details in written)
 
 

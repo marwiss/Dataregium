@@ -20,7 +20,7 @@ from opencde.admin.access import (
     redirect_with_notice,
     text,
 )
-from opencde.deps import GraphDep, ModelGraphDep, ProjectsDep, StorageDep, UsersDep
+from opencde.deps import AuditLogDep, GraphDep, ModelGraphDep, ProjectsDep, StorageDep, UsersDep
 from opencde.ids import is_uuid, normalize_guid
 from opencde.ifcgraph.maintenance import delete_project
 from opencde.store.accounts.projects import AI_POLICIES, EXTENSION_LISTS, PRAXI_STATUSES, AccountError, Project
@@ -91,7 +91,7 @@ async def project_new(request: Request, admin: AdminDep) -> Response:
 
 
 @router.post("")
-async def project_create(request: Request, admin: AdminDep, projects: ProjectsDep, graph: GraphDep) -> Response:
+async def project_create(request: Request, admin: AdminDep, projects: ProjectsDep, audit_log: AuditLogDep) -> Response:
     form = AdminForm(request, admin, "admin-project-new")
     data = await request.form()
     if not form.check(data.get("form_token")):
@@ -105,7 +105,7 @@ async def project_create(request: Request, admin: AdminDep, projects: ProjectsDe
             admin_context(request, admin, "projects", form_token=form.token(), error=tr_error(request, exc)),
             status_code=400,
         )
-    await form.record(graph, "project.create", project_id=project.project_id)
+    await form.record(audit_log, "project.create", project_id=project.project_id)
     return redirect_with_notice(f"/admin/projects/{project.project_id}", "created")
 
 
@@ -126,7 +126,7 @@ async def project_action(
     project_id: ProjectId,
     projects: ProjectsDep,
     users: UsersDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
     models: ModelGraphDep,
     storage: StorageDep,
 ) -> Response:
@@ -143,7 +143,7 @@ async def project_action(
     try:
         if action == "rename":
             await projects.rename(project.project_id, text(data, "name", max_length=200))
-            await form.record(graph, "project.rename", project_id=project.project_id)
+            await form.record(audit_log, "project.rename", project_id=project.project_id)
             return redirect_with_notice(page, "saved")
 
         if action == "member":
@@ -151,33 +151,35 @@ async def project_action(
             if role not in ROLES or not is_uuid(user_id):
                 return redirect_with_notice(page, "invalid")
             await projects.set_member(project.project_id, user_id, Role(role))
-            await form.record(graph, "membership.set", user_id=user_id, project_id=project.project_id, role=role)
+            await form.record(audit_log, "membership.set", user_id=user_id, project_id=project.project_id, role=role)
             return redirect_with_notice(page, "member_saved")
 
         if action == "remove_member":
             user_id = text(data, "user_id", max_length=64)
             if is_uuid(user_id):
                 await projects.remove_member(project.project_id, user_id)
-                await form.record(graph, "membership.remove", user_id=user_id, project_id=project.project_id)
+                await form.record(audit_log, "membership.remove", user_id=user_id, project_id=project.project_id)
             return redirect_with_notice(page, "member_removed")
 
         if action == "extensions":
             values = {name: lines(data, name, max_items=200, max_length=100) for name in EXTENSION_LISTS}
             await projects.set_extensions(project.project_id, values)
-            await form.record(graph, "project.extensions", project_id=project.project_id)
+            await form.record(audit_log, "project.extensions", project_id=project.project_id)
             return redirect_with_notice(page, "extensions_saved")
 
         if action == "praxi_statuses":  # the ready set for topic_status; the other lists stay as they are
             kept = await projects.extensions(project.project_id) or {}
             values = {name: list(kept.get(name, [])) for name in EXTENSION_LISTS}
             await projects.set_extensions(project.project_id, values | {"topic_status": list(PRAXI_STATUSES)})
-            await form.record(graph, "project.extensions", project_id=project.project_id, preset="praxi")
+            await form.record(audit_log, "project.extensions", project_id=project.project_id, preset="praxi")
             return redirect_with_notice(page, "extensions_saved")
 
         if action == "checks":
             block = data.get("block_on_validation_errors") == "on"
             await projects.set_block_on_validation_errors(project.project_id, block)
-            await form.record(graph, "project.checks", project_id=project.project_id, block_on_validation_errors=block)
+            await form.record(
+                audit_log, "project.checks", project_id=project.project_id, block_on_validation_errors=block
+            )
             return redirect_with_notice(page, "saved")
 
         if action == "ai_policy":
@@ -185,14 +187,14 @@ async def project_action(
             if policy not in AI_POLICIES:
                 return redirect_with_notice(page, "invalid")
             await projects.set_ai_policy(project.project_id, policy)
-            await form.record(graph, "project.ai_policy", project_id=project.project_id, ai_policy=policy)
+            await form.record(audit_log, "project.ai_policy", project_id=project.project_id, ai_policy=policy)
             return redirect_with_notice(page, "saved")
 
         if action == "delete":
             if not await password_confirmed(users, admin, data.get("confirm_password")):
                 return redirect_with_notice(page, "wrong_password")
             await delete_project(projects, models, project.project_id, storage)
-            await form.record(graph, "project.delete", project_id=project.project_id, name=project.name)
+            await form.record(audit_log, "project.delete", project_id=project.project_id, name=project.name)
             return redirect_with_notice("/admin/projects", "deleted")
     except AccountError as exc:
         return await _project_page(

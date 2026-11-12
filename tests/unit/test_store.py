@@ -59,6 +59,9 @@ from opencde.store.jobs.postgres import (
 )
 from opencde.store.jobs.proposals import ProposalRepository
 from opencde.store.jobs.validations import ValidationRepository
+from opencde.store.logbook.audit import AuditLogRepository
+from opencde.store.logbook.requests import RequestLogRepository
+from opencde.store.logbook.throttle import SignInThrottleRepository
 from opencde.store.oauth2.clients import ClientRepository
 from opencde.store.oauth2.postgres import PostgresClientRepository, PostgresTokenRepository
 from opencde.store.oauth2.tokens import TokenRepository
@@ -86,6 +89,9 @@ REPOSITORIES = (
     ValidationRepository,
     ClashRepository,
     MergeRepository,
+    AuditLogRepository,
+    RequestLogRepository,
+    SignInThrottleRepository,
     PostgresUserRepository,
     PostgresProjectRepository,
     PostgresTeamRepository,

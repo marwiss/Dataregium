@@ -22,7 +22,7 @@ from opencde.admin.access import (
     text,
 )
 from opencde.auth.dependencies import TokensDep
-from opencde.deps import GraphDep, ProjectsDep, UsersDep
+from opencde.deps import AuditLogDep, GraphDep, ProjectsDep, UsersDep
 from opencde.ids import is_uuid
 from opencde.store.accounts.users import AccountError, User
 from opencde.store.protocols import ProjectStore, UserStore
@@ -95,7 +95,7 @@ async def user_new(request: Request, admin: AdminDep) -> Response:
 
 
 @router.post("")
-async def user_create(request: Request, admin: AdminDep, users: UsersDep, graph: GraphDep) -> Response:
+async def user_create(request: Request, admin: AdminDep, users: UsersDep, audit_log: AuditLogDep) -> Response:
     form = AdminForm(request, admin, "admin-user-new")
     data = await request.form()
     if not form.check(data.get("form_token")):
@@ -120,7 +120,7 @@ async def user_create(request: Request, admin: AdminDep, users: UsersDep, graph:
             admin_context(request, admin, "users", form_token=form.token(), error=tr_error(request, exc)),
             status_code=400,
         )
-    await form.record(graph, "user.create", user_id=user.id, is_admin=user.is_admin)
+    await form.record(audit_log, "user.create", user_id=user.id, is_admin=user.is_admin)
     if generated:
         return render(
             request,
@@ -157,7 +157,7 @@ async def user_action(
     users: UsersDep,
     projects: ProjectsDep,
     tokens: TokensDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> Response:
     user = await users.get(user_id) if is_uuid(user_id) else None
     if user is None:
@@ -186,7 +186,7 @@ async def user_action(
         )
         if disabled and not user.disabled:
             await tokens.revoke_all_for_user(user.id)
-        await form.record(graph, "user.update", user_id=user.id, is_admin=wants_admin, disabled=disabled)
+        await form.record(audit_log, "user.update", user_id=user.id, is_admin=wants_admin, disabled=disabled)
         return redirect_with_notice(page, "saved")
 
     if action == "membership":
@@ -197,14 +197,14 @@ async def user_action(
             await projects.set_member(project_id, user.id, Role(role))
         except AccountError:
             return redirect_with_notice(page, "invalid")
-        await form.record(graph, "membership.set", user_id=user.id, project_id=project_id, role=role)
+        await form.record(audit_log, "membership.set", user_id=user.id, project_id=project_id, role=role)
         return redirect_with_notice(page, "member_saved")
 
     if action == "remove_membership":
         project_id = text(data, "project_id", max_length=64)
         if is_uuid(project_id):
             await projects.remove_member(project_id, user.id)
-            await form.record(graph, "membership.remove", user_id=user.id, project_id=project_id)
+            await form.record(audit_log, "membership.remove", user_id=user.id, project_id=project_id)
         return redirect_with_notice(page, "member_removed")
 
     if action == "reset_password":
@@ -213,7 +213,7 @@ async def user_action(
         password = generated_password()
         await users.set_password(user.id, password, must_change=True)
         await tokens.revoke_all_for_user(user.id)
-        await form.record(graph, "user.reset_password", user_id=user.id)
+        await form.record(audit_log, "user.reset_password", user_id=user.id)
         return render(
             request,
             "admin/secret.html",
@@ -231,7 +231,7 @@ async def user_action(
 
     if action == "revoke_sessions":
         await tokens.revoke_all_for_user(user.id)
-        await form.record(graph, "user.revoke_sessions", user_id=user.id)
+        await form.record(audit_log, "user.revoke_sessions", user_id=user.id)
         return redirect_with_notice(page, "revoked")
 
     if action == "delete":
@@ -241,7 +241,7 @@ async def user_action(
             return redirect_with_notice(page, "wrong_password")
         await tokens.revoke_all_for_user(user.id)
         await users.delete(user.id)
-        await form.record(graph, "user.delete", user_id=user.id, username=user.username)
+        await form.record(audit_log, "user.delete", user_id=user.id, username=user.username)
         return redirect_with_notice("/admin/users", "deleted")
 
     return redirect_with_notice(page, "invalid")

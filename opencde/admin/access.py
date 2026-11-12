@@ -20,9 +20,8 @@ from fastapi.responses import RedirectResponse, Response
 from opencde import audit
 from opencde.auth.forms import FormTokenError
 from opencde.deps import client_ip
-from opencde.graph.graph import Graph
 from opencde.store.accounts.sessions import WebUser
-from opencde.store.protocols import UserStore
+from opencde.store.protocols import AuditLogStore, UserStore
 from opencde.ui.i18n import tr
 from opencde.ui.templating import render
 from opencde.web.dependencies import (
@@ -140,9 +139,9 @@ class AdminForm:
             return False
         return data.get("session") == self.admin.session_hash and data.get("subject") == self.subject
 
-    async def record(self, graph: Graph, action: str, **details: Any) -> None:
+    async def record(self, audit_log: AuditLogStore, action: str, **details: Any) -> None:
         await audit.record(
-            graph,
+            audit_log,
             f"admin.{action}",
             actor=self.admin.user.id,
             ip=client_ip(self.request),

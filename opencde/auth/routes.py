@@ -40,7 +40,7 @@ from opencde.auth import pkce, resources, throttle
 from opencde.auth.dependencies import BEARER_CHALLENGE, TokensDep, bearer_token
 from opencde.auth.forms import FormTokenError, FormTokens
 from opencde.auth.scopes import SCOPES, ScopeError, parse_scope, scope_string
-from opencde.deps import ClientsDep, GraphDep, SettingsDep, UsersDep, client_ip
+from opencde.deps import AuditLogDep, ClientsDep, SettingsDep, SignInThrottleDep, UsersDep, client_ip
 from opencde.errors import CODE_LOCALHOST_REDIRECT, CODE_UNAUTHENTICATED, CODE_VALIDATION, ApiError
 from opencde.ids import secrets_equal
 from opencde.logging import get_logger
@@ -212,7 +212,8 @@ async def authorize_submit(
     clients: ClientsDep,
     users: UsersDep,
     tokens: TokensDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
+    throttles: SignInThrottleDep,
     settings: SettingsDep,
     sessions: WebSessionsDep,
     form_token: Annotated[str | None, Form()] = None,
@@ -236,7 +237,7 @@ async def authorize_submit(
     ip = client_ip(request)
 
     if decision != "allow":
-        await audit.record(graph, "auth.consent.denied", client_id=client.client_id, ip=ip)
+        await audit.record(audit_log, "auth.consent.denied", client_id=client.client_id, ip=ip)
         return _error_redirect(redirect_to, "access_denied", "the user denied the request", state, issuer)
 
     def ask_again(error: str, status_code: int = 200) -> Response:
@@ -255,14 +256,14 @@ async def authorize_submit(
         )
 
     try:
-        user = await throttle.authenticate(users, graph, settings, username, password)
+        user = await throttle.authenticate(users, throttles, settings, username, password)
     except throttle.SignInThrottled as exc:
         details = {"username": username[:128]}
-        await audit.record(graph, "auth.sign_in.throttled", client_id=client.client_id, ip=ip, details=details)
+        await audit.record(audit_log, "auth.sign_in.throttled", client_id=client.client_id, ip=ip, details=details)
         return ask_again(tr(request, "signin.error.throttled", seconds=exc.seconds), status_code=429)
     if user is None:
         await audit.record(
-            graph, "auth.sign_in.failed", client_id=client.client_id, ip=ip, details={"username": username[:128]}
+            audit_log, "auth.sign_in.failed", client_id=client.client_id, ip=ip, details={"username": username[:128]}
         )
         return ask_again(tr(request, "signin.error.credentials"))
 
@@ -280,7 +281,9 @@ async def authorize_submit(
         target = safe_next(f"{request.url.path}?{urlencode(again)}")
         response = RedirectResponse(change_password_url(target), status_code=303, headers=NO_STORE)
         set_session_cookie(response, session, settings)
-        await audit.record(graph, "auth.sign_in.must_change_password", actor=user.id, client_id=client.client_id, ip=ip)
+        await audit.record(
+            audit_log, "auth.sign_in.must_change_password", actor=user.id, client_id=client.client_id, ip=ip
+        )
         return response
 
     code = await tokens.issue_code(
@@ -296,7 +299,7 @@ async def authorize_submit(
     details = {"scope": data["scope"], "pkce": bool(data["code_challenge"])}
     if data.get("resource"):
         details["resource"] = data["resource"]
-    await audit.record(graph, "auth.code.issued", actor=user.id, client_id=client.client_id, ip=ip, details=details)
+    await audit.record(audit_log, "auth.code.issued", actor=user.id, client_id=client.client_id, ip=ip, details=details)
     return _redirect_with(redirect_to, {"code": code, "state": state, "iss": issuer})
 
 
@@ -347,7 +350,7 @@ async def _authenticate_client(request: Request, clients: Any, params: dict[str,
 
 @router.post("/token", summary="Token endpoint", status_code=201)
 @limiter.limit(RATE_EXCHANGE)
-async def token(request: Request, clients: ClientsDep, tokens: TokensDep, graph: GraphDep) -> Response:
+async def token(request: Request, clients: ClientsDep, tokens: TokensDep, audit_log: AuditLogDep) -> Response:
     """Issue tokens for an authorization code or a refresh token (RFC 6749 §4.1.3 and §6).
 
     Confidential clients authenticate with HTTP Basic (client_id:client_secret) or form
@@ -387,14 +390,14 @@ async def token(request: Request, clients: ClientsDep, tokens: TokensDep, graph:
                 resource=resource,
             )
             await audit.record(
-                graph, "auth.token.issued", client_id=client.client_id, ip=ip, details={"grant": grant_type}
+                audit_log, "auth.token.issued", client_id=client.client_id, ip=ip, details={"grant": grant_type}
             )
         elif grant_type == "refresh_token":
             refresh_token = params.get("refresh_token", "")
             if not refresh_token:
                 raise GrantError("invalid_request", "refresh_token is required")
             pair = await tokens.refresh(refresh_token=refresh_token, client_id=client.client_id, resource=resource)
-            await audit.record(graph, "auth.token.refreshed", client_id=client.client_id, ip=ip)
+            await audit.record(audit_log, "auth.token.refreshed", client_id=client.client_id, ip=ip)
         elif not grant_type:
             raise GrantError("invalid_request", "grant_type is required")
         else:
@@ -402,7 +405,7 @@ async def token(request: Request, clients: ClientsDep, tokens: TokensDep, graph:
     except GrantError as exc:
         if "reuse detected" in exc.description or "already used" in exc.description:
             await audit.record(
-                graph, "auth.replay_detected", client_id=client.client_id, ip=ip, details={"grant": grant_type}
+                audit_log, "auth.replay_detected", client_id=client.client_id, ip=ip, details={"grant": grant_type}
             )
         return _oauth_error(exc.status, exc.error, exc.description)
 
@@ -426,7 +429,7 @@ async def token(request: Request, clients: ClientsDep, tokens: TokensDep, graph:
 
 @router.post("/revoke", summary="Revoke a token (RFC 7009)", status_code=200)
 @limiter.limit(RATE_EXCHANGE)
-async def revoke(request: Request, clients: ClientsDep, tokens: TokensDep, graph: GraphDep) -> Response:
+async def revoke(request: Request, clients: ClientsDep, tokens: TokensDep, audit_log: AuditLogDep) -> Response:
     """Revoke an access token, or a refresh token together with every token of its session.
     Always answers 200 for an authenticated client, whether or not the token was known."""
     params = await _token_params(request)
@@ -437,7 +440,7 @@ async def revoke(request: Request, clients: ClientsDep, tokens: TokensDep, graph
     request.state.log_client_id = client.client_id
     revoked = await tokens.revoke(params.get("token", ""), client_id=client.client_id)
     if revoked:
-        await audit.record(graph, "auth.token.revoked", client_id=client.client_id, ip=client_ip(request))
+        await audit.record(audit_log, "auth.token.revoked", client_id=client.client_id, ip=client_ip(request))
     return JSONResponse({}, headers=NO_STORE)
 
 
@@ -480,12 +483,12 @@ class RegistrationRequest(BaseModel):
 @router.post("/reg", summary="Dynamic client registration (Foundation API 2.2.3)", status_code=201)
 @limiter.limit(registration_limit)
 async def register_client(
-    request: Request, body: RegistrationRequest, clients: ClientsDep, settings: SettingsDep, graph: GraphDep
+    request: Request, body: RegistrationRequest, clients: ClientsDep, settings: SettingsDep, audit_log: AuditLogDep
 ) -> Response:
     """Register a client and return its metadata (RFC 7591 §3.2.1): ``client_id`` and, for a confidential
     client, the ``client_secret`` shown once. ``token_endpoint_auth_method: "none"`` registers a public client
     without a secret. Available only when ``OPENCDE_DYNAMIC_CLIENT_REGISTRATION`` is true."""
-    return await registered(request, body, clients, settings, graph)
+    return await registered(request, body, clients, settings, audit_log)
 
 
 async def registered(
@@ -493,7 +496,7 @@ async def registered(
     body: RegistrationRequest,
     clients: Any,
     settings: Any,
-    graph: Any,
+    audit_log: Any,
     *,
     without_pkce: bool = False,
 ) -> Response:
@@ -534,7 +537,7 @@ async def registered(
         code = CODE_LOCALHOST_REDIRECT if exc.key == LOCALHOST_REFUSED else CODE_VALIDATION
         raise ApiError(400, str(exc), code=code) from None
     await audit.record(
-        graph,
+        audit_log,
         "auth.client.registered",
         client_id=client.client_id,
         ip=client_ip(request),

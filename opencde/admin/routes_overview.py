@@ -16,7 +16,7 @@ from opencde.admin import queries
 from opencde.admin.access import AdminDep, AdminForm, admin_context, redirect_with_notice, text
 from opencde.admin.doctor import run_checks
 from opencde.auth.dependencies import TokensDep
-from opencde.deps import GraphDep, ModelGraphDep, SettingsDep, StorageDep
+from opencde.deps import AuditLogDep, GraphDep, ModelGraphDep, SettingsDep, StorageDep
 from opencde.graph.driver import ping_within
 from opencde.settings import env_name
 from opencde.ui.templating import render
@@ -71,10 +71,12 @@ SAFE_SETTINGS = (
 
 
 @router.get("")
-async def overview(request: Request, admin: AdminDep, graph: GraphDep, settings: SettingsDep) -> Response:
+async def overview(
+    request: Request, admin: AdminDep, graph: GraphDep, audit_log: AuditLogDep, settings: SettingsDep
+) -> Response:
     reachable = await ping_within(graph.driver, graph.database, settings.graph_connect_timeout_seconds)
     counts = await queries.counts(graph) if reachable else {}
-    recent = await audit.recent(graph, limit=10) if reachable else []
+    recent = await audit.recent(audit_log, limit=10) if reachable else []
     return render(
         request,
         "admin/overview.html",
@@ -111,7 +113,9 @@ async def sessions_page(request: Request, admin: AdminDep, graph: GraphDep) -> R
 
 
 @router.post("/sessions")
-async def sessions_action(request: Request, admin: AdminDep, graph: GraphDep, tokens: TokensDep) -> Response:
+async def sessions_action(
+    request: Request, admin: AdminDep, graph: GraphDep, audit_log: AuditLogDep, tokens: TokensDep
+) -> Response:
     form = AdminForm(request, admin, "admin-sessions")
     data = await request.form()
     if not form.check(data.get("form_token")):
@@ -120,15 +124,15 @@ async def sessions_action(request: Request, admin: AdminDep, graph: GraphDep, to
     if action == "revoke_family":
         user_id, family_id = text(data, "user_id", max_length=64), text(data, "family_id", max_length=64)
         await tokens.revoke_family(family_id, user_id=user_id)
-        await form.record(graph, "session.revoke_family", user_id=user_id)
+        await form.record(audit_log, "session.revoke_family", user_id=user_id)
     elif action == "revoke_web":
         session_id = text(data, "session_id", max_length=128)
         await queries.delete_web_session(graph, session_id)
-        await form.record(graph, "session.revoke_web")
+        await form.record(audit_log, "session.revoke_web")
     elif action == "revoke_user":
         user_id = text(data, "user_id", max_length=64)
         await tokens.revoke_all_for_user(user_id)
-        await form.record(graph, "session.revoke_user", user_id=user_id)
+        await form.record(audit_log, "session.revoke_user", user_id=user_id)
     else:
         return redirect_with_notice("/admin/sessions", "invalid")
     return redirect_with_notice("/admin/sessions", "revoked")
@@ -146,7 +150,7 @@ def _details_text(details: Any) -> str:
     return json.dumps(details, sort_keys=True, ensure_ascii=False, default=str)
 
 
-def _audit_rows(graph_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _audit_rows(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
             "at": row.get("at"),
@@ -156,7 +160,7 @@ def _audit_rows(graph_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "ip": row.get("ip") or "",
             "details": _details_text(row.get("details")),
         }
-        for row in graph_rows
+        for row in events
     ]
 
 
@@ -164,11 +168,11 @@ def _audit_rows(graph_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 async def audit_page(
     request: Request,
     admin: AdminDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
     type: str | None = Query(None, max_length=64),
 ) -> Response:
     prefix = (type or "").strip()[:64] or None
-    rows = _audit_rows(await audit.recent(graph, limit=AUDIT_LIMIT, type_prefix=prefix))
+    rows = _audit_rows(await audit.recent(audit_log, limit=AUDIT_LIMIT, type_prefix=prefix))
     return render(
         request,
         "admin/audit.html",
@@ -180,11 +184,11 @@ async def audit_page(
 async def audit_csv(
     request: Request,
     admin: AdminDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
     type: str | None = Query(None, max_length=64),
 ) -> Response:
     prefix = (type or "").strip()[:64] or None
-    rows = _audit_rows(await audit.recent(graph, limit=10_000, type_prefix=prefix))
+    rows = _audit_rows(await audit.recent(audit_log, limit=10_000, type_prefix=prefix))
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(["at", "type", "actor", "client_id", "ip", "details"])

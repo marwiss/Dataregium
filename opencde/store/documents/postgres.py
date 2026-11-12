@@ -39,6 +39,7 @@ from opencde.store.documents.versions import (
     _validation,
 )
 from opencde.store.jobs.conversions import STATE_DONE
+from opencde.store.logbook.audit import AuditLogRepository
 from opencde.timeutil import later_iso, now_iso
 
 if TYPE_CHECKING:
@@ -404,7 +405,7 @@ class PostgresDocumentRepository:
         if row is None:
             return False
         if self.audit_graph is not None:
-            await audit.record(self.audit_graph, **audit_event)
+            await audit.record(AuditLogRepository(self.audit_graph), **audit_event)
         return True
 
     # -- what the server's own jobs read of a project, not for a member ---------------------------------------

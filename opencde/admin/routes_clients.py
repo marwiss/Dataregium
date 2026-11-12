@@ -20,7 +20,7 @@ from opencde.admin.access import (
     text,
 )
 from opencde.auth.dependencies import TokensDep
-from opencde.deps import ClientsDep, GraphDep, UsersDep
+from opencde.deps import AuditLogDep, ClientsDep, UsersDep
 from opencde.ids import is_uuid, normalize_guid
 from opencde.store.oauth2.clients import MAX_DESCRIPTION, Client, ClientError
 from opencde.ui.i18n import tr, tr_error
@@ -76,7 +76,7 @@ async def client_new(request: Request, admin: AdminDep) -> Response:
 
 
 @router.post("")
-async def client_create(request: Request, admin: AdminDep, clients: ClientsDep, graph: GraphDep) -> Response:
+async def client_create(request: Request, admin: AdminDep, clients: ClientsDep, audit_log: AuditLogDep) -> Response:
     form = AdminForm(request, admin, "admin-client-new")
     data = await request.form()
     if not form.check(data.get("form_token")):
@@ -100,7 +100,7 @@ async def client_create(request: Request, admin: AdminDep, clients: ClientsDep, 
             admin_context(request, admin, "clients", form_token=form.token(), error=tr_error(request, exc)),
             status_code=400,
         )
-    await form.record(graph, "client.create", client_id=client.client_id, public=public)
+    await form.record(audit_log, "client.create", client_id=client.client_id, public=public)
     if secret:
         return _secret_page(request, admin, client, secret, "admin.secret.client_secret_lead")
     return redirect_with_notice(f"/admin/clients/{client.client_id}", "created")
@@ -122,7 +122,7 @@ async def client_action(
     clients: ClientsDep,
     users: UsersDep,
     tokens: TokensDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> Response:
     client = await clients.get(normalize_guid(client_id)) if is_uuid(client_id) else None
     if client is None:
@@ -149,31 +149,31 @@ async def client_action(
             )
             if disabled and not client.disabled:
                 await tokens.revoke_all_for_client(client.client_id)
-            await form.record(graph, "client.update", client_id=client.client_id, disabled=disabled)
+            await form.record(audit_log, "client.update", client_id=client.client_id, disabled=disabled)
             return redirect_with_notice(page, "saved")
 
         if action == "approve":
             await clients.update(client.client_id, disabled=False)
-            await form.record(graph, "client.approve", client_id=client.client_id)
+            await form.record(audit_log, "client.approve", client_id=client.client_id)
             return redirect_with_notice(page, "approved")
 
         if action == "rotate":
             if not await password_confirmed(users, admin, data.get("confirm_password")):
                 return redirect_with_notice(page, "wrong_password")
             secret = await clients.rotate_secret(client.client_id)
-            await form.record(graph, "client.rotate_secret", client_id=client.client_id)
+            await form.record(audit_log, "client.rotate_secret", client_id=client.client_id)
             return _secret_page(request, admin, client, secret, "admin.secret.client_secret_rotated_lead")
 
         if action == "revoke":
             await tokens.revoke_all_for_client(client.client_id)
-            await form.record(graph, "client.revoke_tokens", client_id=client.client_id)
+            await form.record(audit_log, "client.revoke_tokens", client_id=client.client_id)
             return redirect_with_notice(page, "revoked")
 
         if action == "delete":
             if not await password_confirmed(users, admin, data.get("confirm_password")):
                 return redirect_with_notice(page, "wrong_password")
             await clients.delete(client.client_id)
-            await form.record(graph, "client.delete", client_id=client.client_id, name=client.name)
+            await form.record(audit_log, "client.delete", client_id=client.client_id, name=client.name)
             return redirect_with_notice("/admin/clients", "deleted")
     except ClientError as exc:
         return _client_page(request, admin, client, error=tr_error(request, exc), status_code=400)

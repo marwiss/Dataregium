@@ -34,6 +34,7 @@ from opencde.admin.doctor import run_checks
 from opencde.admin.routes_overview import SAFE_SETTINGS
 from opencde.auth.dependencies import AdminPrincipal, FreshAdminPrincipal, TokensDep, fresh_admin_principal
 from opencde.deps import (
+    AuditLogDep,
     ClientsDep,
     GraphDep,
     ModelGraphDep,
@@ -52,6 +53,7 @@ from opencde.store.accounts.sessions import WebSessionsDep
 from opencde.store.accounts.users import AccountError, User
 from opencde.store.oauth2.clients import MAX_DESCRIPTION, Client, ClientError
 from opencde.store.oauth2.tokens import Principal
+from opencde.store.protocols import AuditLogStore
 
 router = APIRouter(prefix="/admin/api", tags=["Administration (extension)"])
 
@@ -124,10 +126,12 @@ def _client(client: Client) -> dict[str, Any]:
     }
 
 
-async def _record(request: Request, graph: Graph, principal: Principal, action: str, **details: Any) -> None:
+async def _record(
+    request: Request, audit_log: AuditLogStore, principal: Principal, action: str, **details: Any
+) -> None:
     """Every write leaves an audit event: who, through which client, from where (the request id comes along)."""
     await audit.record(
-        graph,
+        audit_log,
         f"admin.{action}",
         actor=principal.user_id,
         client_id=principal.client_id,
@@ -298,12 +302,12 @@ async def list_sessions(
 @router.get("/audit", summary="Administration (extension): the audit log")
 async def list_audit(
     principal: AdminPrincipal,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
     type: TypeQuery = None,
     since: SinceQuery = None,
     limit: LimitQuery = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
-    events = await audit.recent(graph, limit=limit, type_prefix=(type or "").strip() or None, since=since)
+    events = await audit.recent(audit_log, limit=limit, type_prefix=(type or "").strip() or None, since=since)
     items = [
         {
             "id": event.get("id"),
@@ -411,7 +415,7 @@ def _generated_password() -> str:
 
 @router.post("/users", status_code=201, summary="Administration (extension): create a user")
 async def create_user(
-    request: Request, principal: AdminPrincipal, body: UserCreate, users: UsersDep, graph: GraphDep
+    request: Request, principal: AdminPrincipal, body: UserCreate, users: UsersDep, audit_log: AuditLogDep
 ) -> dict[str, Any]:
     if body.is_admin:
         fresh_admin_principal(principal)  # granting the administrator role is dangerous
@@ -428,7 +432,7 @@ async def create_user(
         )
     except AccountError as exc:
         raise _bad_request(exc) from None
-    await _record(request, graph, principal, "user.create", user_id=user.id, is_admin=user.is_admin)
+    await _record(request, audit_log, principal, "user.create", user_id=user.id, is_admin=user.is_admin)
     data = _user(user)
     if generated:
         data["initial_password"] = password  # returned once; the server keeps only the hash
@@ -442,7 +446,7 @@ async def _update_user(
     body: UserUpdate,
     users: UsersDep,
     tokens: TokensDep,
-    graph: Graph,
+    audit_log: AuditLogStore,
 ) -> dict[str, Any]:
     user = await users.get(user_id)
     if user is None:
@@ -465,7 +469,7 @@ async def _update_user(
     if body.disabled and not user.disabled:
         await tokens.revoke_all_for_user(user.id)
     await _record(
-        request, graph, principal, "user.update", user_id=user.id, is_admin=body.is_admin, disabled=body.disabled
+        request, audit_log, principal, "user.update", user_id=user.id, is_admin=body.is_admin, disabled=body.disabled
     )
     return _user(updated)
 
@@ -479,9 +483,9 @@ async def update_user(
     body: UserUpdate,
     users: UsersDep,
     tokens: TokensDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> dict[str, Any]:
-    return await _update_user(request, principal, user_id, body, users, tokens, graph)
+    return await _update_user(request, principal, user_id, body, users, tokens, audit_log)
 
 
 @router.delete("/users/{user_id}", status_code=204, summary="Administration (extension): delete a user")
@@ -492,7 +496,7 @@ async def delete_user(
     users: UsersDep,
     tokens: TokensDep,
     sessions: WebSessionsDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> Response:
     user = await users.get(user_id)
     if user is None:
@@ -502,7 +506,7 @@ async def delete_user(
     await tokens.revoke_all_for_user(user.id)
     await sessions.delete_for_user(user.id)
     await users.delete(user.id)
-    await _record(request, graph, principal, "user.delete", user_id=user.id, username=user.username)
+    await _record(request, audit_log, principal, "user.delete", user_id=user.id, username=user.username)
     return NO_CONTENT
 
 
@@ -514,7 +518,7 @@ async def reset_password(
     users: UsersDep,
     tokens: TokensDep,
     sessions: WebSessionsDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> dict[str, Any]:
     user = await users.get(user_id)
     if user is None:
@@ -523,7 +527,7 @@ async def reset_password(
     await users.set_password(user.id, password, must_change=True)
     await tokens.revoke_all_for_user(user.id)
     await sessions.delete_for_user(user.id)
-    await _record(request, graph, principal, "user.reset_password", user_id=user.id)
+    await _record(request, audit_log, principal, "user.reset_password", user_id=user.id)
     reset = {"id": user.id, "username": user.username, "must_change_password": True}  # nosec B105  # a flag
     reset["password"] = password  # generated above and returned once; the server keeps only the hash
     return reset
@@ -550,13 +554,18 @@ class ProjectUpdate(BaseModel):
 
 @router.post("/projects", status_code=201, summary="Administration (extension): create a project")
 async def create_project(
-    request: Request, principal: AdminPrincipal, body: ProjectCreate, projects: ProjectsDep, graph: GraphDep
+    request: Request,
+    principal: AdminPrincipal,
+    body: ProjectCreate,
+    projects: ProjectsDep,
+    graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> dict[str, Any]:
     try:
         project = await projects.create(body.name, extensions=body.extensions)
     except AccountError as exc:
         raise _bad_request(exc) from None
-    await _record(request, graph, principal, "project.create", project_id=project.project_id, name=project.name)
+    await _record(request, audit_log, principal, "project.create", project_id=project.project_id, name=project.name)
     return await _project_detail(project, projects, graph)
 
 
@@ -569,6 +578,7 @@ async def update_project(
     body: ProjectUpdate,
     projects: ProjectsDep,
     graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> dict[str, Any]:
     project = await projects.get(project_id)
     if project is None:
@@ -586,7 +596,7 @@ async def update_project(
         raise _bad_request(exc) from None
     await _record(
         request,
-        graph,
+        audit_log,
         principal,
         "project.update",
         project_id=project.project_id,
@@ -604,7 +614,7 @@ async def delete_project(
     principal: FreshAdminPrincipal,
     project_id: IdPath,
     projects: ProjectsDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
     models: ModelGraphDep,
     storage: StorageDep,
 ) -> Response:
@@ -613,7 +623,7 @@ async def delete_project(
     if project is None:
         raise HTTPException(404, "No such project")
     await maintenance.delete_project(projects, models, project.project_id, storage)
-    await _record(request, graph, principal, "project.delete", project_id=project.project_id, name=project.name)
+    await _record(request, audit_log, principal, "project.delete", project_id=project.project_id, name=project.name)
     return NO_CONTENT
 
 
@@ -626,7 +636,7 @@ async def set_member(
     body: MemberBody,
     projects: ProjectsDep,
     users: UsersDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> dict[str, Any]:
     if await projects.get(project_id) is None:
         raise HTTPException(404, "No such project")
@@ -640,7 +650,9 @@ async def set_member(
         await projects.set_member(project_id, user_id, role)
     except AccountError as exc:
         raise _bad_request(exc) from None
-    await _record(request, graph, principal, "membership.set", user_id=user_id, project_id=project_id, role=role.value)
+    await _record(
+        request, audit_log, principal, "membership.set", user_id=user_id, project_id=project_id, role=role.value
+    )
     return {"user_id": user_id, "role": role.value}
 
 
@@ -653,11 +665,11 @@ async def remove_member(
     project_id: IdPath,
     user_id: IdPath,
     projects: ProjectsDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> Response:
     if not await projects.remove_member(project_id, user_id):
         raise HTTPException(404, "No such membership")
-    await _record(request, graph, principal, "membership.remove", user_id=user_id, project_id=project_id)
+    await _record(request, audit_log, principal, "membership.remove", user_id=user_id, project_id=project_id)
     return NO_CONTENT
 
 
@@ -688,7 +700,7 @@ class ClientUpdate(BaseModel):
 
 @router.post("/clients", status_code=201, summary="Administration (extension): register a client")
 async def create_client(
-    request: Request, principal: AdminPrincipal, body: ClientCreate, clients: ClientsDep, graph: GraphDep
+    request: Request, principal: AdminPrincipal, body: ClientCreate, clients: ClientsDep, audit_log: AuditLogDep
 ) -> dict[str, Any]:
     try:
         client, secret = await clients.create(
@@ -703,7 +715,7 @@ async def create_client(
         )
     except ClientError as exc:
         raise _bad_request(exc) from None
-    await _record(request, graph, principal, "client.create", client_id=client.client_id, public=body.public)
+    await _record(request, audit_log, principal, "client.create", client_id=client.client_id, public=body.public)
     data = _client(client)
     if secret:
         data["client_secret"] = secret  # returned once
@@ -719,7 +731,7 @@ async def update_client(
     body: ClientUpdate,
     clients: ClientsDep,
     tokens: TokensDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> dict[str, Any]:
     client = await clients.get(client_id)
     if client is None:
@@ -739,13 +751,13 @@ async def update_client(
         raise _bad_request(exc) from None
     if body.disabled and not client.disabled:
         await tokens.revoke_all_for_client(client.client_id)
-    await _record(request, graph, principal, "client.update", client_id=client.client_id, disabled=body.disabled)
+    await _record(request, audit_log, principal, "client.update", client_id=client.client_id, disabled=body.disabled)
     return _client(updated)
 
 
 @router.post("/clients/{client_id}/rotate-secret", summary="Administration (extension): rotate a secret, returned once")
 async def rotate_client_secret(
-    request: Request, principal: FreshAdminPrincipal, client_id: IdPath, clients: ClientsDep, graph: GraphDep
+    request: Request, principal: FreshAdminPrincipal, client_id: IdPath, clients: ClientsDep, audit_log: AuditLogDep
 ) -> dict[str, Any]:
     client = await clients.get(client_id)
     if client is None:
@@ -754,7 +766,7 @@ async def rotate_client_secret(
         secret = await clients.rotate_secret(client.client_id)
     except ClientError as exc:
         raise _bad_request(exc) from None
-    await _record(request, graph, principal, "client.rotate_secret", client_id=client.client_id)
+    await _record(request, audit_log, principal, "client.rotate_secret", client_id=client.client_id)
     return {"client_id": client.client_id, "client_secret": secret}
 
 
@@ -765,25 +777,25 @@ async def revoke_client(
     client_id: IdPath,
     clients: ClientsDep,
     tokens: TokensDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> Response:
     client = await clients.get(client_id)
     if client is None:
         raise HTTPException(404, "No such client")
     await tokens.revoke_all_for_client(client.client_id)
-    await _record(request, graph, principal, "client.revoke_tokens", client_id=client.client_id)
+    await _record(request, audit_log, principal, "client.revoke_tokens", client_id=client.client_id)
     return NO_CONTENT
 
 
 @router.delete("/clients/{client_id}", status_code=204, summary="Administration (extension): delete a client")
 async def delete_client(
-    request: Request, principal: FreshAdminPrincipal, client_id: IdPath, clients: ClientsDep, graph: GraphDep
+    request: Request, principal: FreshAdminPrincipal, client_id: IdPath, clients: ClientsDep, audit_log: AuditLogDep
 ) -> Response:
     client = await clients.get(client_id)
     if client is None:
         raise HTTPException(404, "No such client")
     await clients.delete(client.client_id)
-    await _record(request, graph, principal, "client.delete", client_id=client.client_id, name=client.name)
+    await _record(request, audit_log, principal, "client.delete", client_id=client.client_id, name=client.name)
     return NO_CONTENT
 
 
@@ -797,7 +809,7 @@ async def revoke_user_sessions(
     users: UsersDep,
     tokens: TokensDep,
     sessions: WebSessionsDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
     user: Annotated[str, Query(max_length=128, description="A user id or user name")],
 ) -> Response:
     target = await users.get(user) or await users.get_by_username(user)
@@ -805,20 +817,25 @@ async def revoke_user_sessions(
         raise HTTPException(404, "No such user")
     await tokens.revoke_all_for_user(target.id)
     await sessions.delete_for_user(target.id)
-    await _record(request, graph, principal, "user.revoke_sessions", user_id=target.id)
+    await _record(request, audit_log, principal, "user.revoke_sessions", user_id=target.id)
     return NO_CONTENT
 
 
 @router.delete("/sessions/{session_id}", status_code=204, summary="Administration (extension): end one session")
 async def revoke_session(
-    request: Request, principal: AdminPrincipal, session_id: IdPath, tokens: TokensDep, graph: GraphDep
+    request: Request,
+    principal: AdminPrincipal,
+    session_id: IdPath,
+    tokens: TokensDep,
+    graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> Response:
     """``session_id`` is the ``id`` of the listing: a refresh-token family or a browser session."""
     user_id = await queries.family_user(graph, session_id)
     if user_id is not None and await tokens.revoke_family(session_id, user_id=user_id):
-        await _record(request, graph, principal, "session.revoke_family", user_id=user_id, family_id=session_id)
+        await _record(request, audit_log, principal, "session.revoke_family", user_id=user_id, family_id=session_id)
         return NO_CONTENT
     if await queries.delete_web_session(graph, session_id):
-        await _record(request, graph, principal, "session.revoke_web", session_id=session_id)
+        await _record(request, audit_log, principal, "session.revoke_web", session_id=session_id)
         return NO_CONTENT
     raise HTTPException(404, "No such session")

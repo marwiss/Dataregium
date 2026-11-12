@@ -11,8 +11,18 @@ from opencde.graph.graph import Graph
 from opencde.postgres.database import Postgres
 from opencde.settings import Settings
 from opencde.storage import LocalStorage
+from opencde.store.logbook.audit import AuditLogRepository
+from opencde.store.logbook.requests import RequestLogRepository
+from opencde.store.logbook.throttle import SignInThrottleRepository
 from opencde.store.oauth2.postgres import client_store
-from opencde.store.protocols import ClientStore, ProjectStore, UserStore
+from opencde.store.protocols import (
+    AuditLogStore,
+    ClientStore,
+    ProjectStore,
+    RequestLogStore,
+    SignInThrottleStore,
+    UserStore,
+)
 
 
 def get_settings(request: Request) -> Settings:
@@ -64,6 +74,18 @@ def get_clients(
     return client_store(graph, postgres, settings)
 
 
+def get_audit_log(graph: Annotated[Graph, Depends(get_graph)]) -> AuditLogStore:
+    return AuditLogRepository(graph)
+
+
+def get_request_log(graph: Annotated[Graph, Depends(get_graph)]) -> RequestLogStore:
+    return RequestLogRepository(graph)
+
+
+def get_sign_in_throttle(graph: Annotated[Graph, Depends(get_graph)]) -> SignInThrottleStore:
+    return SignInThrottleRepository(graph)
+
+
 def client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
@@ -76,3 +98,6 @@ StorageDep = Annotated[LocalStorage, Depends(get_storage)]
 UsersDep = Annotated[UserStore, Depends(get_users)]
 ProjectsDep = Annotated[ProjectStore, Depends(get_projects)]
 ClientsDep = Annotated[ClientStore, Depends(get_clients)]
+AuditLogDep = Annotated[AuditLogStore, Depends(get_audit_log)]
+RequestLogDep = Annotated[RequestLogStore, Depends(get_request_log)]
+SignInThrottleDep = Annotated[SignInThrottleStore, Depends(get_sign_in_throttle)]

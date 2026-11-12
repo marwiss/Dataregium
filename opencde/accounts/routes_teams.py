@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from opencde.accounts.roles import Role, at_least
 from opencde.accounts.routes_manage import IdPath, ProjectPrincipal, _managed, _record
-from opencde.deps import GraphDep, ProjectsDep
+from opencde.deps import AuditLogDep, GraphDep, ProjectsDep
 from opencde.ids import is_uuid, normalize_guid
 from opencde.store.accounts.teams import MAX_MEMBERS, MAX_TEAMS, TeamsDep
 
@@ -95,6 +95,7 @@ async def add_team(
     teams: TeamsDep,
     projects: ProjectsDep,
     graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> dict[str, Any]:
     await _managed(graph, principal, project_id)
     if len(await teams.of_project(project_id)) >= MAX_TEAMS:
@@ -103,7 +104,7 @@ async def add_team(
     team_id = await teams.save(project_id, team_id=None, **fields)
     if team_id is None:
         raise HTTPException(404, "No such project")
-    await _record(request, graph, principal, "team.set", project_id=project_id, team_id=team_id)
+    await _record(request, audit_log, principal, "team.set", project_id=project_id, team_id=team_id)
     return _shown(await teams.get(project_id, team_id) or {})
 
 
@@ -117,13 +118,14 @@ async def set_team(
     teams: TeamsDep,
     projects: ProjectsDep,
     graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> dict[str, Any]:
     await _managed(graph, principal, project_id)
     if await teams.get(project_id, team_id) is None:
         raise HTTPException(404, "No such team")
     fields = await _checked(graph, projects, project_id, body)
     await teams.save(project_id, team_id=team_id, **fields)
-    await _record(request, graph, principal, "team.set", project_id=project_id, team_id=team_id)
+    await _record(request, audit_log, principal, "team.set", project_id=project_id, team_id=team_id)
     return _shown(await teams.get(project_id, team_id) or {})
 
 
@@ -133,10 +135,16 @@ async def set_team(
     summary="Project administration (extension): remove a team",
 )
 async def remove_team(
-    request: Request, principal: ProjectPrincipal, project_id: IdPath, team_id: IdPath, teams: TeamsDep, graph: GraphDep
+    request: Request,
+    principal: ProjectPrincipal,
+    project_id: IdPath,
+    team_id: IdPath,
+    teams: TeamsDep,
+    graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> Response:
     await _managed(graph, principal, project_id)
     if not await teams.delete(project_id, team_id):
         raise HTTPException(404, "No such team")
-    await _record(request, graph, principal, "team.remove", project_id=project_id, team_id=team_id)
+    await _record(request, audit_log, principal, "team.remove", project_id=project_id, team_id=team_id)
     return Response(status_code=204)

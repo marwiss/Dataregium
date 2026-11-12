@@ -17,7 +17,7 @@ from opencde.admin import queries
 from opencde.admin.access import NOTICES, SignedInDep, redirect_with_notice, text
 from opencde.auth.dependencies import TokensDep
 from opencde.auth.forms import FormTokenError
-from opencde.deps import GraphDep, UsersDep, client_ip
+from opencde.deps import AuditLogDep, GraphDep, UsersDep, client_ip
 from opencde.store.accounts.sessions import WebSessionsDep
 from opencde.store.accounts.users import AccountError
 from opencde.ui.i18n import tr, tr_error
@@ -87,6 +87,7 @@ async def account_action(
     tokens: TokensDep,
     sessions: WebSessionsDep,
     graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> Response:
     require_same_origin(request)
     data = await request.form()
@@ -104,7 +105,7 @@ async def account_action(
         current = text(data, "current_password", max_length=256)
         new, repeat = text(data, "new_password", max_length=256), text(data, "repeat_password", max_length=256)
         if await users.authenticate(web_user.user.username, current) is None:
-            await audit.record(graph, "account.password.failed", actor=web_user.user.id, ip=ip)
+            await audit.record(audit_log, "account.password.failed", actor=web_user.user.id, ip=ip)
             return _back_to_account(request, "wrong_password")
         if new != repeat:
             return await _page(
@@ -114,7 +115,7 @@ async def account_action(
             await users.set_password(web_user.user.id, new, must_change=False)
         except AccountError as exc:
             return await _page(request, web_user, tokens, graph, error=tr_error(request, exc), status_code=400)
-        await audit.record(graph, "account.password.changed", actor=web_user.user.id, ip=ip)
+        await audit.record(audit_log, "account.password.changed", actor=web_user.user.id, ip=ip)
         going_on = _going_on(request)
         if going_on != "/":
             return RedirectResponse(going_on, status_code=303, headers=NO_STORE)
@@ -122,7 +123,7 @@ async def account_action(
 
     if action == "revoke_app":
         await tokens.revoke_family(text(data, "family_id", max_length=64), user_id=web_user.user.id)
-        await audit.record(graph, "account.app.revoked", actor=web_user.user.id, ip=ip)
+        await audit.record(audit_log, "account.app.revoked", actor=web_user.user.id, ip=ip)
         return redirect_with_notice("/account", "revoked")
 
     if action == "revoke_web":
@@ -135,7 +136,7 @@ async def account_action(
 
     if action == "sign_out_everywhere":
         await sessions.delete_for_user(web_user.user.id)
-        await audit.record(graph, "account.sign_out_everywhere", actor=web_user.user.id, ip=ip)
+        await audit.record(audit_log, "account.sign_out_everywhere", actor=web_user.user.id, ip=ip)
         return redirect_with_notice("/signin", "revoked")
 
     return redirect_with_notice("/account", "invalid")

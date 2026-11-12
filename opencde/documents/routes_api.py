@@ -29,7 +29,7 @@ from opencde import audit
 from opencde.accounts.roles import may_upload
 from opencde.auth.dependencies import DocumentsPrincipal
 from opencde.bcf.binary import file_response, receive_upload
-from opencde.deps import ClientsDep, GraphDep, ProjectsDep, SettingsDep, StorageDep, UsersDep, client_ip
+from opencde.deps import AuditLogDep, ClientsDep, ProjectsDep, SettingsDep, StorageDep, UsersDep, client_ip
 from opencde.documents.assembly import AssemblyError, assemble
 from opencde.documents.links import api_base, part_ranges, precheck_url, publication_url, validation_report_url
 from opencde.documents.schemas import (
@@ -135,7 +135,7 @@ async def upload_documents(
     settings: SettingsDep,
     users: UsersDep,
     clients: ClientsDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> DocumentUploadSessionInitialization:
     """The client names the files and its callback; the user continues in the browser at ``upload_ui_url``.
 
@@ -196,7 +196,7 @@ async def upload_documents(
     if headless:
         await sessions.update(session_id, state=STATE_METADATA, project_id=body.project_id, files=files)
         await audit.record(
-            graph,
+            audit_log,
             "documents.headless_upload",
             actor=principal.user_id,
             client_id=principal.client_id,

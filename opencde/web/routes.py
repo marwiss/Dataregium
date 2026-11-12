@@ -18,7 +18,7 @@ from fastapi.responses import RedirectResponse, Response
 from opencde import audit
 from opencde.auth import throttle
 from opencde.auth.forms import FormTokenError
-from opencde.deps import GraphDep, SettingsDep, UsersDep, client_ip
+from opencde.deps import AuditLogDep, SettingsDep, SignInThrottleDep, UsersDep, client_ip
 from opencde.ratelimit import limiter, sign_in_limit
 from opencde.store.accounts.sessions import COOKIE_NAME, WebSessionsDep, clear_session_cookie, set_session_cookie
 from opencde.ui.i18n import tr
@@ -58,7 +58,8 @@ async def signin_submit(
     request: Request,
     users: UsersDep,
     sessions: WebSessionsDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
+    throttles: SignInThrottleDep,
     settings: SettingsDep,
     form_token: Annotated[str | None, Form()] = None,
     username: Annotated[str, Form(max_length=128)] = "",
@@ -73,18 +74,18 @@ async def signin_submit(
     ip = client_ip(request)
 
     try:
-        user = await throttle.authenticate(users, graph, settings, username, password)
+        user = await throttle.authenticate(users, throttles, settings, username, password)
     except throttle.SignInThrottled as exc:
-        await audit.record(graph, "web.sign_in.throttled", ip=ip, details={"username": username[:128]})
+        await audit.record(audit_log, "web.sign_in.throttled", ip=ip, details={"username": username[:128]})
         error = tr(request, "signin.error.throttled", seconds=exc.seconds)
         return _signin_page(request, target, error, status_code=429)
     if user is None:
-        await audit.record(graph, "web.sign_in.failed", ip=ip, details={"username": username[:128]})
+        await audit.record(audit_log, "web.sign_in.failed", ip=ip, details={"username": username[:128]})
         return _signin_page(request, target, tr(request, "signin.error.credentials"))
 
     token = await sessions.create(user.id, ip)
     await users.touch_sign_in(user.id)
-    await audit.record(graph, "web.sign_in", actor=user.id, ip=ip)
+    await audit.record(audit_log, "web.sign_in", actor=user.id, ip=ip)
     if user.must_change_password:
         target = change_password_url(target)
     response = RedirectResponse(target, status_code=302, headers=NO_STORE)
@@ -97,7 +98,7 @@ async def signout(
     request: Request,
     sessions: WebSessionsDep,
     web_user: WebUserDep,
-    graph: GraphDep,
+    audit_log: AuditLogDep,
     signout_token: Annotated[str | None, Form()] = None,
     next_page: Annotated[str | None, Form(alias="next")] = None,
 ) -> Response:
@@ -123,6 +124,6 @@ async def signout(
         cookie = request.cookies.get(COOKIE_NAME)
         if cookie:
             await sessions.delete(cookie)
-        await audit.record(graph, "web.sign_out", actor=web_user.user.id, ip=client_ip(request))
+        await audit.record(audit_log, "web.sign_out", actor=web_user.user.id, ip=client_ip(request))
     clear_session_cookie(response)
     return response

@@ -19,12 +19,12 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from opencde import audit
 from opencde.auth.dependencies import get_tokens
 from opencde.deps import get_graph
 from opencde.main import create_app
 from opencde.mcp import ifc_models
 from opencde.store.documents.versions import VersionRecord
+from opencde.store.logbook import audit
 from opencde.store.oauth2.tokens import Principal
 from tests.conftest import test_settings as make_settings
 

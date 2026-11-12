@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse, Response
 from opencde import requestlog
 from opencde.admin.access import AdminDep, admin_context
 from opencde.auth.dependencies import AdminPrincipal
-from opencde.deps import GraphDep, SettingsDep
+from opencde.deps import RequestLogDep, SettingsDep
 from opencde.ui.templating import render
 
 router = APIRouter(prefix="/admin", include_in_schema=False)
@@ -53,7 +53,7 @@ def _rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 async def _entries(
-    graph: GraphDep,
+    request_log: RequestLogDep,
     *,
     client_id: str | None,
     user: str | None,
@@ -65,7 +65,7 @@ async def _entries(
 ) -> list[dict[str, Any]]:
     return _rows(
         await requestlog.query(
-            graph,
+            request_log,
             client_id=(client_id or "").strip(),
             username=(user or "").strip(),
             path_prefix=(path or "").strip(),
@@ -81,7 +81,7 @@ async def _entries(
 async def requests_page(
     request: Request,
     admin: AdminDep,
-    graph: GraphDep,
+    request_log: RequestLogDep,
     settings: SettingsDep,
     client_id: ClientFilter = None,
     user: UserFilter = None,
@@ -91,7 +91,7 @@ async def requests_page(
     request_id: RequestIdFilter = None,
 ) -> Response:
     rows = await _entries(
-        graph,
+        request_log,
         client_id=client_id,
         user=user,
         path=path,
@@ -126,7 +126,7 @@ async def requests_page(
 @api_router.get("/requests", summary="Request log (extension): the server side of a client's calls")
 async def requests_api(
     principal: AdminPrincipal,
-    graph: GraphDep,
+    request_log: RequestLogDep,
     settings: SettingsDep,
     client_id: ClientFilter = None,
     user: UserFilter = None,
@@ -139,7 +139,7 @@ async def requests_api(
     """Newest entries first. Needs the ``admin`` scope and an administrator account. Entries carry
     method, path, operation, status, timing, request id, byte counts and the caller; never bodies or tokens."""
     rows = await _entries(
-        graph,
+        request_log,
         client_id=client_id,
         user=user,
         path=path,

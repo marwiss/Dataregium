@@ -20,12 +20,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from opencde import audit
 from opencde.accounts.roles import Role
 from opencde.auth.dependencies import require_scope
-from opencde.deps import GraphDep, ProjectsDep, UsersDep, client_ip
+from opencde.deps import AuditLogDep, GraphDep, ProjectsDep, UsersDep, client_ip
 from opencde.errors import CODE_CONFLICT, ApiError
 from opencde.graph.graph import Graph
 from opencde.store.accounts.projects import AiPolicy, Project
 from opencde.store.accounts.users import AccountError
 from opencde.store.oauth2.tokens import Principal
+from opencde.store.protocols import AuditLogStore
 
 router = APIRouter(prefix="/manage/1.0", tags=["Project administration (extension)"])
 
@@ -78,9 +79,11 @@ async def _keeps_a_manager(projects: ProjectsDep, project_id: str, user_id: str,
         raise ApiError(409, "A project keeps at least one manager", code=CODE_CONFLICT)
 
 
-async def _record(request: Request, graph: Graph, principal: Principal, action: str, **details: Any) -> None:
+async def _record(
+    request: Request, audit_log: AuditLogStore, principal: Principal, action: str, **details: Any
+) -> None:
     await audit.record(
-        graph,
+        audit_log,
         f"manage.{action}",
         actor=principal.user_id,
         client_id=principal.client_id,
@@ -120,13 +123,14 @@ async def set_project(
     body: ProjectSettings,
     projects: ProjectsDep,
     graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> dict[str, Any]:
     await _managed(graph, principal, project_id)
     try:
         project = await projects.set_ai_policy(project_id, body.ai_policy)
     except AccountError:
         raise HTTPException(404, "No such project") from None
-    await _record(request, graph, principal, "project.ai_policy", project_id=project_id, ai_policy=body.ai_policy)
+    await _record(request, audit_log, principal, "project.ai_policy", project_id=project_id, ai_policy=body.ai_policy)
     return _project(project)
 
 
@@ -157,6 +161,7 @@ async def add_member(
     projects: ProjectsDep,
     users: UsersDep,
     graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> dict[str, Any]:
     await _managed(graph, principal, project_id)
     user = await users.get_by_username(body.username.strip())
@@ -167,7 +172,9 @@ async def add_member(
         await _keeps_a_manager(projects, project_id, user.id, body.role)
         response.status_code = 200
     await projects.set_member(project_id, user.id, Role(body.role))
-    await _record(request, graph, principal, "membership.set", project_id=project_id, user_id=user.id, role=body.role)
+    await _record(
+        request, audit_log, principal, "membership.set", project_id=project_id, user_id=user.id, role=body.role
+    )
     return {"user_id": user.id, "username": user.username, "name": user.full_name, "role": body.role}
 
 
@@ -180,13 +187,16 @@ async def set_role(
     body: MemberRole,
     projects: ProjectsDep,
     graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> dict[str, Any]:
     await _managed(graph, principal, project_id)
     if user_id not in {member.id for member, _ in await projects.members(project_id)}:
         raise HTTPException(404, "No such member")
     await _keeps_a_manager(projects, project_id, user_id, body.role)
     await projects.set_member(project_id, user_id, Role(body.role))
-    await _record(request, graph, principal, "membership.set", project_id=project_id, user_id=user_id, role=body.role)
+    await _record(
+        request, audit_log, principal, "membership.set", project_id=project_id, user_id=user_id, role=body.role
+    )
     return {"user_id": user_id, "role": body.role}
 
 
@@ -202,11 +212,12 @@ async def remove_member(
     user_id: IdPath,
     projects: ProjectsDep,
     graph: GraphDep,
+    audit_log: AuditLogDep,
 ) -> Response:
     await _managed(graph, principal, project_id)
     if user_id not in {member.id for member, _ in await projects.members(project_id)}:
         raise HTTPException(404, "No such member")
     await _keeps_a_manager(projects, project_id, user_id, None)
     await projects.remove_member(project_id, user_id)
-    await _record(request, graph, principal, "membership.remove", project_id=project_id, user_id=user_id)
+    await _record(request, audit_log, principal, "membership.remove", project_id=project_id, user_id=user_id)
     return Response(status_code=204)

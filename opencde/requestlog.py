@@ -1,5 +1,5 @@
 # This file was generated with the assistance of an AI coding tool.
-"""Request log: one ``RequestLog`` node per HTTP request, for debugging clients and learning the APIs.
+"""Request log: one entry per HTTP request, for debugging clients and learning the APIs.
 
 An extension outside the OpenCDE specifications, off by default
 (``OPENCDE_REQUEST_LOG_ENABLED``). Each entry holds when, method, path (never
@@ -7,10 +7,11 @@ the query string, which may carry filters with personal data), the operation
 as the OpenAPI summary names it, status, duration, the ``X-Request-ID`` the
 client sent or the server minted, bytes in and out, and who called (user and
 client from the bearer principal, or the browser user of a page) from which
-address; for the MCP endpoint the method and the tool. Never bodies, headers or tokens. Entries expire after
-``OPENCDE_REQUEST_LOG_RETENTION_HOURS`` and are swept by the cleaner; the
-administration shows them at ``/admin/requests`` and serves them as JSON at
-``/admin/api/requests`` for administrators holding the ``admin`` scope.
+address; for the MCP endpoint the method and the tool. Never bodies, headers or tokens. The store the server's own
+data is in keeps them (``opencde.store.logbook``): ``RequestLog`` nodes in the graph, rows of ``request_log_entries``
+in PostgreSQL. Entries expire after ``OPENCDE_REQUEST_LOG_RETENTION_HOURS`` and are swept by the cleaner; the
+administration shows them at ``/admin/requests`` and serves them as JSON at ``/admin/api/requests`` for
+administrators holding the ``admin`` scope.
 """
 
 from __future__ import annotations
@@ -18,14 +19,16 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from opencde.graph.graph import Graph
 from opencde.ids import new_id
 from opencde.logging import get_logger
 from opencde.timeutil import later_iso, now_iso
+
+if TYPE_CHECKING:
+    from opencde.store.protocols import RequestLogStore
 
 log = get_logger(__name__)
 
@@ -33,20 +36,12 @@ SKIPPED_PREFIXES = ("/static/", "/healthz", "/readyz")
 MAX_LIMIT = 1000
 DEFAULT_LIMIT = 200
 
-CREATE = """
-CREATE (:RequestLog {
-    id: $id, at: $at, method: $method, path: $path, operation: $operation, status: $status,
-    duration_ms: $duration_ms, request_id: $request_id, bytes_in: $bytes_in, bytes_out: $bytes_out,
-    username: $username, client_id: $client_id, ip: $ip, expires_at: $expires_at
-})
-"""
-
 
 class RequestLogWriter:
     """Stores entries in the background so a response never waits for the log."""
 
-    def __init__(self, graph: Graph, retention_hours: int) -> None:
-        self.graph = graph
+    def __init__(self, store: RequestLogStore, retention_hours: int) -> None:
+        self.store = store
         self.retention_seconds = retention_hours * 3600
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -59,7 +54,7 @@ class RequestLogWriter:
 
     async def _write(self, entry: dict[str, Any]) -> None:
         try:
-            await self.graph.run(CREATE, **entry)
+            await self.store.add(entry)
         except Exception as exc:  # the log is a convenience; the request itself has already been answered
             log.warning("request_log_write_failed", error=f"{type(exc).__name__}: {exc}"[:200])
 
@@ -166,7 +161,7 @@ class RequestLogMiddleware:
 
 
 async def query(
-    graph: Graph,
+    store: RequestLogStore,
     *,
     client_id: str | None = None,
     username: str | None = None,
@@ -177,25 +172,12 @@ async def query(
     limit: int = DEFAULT_LIMIT,
 ) -> list[dict[str, Any]]:
     """The newest matching entries, newest first; every filter is optional."""
-    rows = await graph.run(
-        """
-        MATCH (r:RequestLog)
-        WHERE ($client_id IS NULL OR r.client_id = $client_id)
-          AND ($username IS NULL OR r.username = $username)
-          AND ($path IS NULL OR r.path STARTS WITH $path)
-          AND ($status IS NULL OR r.status = $status)
-          AND ($since IS NULL OR r.at >= $since)
-          AND ($request_id IS NULL OR r.request_id = $request_id)
-        RETURN properties(r) AS entry
-        ORDER BY r.at DESC
-        LIMIT $limit
-        """,
+    return await store.query(
         client_id=client_id or None,
         username=username or None,
-        path=path_prefix or None,
+        path_prefix=path_prefix or None,
         status=status,
         since=since or None,
         request_id=request_id or None,
         limit=max(1, min(int(limit), MAX_LIMIT)),
     )
-    return [dict(row["entry"]) for row in rows]

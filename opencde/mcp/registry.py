@@ -34,6 +34,7 @@ from opencde.store.accounts.postgres import project_store
 from opencde.store.accounts.projects import Project
 from opencde.store.documents.postgres import document_store
 from opencde.store.documents.versions import VersionRecord
+from opencde.store.logbook.audit import AuditLogRepository
 from opencde.store.oauth2.tokens import Principal
 
 if TYPE_CHECKING:
@@ -90,7 +91,7 @@ class ToolContext:
         """An ``mcp.*`` event in the audit log: who, through which client and tool; identifiers, never texts."""
         client = {"client_info": self.client_info} if self.client_info else {}
         await audit.record(
-            self.graph,
+            AuditLogRepository(self.graph),
             event,
             actor=self.principal.user_id,
             client_id=self.principal.client_id,

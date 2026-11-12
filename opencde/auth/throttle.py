@@ -2,9 +2,9 @@
 """A growing wait after failed sign-ins, per user name, on top of the rate limit per address.
 
 Someone with many addresses gets past the limit per address, so failures are also counted per user name, in
-the graph, where every server process sees them. The first attempts cost nothing; after that each failure
-doubles the wait, up to a ceiling. Unknown names count the same way, so the answer says nothing about which
-accounts exist, and names are stored only as hashes.
+the store of the server's own data (``opencde.store.logbook``), where every server process sees them. The first
+attempts cost nothing; after that each failure doubles the wait, up to a ceiling. Unknown names count the same
+way, so the answer says nothing about which accounts exist, and names are stored only as hashes.
 
 The price of counting per name is that anyone can make an account wait by failing on purpose. The ceiling is
 what keeps that a nuisance rather than a lockout, and nothing here ever disables an account.
@@ -12,11 +12,10 @@ what keeps that a nuisance rather than a lockout, and nothing here ever disables
 
 from __future__ import annotations
 
-from opencde.graph.graph import Graph, Tx
 from opencde.ids import hash_secret
 from opencde.settings import Settings
 from opencde.store.accounts.users import User
-from opencde.store.protocols import UserStore
+from opencde.store.protocols import SignInThrottleStore, UserStore
 from opencde.timeutil import later_iso, now_iso, parse_iso
 
 FORGET_AFTER_SECONDS = 24 * 3600
@@ -43,54 +42,41 @@ def delay_after(failures: int, settings: Settings) -> int:
     return min(settings.sign_in_delay_seconds * 2 ** min(over, 30), settings.sign_in_max_delay_seconds)
 
 
-async def wait_seconds(graph: Graph, username: str) -> int:
+async def wait_seconds(throttles: SignInThrottleStore, username: str) -> int:
     """How long this user name still has to wait; 0 when it may try."""
-    row = await graph.one("MATCH (t:SignInThrottle {key: $key}) RETURN t.blocked_until AS until", key=_key(username))
-    until = row["until"] if row else None
+    until = await throttles.blocked_until(_key(username))
     if not until:
         return 0
     remaining = (parse_iso(until) - parse_iso(now_iso())).total_seconds()
     return max(0, int(remaining) + 1) if remaining > 0 else 0
 
 
-async def record_failure(graph: Graph, username: str, settings: Settings) -> None:
-    key = _key(username)
+async def record_failure(throttles: SignInThrottleStore, username: str, settings: Settings) -> None:
+    def until(failures: int) -> str | None:
+        delay = delay_after(failures, settings)
+        return later_iso(delay) if delay else None
 
-    async def work(tx: Tx) -> None:
-        row = await tx.one(
-            """
-            MERGE (t:SignInThrottle {key: $key})
-            SET t.failures = coalesce(t.failures, 0) + 1, t.expires_at = $expires
-            RETURN t.failures AS failures
-            """,
-            key=key,
-            expires=later_iso(FORGET_AFTER_SECONDS),
-        )
-        delay = delay_after(row["failures"] if row else 1, settings)
-        if delay:
-            await tx.run(
-                "MATCH (t:SignInThrottle {key: $key}) SET t.blocked_until = $until", key=key, until=later_iso(delay)
-            )
-
-    await graph.write(work)
+    await throttles.fail(_key(username), forget_at=later_iso(FORGET_AFTER_SECONDS), until=until)
 
 
-async def forget(graph: Graph, username: str) -> None:
-    await graph.run("MATCH (t:SignInThrottle {key: $key}) DETACH DELETE t", key=_key(username))
+async def forget(throttles: SignInThrottleStore, username: str) -> None:
+    await throttles.forget(_key(username))
 
 
-async def authenticate(users: UserStore, graph: Graph, settings: Settings, username: str, password: str) -> User | None:
+async def authenticate(
+    users: UserStore, throttles: SignInThrottleStore, settings: Settings, username: str, password: str
+) -> User | None:
     """``users.authenticate`` behind the wait. Raises :class:`SignInThrottled` without looking at the password."""
     if not settings.sign_in_throttle_enabled:
         return await users.authenticate(username, password)
-    seconds = await wait_seconds(graph, username)
+    seconds = await wait_seconds(throttles, username)
     if seconds:
         raise SignInThrottled(seconds)
     user = await users.authenticate(username, password)
     if user is None:
-        await record_failure(graph, username, settings)
+        await record_failure(throttles, username, settings)
     else:
-        await forget(graph, username)
+        await forget(throttles, username)
     return user
 
 

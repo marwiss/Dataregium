@@ -50,7 +50,7 @@ from pydantic import BaseModel, Field
 
 from opencde import audit
 from opencde.auth.dependencies import AdminPrincipal
-from opencde.deps import GraphDep, SettingsDep, client_ip
+from opencde.deps import AuditLogDep, GraphDep, SettingsDep, client_ip
 from opencde.graph.graph import Graph
 from opencde.ids import new_id
 from opencde.logging import get_logger
@@ -365,7 +365,12 @@ class GraphQuery(BaseModel):
 
 @router.post("/query", summary="Administration (extension): run one read-only Cypher statement")
 async def graph_query(
-    request: Request, principal: AdminPrincipal, body: GraphQuery, graph: GraphDep, settings: SettingsDep
+    request: Request,
+    principal: AdminPrincipal,
+    body: GraphQuery,
+    graph: GraphDep,
+    audit_log: AuditLogDep,
+    settings: SettingsDep,
 ) -> QueryResult:
     """Read-only Cypher against the whole graph for administrators; see the module documentation for the fences."""
     statement = body.cypher.strip()
@@ -373,7 +378,7 @@ async def graph_query(
 
     async def trace(**details: Any) -> None:
         await audit.record(
-            graph,
+            audit_log,
             "admin.graph.query",
             actor=principal.user_id,
             client_id=principal.client_id,

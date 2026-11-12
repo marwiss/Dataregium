@@ -1,7 +1,7 @@
 # This file was generated with the assistance of an AI coding tool.
 """What each area of the server's storage answers for, as the routes and services use it (ADR 0027).
 
-One protocol per repository, in five areas; the graph repositories satisfy them, and another storage would
+One protocol per repository, in six areas; the graph repositories satisfy them, and another storage would
 implement them. The signatures are the repositories' own, kept in step by ``tests/unit/test_store.py``.
 """
 
@@ -574,3 +574,39 @@ class ChangeSetDraftStore(Protocol):
     async def update(
         self, *, user_id: str, changeset_id: str, change: Callable[[ChangeSetDraft], ChangeSetDraft]
     ) -> ChangeSetDraft | None: ...
+
+
+# -- The logbook area ------------------------------------------------------------------------------------
+class AuditLogStore(Protocol):
+    """What ``AuditLogRepository`` answers for; its own docstring says how."""
+
+    async def add(self, event: dict[str, Any]) -> None: ...
+    async def recent(
+        self, *, limit: int, type_prefix: str | None = None, since: str | None = None
+    ) -> list[dict[str, Any]]: ...
+
+
+class RequestLogStore(Protocol):
+    """What ``RequestLogRepository`` answers for; its own docstring says how."""
+
+    async def add(self, entry: dict[str, Any]) -> None: ...
+    async def query(
+        self,
+        *,
+        client_id: str | None,
+        username: str | None,
+        path_prefix: str | None,
+        status: int | None,
+        since: str | None,
+        request_id: str | None,
+        limit: int,
+    ) -> list[dict[str, Any]]: ...
+    async def count(self) -> int: ...
+
+
+class SignInThrottleStore(Protocol):
+    """What ``SignInThrottleRepository`` answers for; its own docstring says how."""
+
+    async def blocked_until(self, key: str) -> str | None: ...
+    async def fail(self, key: str, *, forget_at: str, until: Callable[[int], str | None]) -> None: ...
+    async def forget(self, key: str) -> None: ...
