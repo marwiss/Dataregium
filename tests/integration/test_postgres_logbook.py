@@ -361,6 +361,8 @@ def test_the_app_keeps_its_logbook_and_reads_its_figures_in_postgresql(
         assert manager_row["projects"] == [{"project_id": world.project_id, "role": "manager"}]
         logged = client.get("/admin/api/requests", params={"path": managed}, headers=admin.headers).json()
         assert {row["username"] for row in logged["requests"]} == {"manager", "editor", "outsider"}
+        health = client.get("/admin/api/health", headers=admin.headers).json()["checks"]
+        assert any(check["ok"] and postgres_target.url in check["detail"] for check in health), "PostgreSQL is asked"
 
         web_sign_in(client, world, "admin")
         for page, words in (

@@ -219,10 +219,11 @@ async def settings_page(
     models: ModelGraphDep,
     settings: SettingsDep,
     storage: StorageDep,
+    postgres: PostgresDep,
 ) -> Response:
     values = [(env_name(name), getattr(settings, name)) for name in SAFE_SETTINGS]
     shown = [(name, value.value if hasattr(value, "value") else value) for name, value in values]
-    checks = await run_checks(settings, models, storage, store=graph)
+    checks = await run_checks(settings, models, storage, store=graph, postgres=postgres)
     return render(
         request, "admin/settings.html", admin_context(request, admin, "settings", values=shown, checks=checks)
     )
