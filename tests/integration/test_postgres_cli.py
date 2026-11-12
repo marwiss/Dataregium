@@ -30,7 +30,6 @@ from opencde.cli import app
 from opencde.graph.graph import Graph
 from opencde.postgres import tables
 from opencde.postgres.database import Postgres
-from opencde.settings import Settings
 from opencde.storage import LocalStorage
 from opencde.store.accounts.postgres import (
     PostgresProjectRepository,
@@ -157,9 +156,7 @@ async def test_on_postgresql_a_backup_restores_the_same_rows(
     assert (LocalStorage(tmp_path / "moved")).exists(seed.sample_model_key), "the files came with them"
 
 
-async def test_on_postgresql_a_graphs_backup_restores_as_rows(
-    graph: Graph, pg: Postgres, settings: Settings, tmp_path: Path
-) -> None:
+async def test_on_postgresql_a_graphs_backup_restores_as_rows(graph: Graph, pg: Postgres, tmp_path: Path) -> None:
     """How a server moves from a graph to PostgreSQL: the graph's backup, restored into PostgreSQL, reads back
     through PostgreSQL's repositories as it read through the graph's."""
     storage = LocalStorage(tmp_path / "data")

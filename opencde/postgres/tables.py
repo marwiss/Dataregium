@@ -224,7 +224,7 @@ async def dump(postgres: Postgres, emit: Callable[[str, dict[str, Any]], None]) 
     async def work(tx: Tx) -> int:
         await tx.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         there = await present(tx)
-        strange = await unknown(tx)
+        strange = sorted(there - BY_NAME.keys() - {LEDGER})
         if strange:
             raise ValueError(f"the database has tables this server does not know: {', '.join(strange)}")
         count = 0
