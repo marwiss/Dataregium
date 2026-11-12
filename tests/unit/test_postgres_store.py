@@ -89,9 +89,9 @@ MODULES = sorted(
 )
 RUNNERS = {"run", "one", "execute", "fetch", "fetchrow", "fetchval", "executemany"}
 SQL = re.compile(r"\b(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN|VALUES|CREATE|DROP|ALTER|TRUNCATE)\b")
-#: The layer that runs the repositories' statements hands on the statement its caller gave, and the cleaner each of
-#: its module's statements in turn.
-PASSED_ON = {"database.py": {"query", "text"}, "cleanup.py": {"statement"}}
+#: The layer that runs the repositories' statements hands on the statement its caller gave, and the cleaner and the
+#: tables' backup each of their module's statements in turn.
+PASSED_ON = {"database.py": {"query", "text"}, "cleanup.py": {"statement"}, "tables.py": {"statement"}}
 URL = "postgresql://cde@127.0.0.1:9/cde"  # the discard port: refused at once
 WEAK = "x' OR '1'='1"
 LONG_ENOUGH = "a-long-and-strong-passphrase"

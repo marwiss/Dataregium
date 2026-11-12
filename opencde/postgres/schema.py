@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 )
 """
 APPLIED = "SELECT version, name FROM schema_migrations ORDER BY version"
+LEDGER_PRESENT = "SELECT to_regclass('schema_migrations') IS NOT NULL AS present"
 RECORD = "INSERT INTO schema_migrations (version, name, applied_at) VALUES ($1, $2, $3)"
 
 
@@ -61,9 +62,11 @@ def migrations(folder: Path = MIGRATIONS_DIR) -> list[Migration]:
     return found
 
 
-async def migrate(postgres: Postgres, folder: Path = MIGRATIONS_DIR) -> int:
-    """Apply the migrations the database lacks; returns how many ran."""
+async def migrate(postgres: Postgres, folder: Path = MIGRATIONS_DIR, *, until: int | None = None) -> int:
+    """Apply the migrations the database lacks, those up to ``until`` alone when it is given (a restore puts a
+    backup's rows back at the version they were taken at, and then migrates the rest); returns how many ran."""
     shipped = migrations(folder)
+    wanted = [migration for migration in shipped if until is None or migration.version <= until]
 
     async def work(tx: Tx) -> int:
         await tx.execute(LOCK, LOCK_KEY)
@@ -77,7 +80,7 @@ async def migrate(postgres: Postgres, folder: Path = MIGRATIONS_DIR) -> int:
         if renamed:
             raise MigrationError(f"the database's migrations {renamed} are not the ones this server ships")
         ran = 0
-        for migration in shipped:
+        for migration in wanted:
             if migration.version in recorded:
                 continue
             await tx.script(migration.path.read_text(encoding="utf-8"))
@@ -88,3 +91,12 @@ async def migrate(postgres: Postgres, folder: Path = MIGRATIONS_DIR) -> int:
     ran = await postgres.write(work)
     (log.info if ran else log.debug)("postgres_migrated", ran=ran, version=len(shipped))
     return ran
+
+
+async def applied(postgres: Postgres) -> dict[int, str]:
+    """The migrations the database has, by version: none before the first ran. Reads only, for the doctor and the
+    restore, which must not migrate first."""
+    present = await postgres.one(LEDGER_PRESENT)
+    if not present or not present["present"]:
+        return {}
+    return {int(row["version"]): row["name"] for row in await postgres.run(APPLIED)}
