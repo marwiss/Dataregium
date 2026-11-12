@@ -20,13 +20,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from opencde import audit
 from opencde.accounts.roles import Role
 from opencde.auth.dependencies import require_scope
-from opencde.deps import AuditLogDep, GraphDep, ProjectsDep, UsersDep, client_ip
+from opencde.deps import AuditLogDep, ProjectsDep, UsersDep, client_ip
 from opencde.errors import CODE_CONFLICT, ApiError
-from opencde.graph.graph import Graph
 from opencde.store.accounts.projects import AiPolicy, Project
 from opencde.store.accounts.users import AccountError
 from opencde.store.oauth2.tokens import Principal
-from opencde.store.protocols import AuditLogStore
+from opencde.store.protocols import AuditLogStore, UserStore
 
 router = APIRouter(prefix="/manage/1.0", tags=["Project administration (extension)"])
 
@@ -58,16 +57,12 @@ class ProjectSettings(BaseModel):
     )
 
 
-async def _managed(graph: Graph, principal: Principal, project_id: str) -> None:
+async def _managed(users: UserStore, principal: Principal, project_id: str) -> None:
     """404 unless the caller is a member of the project, 403 unless a manager of it."""
-    row = await graph.one(
-        "MATCH (:User {id: $user_id})-[m:MEMBER_OF]->(:Project {project_id: $project_id}) RETURN m.role AS role",
-        user_id=principal.user_id,
-        project_id=project_id,
-    )
-    if row is None:
+    role = await users.project_role(principal.user_id, project_id)
+    if role is None:
         raise HTTPException(404, "No such project")
-    if row["role"] != Role.MANAGER.value:
+    if role is not Role.MANAGER:
         raise HTTPException(403, "Only a manager of the project manages its members")
 
 
@@ -106,9 +101,9 @@ async def managed_projects(principal: ProjectPrincipal, projects: ProjectsDep) -
 
 @router.get("/projects/{project_id}", summary="Project administration (extension): a project you manage")
 async def managed_project(
-    principal: ProjectPrincipal, project_id: IdPath, projects: ProjectsDep, graph: GraphDep
+    principal: ProjectPrincipal, project_id: IdPath, projects: ProjectsDep, users: UsersDep
 ) -> dict[str, Any]:
-    await _managed(graph, principal, project_id)
+    await _managed(users, principal, project_id)
     project = await projects.get(project_id)
     if project is None:
         raise HTTPException(404, "No such project")
@@ -122,10 +117,10 @@ async def set_project(
     project_id: IdPath,
     body: ProjectSettings,
     projects: ProjectsDep,
-    graph: GraphDep,
+    users: UsersDep,
     audit_log: AuditLogDep,
 ) -> dict[str, Any]:
-    await _managed(graph, principal, project_id)
+    await _managed(users, principal, project_id)
     try:
         project = await projects.set_ai_policy(project_id, body.ai_policy)
     except AccountError:
@@ -136,9 +131,9 @@ async def set_project(
 
 @router.get("/projects/{project_id}/members", summary="Project administration (extension): the members and roles")
 async def list_members(
-    principal: ProjectPrincipal, project_id: IdPath, projects: ProjectsDep, graph: GraphDep
+    principal: ProjectPrincipal, project_id: IdPath, projects: ProjectsDep, users: UsersDep
 ) -> dict[str, Any]:
-    await _managed(graph, principal, project_id)
+    await _managed(users, principal, project_id)
     members = [
         {"user_id": user.id, "username": user.username, "name": user.full_name, "role": role.value}
         for user, role in await projects.members(project_id)
@@ -160,10 +155,9 @@ async def add_member(
     body: MemberAdd,
     projects: ProjectsDep,
     users: UsersDep,
-    graph: GraphDep,
     audit_log: AuditLogDep,
 ) -> dict[str, Any]:
-    await _managed(graph, principal, project_id)
+    await _managed(users, principal, project_id)
     user = await users.get_by_username(body.username.strip())
     if user is None:
         raise HTTPException(404, "No such user")
@@ -186,10 +180,10 @@ async def set_role(
     user_id: IdPath,
     body: MemberRole,
     projects: ProjectsDep,
-    graph: GraphDep,
+    users: UsersDep,
     audit_log: AuditLogDep,
 ) -> dict[str, Any]:
-    await _managed(graph, principal, project_id)
+    await _managed(users, principal, project_id)
     if user_id not in {member.id for member, _ in await projects.members(project_id)}:
         raise HTTPException(404, "No such member")
     await _keeps_a_manager(projects, project_id, user_id, body.role)
@@ -211,10 +205,10 @@ async def remove_member(
     project_id: IdPath,
     user_id: IdPath,
     projects: ProjectsDep,
-    graph: GraphDep,
+    users: UsersDep,
     audit_log: AuditLogDep,
 ) -> Response:
-    await _managed(graph, principal, project_id)
+    await _managed(users, principal, project_id)
     if user_id not in {member.id for member, _ in await projects.members(project_id)}:
         raise HTTPException(404, "No such member")
     await _keeps_a_manager(projects, project_id, user_id, None)

@@ -18,9 +18,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from opencde.accounts.roles import Role, at_least
 from opencde.accounts.routes_manage import IdPath, ProjectPrincipal, _managed, _record
-from opencde.deps import AuditLogDep, GraphDep, ProjectsDep
+from opencde.deps import AuditLogDep, ProjectsDep, UsersDep
 from opencde.ids import is_uuid, normalize_guid
 from opencde.store.accounts.teams import MAX_MEMBERS, MAX_TEAMS, TeamsDep
+from opencde.store.documents.versions import DocumentsDep
+from opencde.store.oauth2.tokens import Principal
+from opencde.store.protocols import DocumentStore, ProjectStore
 
 router = APIRouter(prefix="/manage/1.0", tags=["Project administration (extension)"])
 
@@ -41,7 +44,9 @@ class TeamIn(BaseModel):
     )
 
 
-async def _checked(graph: GraphDep, projects: ProjectsDep, project_id: str, body: TeamIn) -> dict[str, Any]:
+async def _checked(
+    documents: DocumentStore, projects: ProjectStore, principal: Principal, project_id: str, body: TeamIn
+) -> dict[str, Any]:
     """The team's users and document, each held to the project: 400 with what is wrong."""
     members = {user.username: (user, role) for user, role in await projects.members(project_id)}
     responsible = members.get(body.responsible.strip())
@@ -53,17 +58,8 @@ async def _checked(graph: GraphDep, projects: ProjectsDep, project_id: str, body
     if not is_uuid(body.ids_document_id):
         raise HTTPException(400, "ids_document_id names no IDS document of the project")
     document_id = normalize_guid(body.ids_document_id)
-    row = await graph.one(
-        """
-        MATCH (:Project {project_id: $project_id})-[:HAS_DOCUMENT]->(:Document {document_id: $document_id})
-              -[:HAS_VERSION]->(v:DocumentVersion)
-        WITH v ORDER BY v.version_index DESC LIMIT 1
-        RETURN v.file_name AS file_name
-        """,
-        project_id=project_id,
-        document_id=document_id,
-    )
-    if row is None or not str(row["file_name"]).lower().endswith(IDS_SUFFIX):
+    latest = await documents.latest(user_id=principal.user_id, document_id=document_id)  # a manager is a member
+    if latest is None or latest.project_id != project_id or not latest.file_name.lower().endswith(IDS_SUFFIX):
         raise HTTPException(400, "ids_document_id names no IDS document of the project")
     return {
         "name": body.name.strip(),
@@ -79,9 +75,9 @@ def _shown(team: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/projects/{project_id}/teams", summary="Project administration (extension): the teams and their parts")
 async def list_teams(
-    principal: ProjectPrincipal, project_id: IdPath, teams: TeamsDep, graph: GraphDep
+    principal: ProjectPrincipal, project_id: IdPath, teams: TeamsDep, users: UsersDep
 ) -> dict[str, Any]:
-    await _managed(graph, principal, project_id)
+    await _managed(users, principal, project_id)
     found = [_shown(team) for team in await teams.of_project(project_id)]
     return {"items": found, "total": len(found)}
 
@@ -94,13 +90,14 @@ async def add_team(
     body: TeamIn,
     teams: TeamsDep,
     projects: ProjectsDep,
-    graph: GraphDep,
+    documents: DocumentsDep,
+    users: UsersDep,
     audit_log: AuditLogDep,
 ) -> dict[str, Any]:
-    await _managed(graph, principal, project_id)
+    await _managed(users, principal, project_id)
     if len(await teams.of_project(project_id)) >= MAX_TEAMS:
         raise HTTPException(409, f"A project has at most {MAX_TEAMS} teams")
-    fields = await _checked(graph, projects, project_id, body)
+    fields = await _checked(documents, projects, principal, project_id, body)
     team_id = await teams.save(project_id, team_id=None, **fields)
     if team_id is None:
         raise HTTPException(404, "No such project")
@@ -117,13 +114,14 @@ async def set_team(
     body: TeamIn,
     teams: TeamsDep,
     projects: ProjectsDep,
-    graph: GraphDep,
+    documents: DocumentsDep,
+    users: UsersDep,
     audit_log: AuditLogDep,
 ) -> dict[str, Any]:
-    await _managed(graph, principal, project_id)
+    await _managed(users, principal, project_id)
     if await teams.get(project_id, team_id) is None:
         raise HTTPException(404, "No such team")
-    fields = await _checked(graph, projects, project_id, body)
+    fields = await _checked(documents, projects, principal, project_id, body)
     await teams.save(project_id, team_id=team_id, **fields)
     await _record(request, audit_log, principal, "team.set", project_id=project_id, team_id=team_id)
     return _shown(await teams.get(project_id, team_id) or {})
@@ -140,10 +138,10 @@ async def remove_team(
     project_id: IdPath,
     team_id: IdPath,
     teams: TeamsDep,
-    graph: GraphDep,
+    users: UsersDep,
     audit_log: AuditLogDep,
 ) -> Response:
-    await _managed(graph, principal, project_id)
+    await _managed(users, principal, project_id)
     if not await teams.delete(project_id, team_id):
         raise HTTPException(404, "No such team")
     await _record(request, audit_log, principal, "team.remove", project_id=project_id, team_id=team_id)
