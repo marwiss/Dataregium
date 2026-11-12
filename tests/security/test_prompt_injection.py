@@ -1094,6 +1094,22 @@ def _within(part: dict[str, Any], value: Any, at: Place) -> Iterator[Place]:
             yield from _within(option["items"], value[0], (*at, 0))
 
 
+def _places(schema: dict[str, Any], above: Place = ()) -> Iterator[Place]:
+    """Every argument a tool's schema names, at any depth, whatever a call holds: an object's own, a list's first."""
+    for name, part in schema["properties"].items():
+        yield (*above, name)
+        yield from _inside(part, (*above, name))
+
+
+def _inside(part: dict[str, Any], at: Place) -> Iterator[Place]:
+    for option in part.get("anyOf", [part]):
+        if "properties" in option:
+            yield from _places(option, at)
+        if isinstance(option.get("items"), dict):
+            yield (*at, 0)
+            yield from _inside(option["items"], (*at, 0))
+
+
 def _given(arguments: dict[str, Any], path: Place, value: Any) -> dict[str, Any]:
     changed = json.loads(json.dumps(arguments))  # the arguments as they go out, with no object shared
     place: Any = changed
@@ -1293,6 +1309,18 @@ ON_A_DRAFT: dict[str, dict[str, Any]] = {
     "get_proposal": {"project_id": CLOUD, "topic_guid": TOPIC, "wait_seconds": None},
     "list_proposals": {"document_id": DOCUMENT, "limit": None},
 }
+STAIR = {"risers": 16, "riser_height": 0.175, "tread_length": 0.27, "width": 1, "thickness": 0.2, "landing": None}
+POLYGON = {"profile": "polygon", "x": None, "y": None, "radius": None, "outline": OUTLINE, "depth": 3, "along": "z"}
+#: Other calls the stand-ins answer, for the arguments that a tool's call above leaves null: a stair, a polygon and
+#: an outline.
+OTHER_FORMS: dict[str, list[dict[str, Any]]] = {
+    "create_element": [
+        ON_A_DRAFT["create_element"]
+        | {"ifc_class": "IfcStair", "predefined_type": None, "shape": None, "stair": STAIR},
+        ON_A_DRAFT["create_element"] | {"shape": POLYGON},
+    ],
+    "edit_element": [ON_A_DRAFT["edit_element"] | {"start": None, "end": None, "outline": OUTLINE}],
+}
 
 
 def _drafted(client: TestClient) -> str:
@@ -1339,14 +1367,36 @@ def _held_as_data(kept: Any, text: str) -> bool:
     return held
 
 
+def _keys(value: Any) -> Iterator[str]:
+    """Every key of a JSON value, at any depth."""
+    if isinstance(value, dict):
+        yield from value
+    for item in value.values() if isinstance(value, dict) else value if isinstance(value, list) else []:
+        yield from _keys(item)
+
+
+def _answered_as_data(result: dict[str, Any]) -> None:
+    """A taken call's answer: the same JSON as ``structuredContent`` and as text, in the code's own keys, and each of
+    its values that shows a string of the suite holds that string's start as it went in: never formatted or escaped."""
+    answer = result["structuredContent"]
+    assert json.loads(result["content"][0]["text"]) == answer, "the same JSON twice"
+    untraced(json.dumps(list(_keys(answer))))
+    for found in _strings(answer):
+        for text in INJECTIONS:
+            assert text[:60] in found or not any(trace in found for trace in traces(text)), (text[:40], found[:300])
+
+
 @pytest.mark.parametrize("name", list(ON_A_DRAFT))
 def test_a_change_set_tool_refusal_never_quotes_its_arguments_and_keeps_nothing(
     name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, production_log: ProductionLog
 ) -> None:
-    """The change sets' tools are asked as the others are, on a draft that holds the strings already: every refusal
-    says what is wrong in the code's own words, quoting neither the call nor the draft, and keeps nothing: no step, no
-    draft, no topic, no snippet, no trial. A text a tool takes goes into the draft or the proposal as it is, cut where
-    the tool cuts it; no log keeps it, and the audit log nothing of it but the AI model ``propose_changes`` names."""
+    """The change sets' tools are asked as the others are, on a draft that holds the strings already, each argument
+    the tool's schema names, at any depth, on the first of its calls that holds it: every refusal says what is wrong
+    in the code's own words, quoting neither the call nor the draft, and keeps nothing: no step, no draft, no topic,
+    no snippet, no trial. A text a tool takes goes into the draft or the proposal as it is, cut where the tool cuts
+    it, as a statement's parameter and never in a statement, and the answer carries it in its values only, as it went
+    in; the tools and the instructions stay the code's own; no log keeps it, and the audit log nothing of it but the
+    AI model ``propose_changes`` names."""
     monkeypatch.setattr(change_sets, "Proposing", FakeProposing)
     monkeypatch.setattr(change_sets, "TopicRepository", FakeTopics)
     monkeypatch.setattr(FakeProposing, "made", [])
@@ -1359,16 +1409,22 @@ def test_a_change_set_tool_refusal_never_quotes_its_arguments_and_keeps_nothing(
         production_log.listen()
         client.app.state.ifcgraph = trials  # type: ignore[attr-defined]
         client.app.state.requestlog = writer  # type: ignore[attr-defined]
+        itself = _said_of_itself(client)
         handle = _drafted(client)
         drafted = copy.deepcopy(graph.drafts)
-        answered = ({"changeset_id": handle} if "changeset_id" in schema["properties"] else {}) | ON_A_DRAFT[name]
-        assert call(client, name, answered).json()["result"]["isError"] is False, "the call itself is answered"
+        own = {"changeset_id": handle} if "changeset_id" in schema["properties"] else {}
+        swept: dict[Place, dict[str, Any]] = {}
+        for form in (ON_A_DRAFT[name], *OTHER_FORMS.get(name, [])):
+            answered = own | form
+            assert call(client, name, answered).json()["result"]["isError"] is False, "the call itself is answered"
+            for path in _argument_paths(schema, answered):
+                swept.setdefault(path, answered)
+        assert set(swept) == set(_places(schema)), "a new argument gets a value in a call here, and is asked too"
         proposed = len(FakeProposing.made)
-        paths = list(_argument_paths(schema, answered))
         calls: list[tuple[Place | None, Any, dict[str, Any]]] = [
-            (path, value, _given(answered, path, value)) for path in paths for value in HOSTILE_VALUES
+            (path, value, _given(answered, path, value)) for path, answered in swept.items() for value in HOSTILE_VALUES
         ]
-        calls += [(None, text, answered | {text: text}) for text in INJECTIONS]
+        calls += [(None, text, own | ON_A_DRAFT[name] | {text: text}) for text in INJECTIONS]
         for path, value, arguments in calls:
             graph.drafts = copy.deepcopy(drafted)  # each call is asked of the draft as _drafted left it
             made = len(FakeProposing.made)
@@ -1383,9 +1439,11 @@ def test_a_change_set_tool_refusal_never_quotes_its_arguments_and_keeps_nothing(
                 refused[path] = refused.get(path, 0) + 1
                 continue
             taken += 1
+            _answered_as_data(result)
             if isinstance(value, str):
                 held += _held_as_data([*_added(drafted, graph.drafts), *FakeProposing.made[made:]], value)
-    assert all(refused.get(path) for path in paths) and refused[None] == len(INJECTIONS), "each refused something"
+        assert _said_of_itself(client) == itself, "the tools and the instructions are the code's own"
+    assert all(refused.get(path) for path in swept) and refused[None] == len(INJECTIONS), "each refused something"
     assert bool(held) == bool(taken), "a tool that takes a text keeps it"
     assert len(FakeProposing.made) == proposed + (taken if name == "propose_changes" else 0), "proposed when taken"
     assert not trials.scheduled and len(graph.drafts) == 1, "no trial and no other draft"
@@ -1393,6 +1451,7 @@ def test_a_change_set_tool_refusal_never_quotes_its_arguments_and_keeps_nothing(
     named = [found.pop("ai_model", None) for found in details]
     assert all(model is None or len(model) <= change_sets.MAX_AUDIT_TEXT for model in named), "cut short"
     untraced(json.dumps(details))
+    untraced("\n".join(query for query, _params in graph.calls))  # a value is a parameter, never a statement
     untraced(json.dumps(writer.entries))
     untraced(production_log.text())
 
