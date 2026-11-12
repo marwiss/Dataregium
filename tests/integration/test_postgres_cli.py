@@ -233,11 +233,9 @@ async def test_on_postgresql_a_graphs_backup_with_what_has_no_place_is_refused(
 ) -> None:
     storage = LocalStorage(tmp_path / "data")
     await seeded(storage, graph=graph)
-    # Every label a backup carries has a table since the logs moved (0006_logs), so what has no place is a
-    # relationship no table holds.
-    await graph.run("MATCH (u:User {username: $username}), (p:Project) CREATE (u)-[:FOLLOWS]->(p)", username="admin")
+    await graph.run("MATCH (u:User {username: 'officer'}) SET u.ghost = 1")  # a property of no release: no column
     await backups.export(graph, storage, tmp_path / "backup")
-    with pytest.raises(backups.BackupError, match=r"FOLLOWS from User to Project: a relationship with no place \(2\)"):
+    with pytest.raises(backups.BackupError, match=r"users\.ghost: no column holds it \(1\)"):
         await backups.restore(None, LocalStorage(tmp_path / "moved"), tmp_path / "backup", postgres=pg)
     assert await tables.is_empty(pg), "nothing written"
 
