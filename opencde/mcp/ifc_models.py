@@ -4,8 +4,9 @@
 One row per IFC document of the caller's projects, or of one ``project_id``: the project, the caller's role in it, its
 AI policy, the document, its latest version and how far that version's model has come, from the server's records of
 the conversions. On a server other than the local engine a project whose policy is ``local`` is not listed, and asked
-for by its id it is a refusal that the audit log keeps (F29 a). Every statement starts at the user and reaches the
-projects through ``MEMBER_OF``.
+for by its id it is a refusal that the audit log keeps (F29 a). The memberships, the versions and the conversions are
+read through their areas' stores, each from the user through ``MEMBER_OF``: the projects first, then the latest
+versions of those the server may give to AI tools, then the conversions of those versions.
 """
 
 from __future__ import annotations
@@ -15,28 +16,17 @@ from typing import Any
 
 from pydantic import Field
 
+from opencde.accounts.roles import Role
 from opencde.ifcgraph.service import IFC_SUFFIXES
-from opencde.mcp.registry import MAX_ANSWER_BYTES, Arguments, Tool, ToolContext, member_project, text
+from opencde.mcp.registry import MAX_ANSWER_BYTES, Arguments, Tool, ToolContext, member_project, serves, text
+from opencde.store.accounts.postgres import project_store
+from opencde.store.accounts.projects import Project
+from opencde.store.documents.postgres import document_store
+from opencde.store.documents.versions import VersionRecord
+from opencde.store.jobs.postgres import conversion_store
 
 MAX_ROWS = 200
 _ROWS_BUDGET = MAX_ANSWER_BYTES - 1024  # what the rows may take of an answer, beside `truncated`
-
-MODELS = """
-MATCH (:User {id: $user_id})-[m:MEMBER_OF]->(p:Project)
-WHERE ($project_id IS NULL OR p.project_id = $project_id) AND ($every_policy OR p.ai_policy = 'cloud')
-MATCH (p)-[:HAS_DOCUMENT]->(d:Document)-[:HAS_VERSION]->(v:DocumentVersion)
-WITH p, m, d, v ORDER BY v.version_index DESC
-WITH p, m, d, collect(v)[0] AS v
-WHERE any(suffix IN $suffixes WHERE toLower(v.file_name) ENDS WITH suffix)
-OPTIONAL MATCH (p)-[:HAS_CONVERSION]->(c:Conversion {document_id: d.document_id, version_index: v.version_index})
-WITH p, m, d, v, c ORDER BY c.created_at DESC
-WITH p, m, d, v, collect(c)[0] AS c
-ORDER BY p.name, p.project_id, v.title, d.document_id
-LIMIT $limit
-RETURN p.project_id AS project_id, p.name AS project_name, m.role AS role, p.ai_policy AS ai_policy,
-       d.document_id AS document_id, v.title AS title, v.file_name AS file_name, v.version_index AS version_index,
-       c.state AS model_state, c.schema AS schema
-"""
 
 
 class ListModelsArguments(Arguments):
@@ -45,37 +35,51 @@ class ListModelsArguments(Arguments):
     )
 
 
-def _row(found: dict[str, Any]) -> dict[str, Any]:
+def _row(project: Project, role: Role, head: VersionRecord, conversion: dict[str, Any] | None) -> dict[str, Any]:
     return {
-        "project_id": found["project_id"],
-        "project_name": text(found["project_name"]),
-        "role": found["role"],
-        "ai_policy": "cloud" if found["ai_policy"] == "cloud" else "local",
-        "document_id": found["document_id"],
-        "title": text(found["title"]),
-        "file_name": text(found["file_name"]),
-        "version_index": int(found["version_index"]),
-        "model_state": found["model_state"],
-        "schema": found["schema"],
+        "project_id": head.project_id,
+        "project_name": text(head.project_name),
+        "role": role.value,
+        "ai_policy": "cloud" if project.ai_policy == "cloud" else "local",
+        "document_id": head.document_id,
+        "title": text(head.title),
+        "file_name": text(head.file_name),
+        "version_index": head.version_index,
+        "model_state": conversion.get("state") if conversion else None,
+        "schema": conversion.get("schema") if conversion else None,
     }
 
 
 async def list_models(context: ToolContext, arguments: ListModelsArguments) -> dict[str, Any]:
-    project_id = None
+    user_id = context.principal.user_id
     if arguments.project_id is not None:
-        project, _role = await member_project(context, arguments.project_id)
-        project_id = project.project_id
-    found = await context.graph.run(
-        MODELS,
-        user_id=context.principal.user_id,
-        project_id=project_id,
-        every_policy=context.settings.is_local,
-        suffixes=list(IFC_SUFFIXES),
-        limit=MAX_ROWS + 1,
+        served = [await member_project(context, arguments.project_id)]
+    else:
+        memberships = await project_store(context.graph, context.postgres).list_for_user(user_id)
+        served = [(project, role) for project, role in memberships if serves(context.settings, project.ai_policy)]
+    projects = {project.project_id: (project, role) for project, role in served}
+    found = (
+        await document_store(context.graph, context.postgres).member_heads(
+            user_id=user_id, project_ids=list(projects), suffixes=list(IFC_SUFFIXES), limit=MAX_ROWS + 1
+        )
+        if projects
+        else []
     )
+    heads = found[:MAX_ROWS]
+    conversions = (
+        await conversion_store(context.graph, context.postgres).for_member_versions(
+            user_id=user_id, versions=[(head.project_id, head.document_id, head.version_index) for head in heads]
+        )
+        if heads
+        else []
+    )
+    newest = {(c["project_id"], c["document_id"], c["version_index"]): c for c in conversions}
     models: list[dict[str, Any]] = []
     size = 0
-    for row in (_row(record) for record in found[:MAX_ROWS]):
+    for row in (
+        _row(*projects[head.project_id], head, newest.get((head.project_id, head.document_id, head.version_index)))
+        for head in heads
+    ):
         size += len(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 1
         if size > _ROWS_BUDGET:
             break

@@ -144,7 +144,7 @@ def test_a_call_answers_structured_content_and_the_same_json_as_text(tmp_path: P
     assert content["type"] == "text"
     assert content["text"] == '{"models":[' + _compact(expected) + '],"truncated":false}'
     (query,) = graph.model_queries()
-    assert query["user_id"] == "u-anna" and query["project_id"] is None and query["every_policy"] is False
+    assert query["user_id"] == "u-anna" and query["project_ids"] == [CLOUD], "every project it may give to AI tools"
     assert query["limit"] == 201 and ".ifc" in query["suffixes"]
 
 

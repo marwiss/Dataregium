@@ -221,8 +221,9 @@ def test_a_team_server_lists_only_cloud_projects_and_refuses_a_local_one_by_its_
         refused = call(client, "list_models", {"project_id": LOCAL.upper()}).json()["result"]
         served = call(client, "list_models", {"project_id": CLOUD}).json()["result"]
     assert everything["isError"] is False and served["isError"] is False
-    assert [query["every_policy"] for query in graph.model_queries()] == [False, False]
-    assert [query["project_id"] for query in graph.model_queries()] == [None, CLOUD], "the local one is never queried"
+    assert [query["project_ids"] for query in graph.model_queries()] == [[CLOUD], [CLOUD]], (
+        "the local one is never queried"
+    )
     assert refused["isError"] is True and "local only" in refused["content"][0]["text"]
     (event,) = graph.events()
     assert event["type"] == "mcp.denied" and event["actor"] == "u-anna"
@@ -247,7 +248,7 @@ def test_the_local_engine_serves_every_project(tmp_path: Path) -> None:
     ) as client:
         everything = call(client, "list_models", {"project_id": None}).json()["result"]
         local = call(client, "list_models", {"project_id": LOCAL}).json()["result"]
-    assert [query["every_policy"] for query in graph.model_queries()] == [True, True]
+    assert [query["project_ids"] for query in graph.model_queries()] == [[CLOUD, LOCAL], [LOCAL]], "every policy"
     assert local["isError"] is False and local["structuredContent"]["models"][0]["ai_policy"] == "local"
     assert everything["isError"] is False and not graph.events()
 

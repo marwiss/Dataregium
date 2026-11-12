@@ -17,7 +17,7 @@ from opencde.deps import get_graph
 from opencde.main import create_app
 from opencde.mcp import routes
 from tests.conftest import test_settings as make_settings
-from tests.mcp_support import BEARER, BOUND, CLOUD, FakeGraph, OneToken
+from tests.mcp_support import BEARER, BOUND, CLOUD, FakeGraph, OneToken, stand_in_stores
 
 mcp = pytest.importorskip("mcp")
 httpx2 = pytest.importorskip("httpx2")
@@ -26,9 +26,12 @@ pytestmark = pytest.mark.conformance
 
 
 @pytest.mark.parametrize(("mode", "version"), [("auto", "2026-07-28"), ("legacy", "2025-11-25")])
-async def test_the_sdks_client_discovers_lists_and_calls(tmp_path: Path, mode: str, version: str) -> None:
+async def test_the_sdks_client_discovers_lists_and_calls(
+    tmp_path: Path, mode: str, version: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from mcp.client.streamable_http import streamable_http_client
 
+    stand_in_stores(monkeypatch)
     app = create_app(make_settings(tmp_path, mcp_enabled=True), startup_wait_seconds=0)
     app.dependency_overrides[get_tokens] = lambda: OneToken(BOUND)
     app.dependency_overrides[get_graph] = FakeGraph
