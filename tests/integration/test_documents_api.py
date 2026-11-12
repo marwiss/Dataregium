@@ -10,7 +10,10 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.datastructures import UploadFile
 
+from opencde.documents import routes_ui
+from opencde.documents.assembly import TooLargeError
 from opencde.settings import Settings
 from tests.conformance.schemas import validate, validate_documents
 from tests.integration.conftest_accounts import World, build_world, login_as
@@ -300,6 +303,41 @@ def test_upload_cancelled_in_the_browser(client: TestClient, world: World) -> No
     )
     assert duplicate_ids.status_code == 400
     assert client.post("/documents/1.0/upload-documents", json={}, headers=editor.headers).status_code == 400
+
+
+def test_a_refused_browser_upload_leaves_no_file_open(
+    client: TestClient, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file the selection page refuses as too large is closed, so that its temporary copy goes at once; left open, it
+    kept its space until the process ended (Hemsidor's D1, 2026-11-12)."""
+    editor = login_as(client, world, "editor")
+    web_sign_in(client, world, "editor")
+    selection = client.post(
+        "/documents/1.0/select-documents",
+        json={"callback": {"url": CALLBACK, "expires_in": 600}},
+        headers=editor.headers,
+    ).json()
+    page = client.get(selection["select_documents_url"])
+    closed: list[str | None] = []
+    close = UploadFile.close
+
+    async def watched(self: UploadFile) -> None:
+        closed.append(self.filename)
+        await close(self)
+
+    def too_large(*_args: Any) -> tuple[int, str]:
+        raise TooLargeError("file exceeds the limit")
+
+    monkeypatch.setattr(UploadFile, "close", watched)
+    monkeypatch.setattr(routes_ui, "store_stream", too_large)
+    refused = client.post(
+        selection["select_documents_url"] + "/upload",
+        data={"form_token": form_token(page.text), "project_id": world.project_id},
+        files={"file": ("big.ifc", b"ISO-10303-21;\nENDSEC;\n", "application/octet-stream")},
+        follow_redirects=False,
+    )
+    assert refused.status_code == 413 and refused.json()["code"] == "upload_too_large"
+    assert "big.ifc" in closed, "the refused file is closed"
 
 
 def test_selection_flow_with_filtering_and_browser_upload(client: TestClient, world: World) -> None:

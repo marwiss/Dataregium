@@ -431,78 +431,86 @@ async def select_ui_upload(
         return _expired(request, web_user)
     if session.user_id != web_user.user.id:
         return _wrong_user(request, web_user)
-    form = await request.form(max_files=2, max_fields=10)
-    form_token = form.get("form_token")
-    if not _read_form_token(request, form_token if isinstance(form_token, str) else None, SELECT_PURPOSE, session.id):
-        raise HTTPException(400, "The form has expired. Please try again.")
-    project_id = form.get("project_id")
-    role = await users.project_role(web_user.user.id, project_id) if isinstance(project_id, str) else None
-    if not may_upload(role) or not isinstance(project_id, str):
-        raise HTTPException(403, "You may not add documents to this project")
-    upload = form.get("file")
-    if upload is None or isinstance(upload, str) or not upload.filename:
-        raise HTTPException(400, "Choose a file to upload")
-    file_name = sanitize_filename(upload.filename) or "document"
-    title = form.get("title")
-    title = title.strip()[:MAX_TITLE] if isinstance(title, str) and title.strip() else file_name
-    version_id = new_id()
-    key = make_key("documents", version_id)
-    try:
-        size, sha256 = await anyio.to_thread.run_sync(
-            store_stream, storage, upload.file, key, settings.max_upload_bytes
-        )
-    except TooLargeError:
-        raise ApiError(413, f"The file exceeds {settings.max_upload_bytes} bytes", code=CODE_UPLOAD_TOO_LARGE) from None
-    if size == 0:
-        storage.delete(key)
-        raise HTTPException(400, "The file is empty")
-    project = next((p for p, _ in await projects.list_for_user(web_user.user.id) if p.project_id == project_id), None)
-    checked = None
-    if ifcgraph is not None and project is not None and project.block_on_validation_errors:
-        checked = await ifcgraph.check_now(project_id=project_id, storage_key=key, file_name=file_name)
-        if checked is not None and checked.get("error_count"):
-            storage.delete(key)  # the project refuses a file with errors (ADR 0021)
-            return _message(
-                request,
-                web_user,
-                tr(request, "docs.message.refused"),
-                tr(request, "docs.message.refused_text", errors=int(checked["error_count"])),
-                status_code=422,
-                hint=tr(request, "docs.message.refused_hint"),
+    # The form's files are closed when this is over, also when the upload is refused: a refused file left open
+    # keeps its temporary copy until the process ends.
+    async with request.form(max_files=2, max_fields=10) as form:
+        form_token = form.get("form_token")
+        if not _read_form_token(
+            request, form_token if isinstance(form_token, str) else None, SELECT_PURPOSE, session.id
+        ):
+            raise HTTPException(400, "The form has expired. Please try again.")
+        project_id = form.get("project_id")
+        role = await users.project_role(web_user.user.id, project_id) if isinstance(project_id, str) else None
+        if not may_upload(role) or not isinstance(project_id, str):
+            raise HTTPException(403, "You may not add documents to this project")
+        upload = form.get("file")
+        if upload is None or isinstance(upload, str) or not upload.filename:
+            raise HTTPException(400, "Choose a file to upload")
+        file_name = sanitize_filename(upload.filename) or "document"
+        title = form.get("title")
+        title = title.strip()[:MAX_TITLE] if isinstance(title, str) and title.strip() else file_name
+        version_id = new_id()
+        key = make_key("documents", version_id)
+        try:
+            size, sha256 = await anyio.to_thread.run_sync(
+                store_stream, storage, upload.file, key, settings.max_upload_bytes
             )
-    try:
-        record = await documents.create_version(
-            project_id=project_id,
-            document_id=None,
-            title=title,
-            version_number="1",
-            file_name=file_name,
-            size_in_bytes=size,
-            sha256=sha256,
-            storage_key=key,
-            author=web_user.user.username,
-            metadata=default_metadata(
+        except TooLargeError:
+            raise ApiError(
+                413, f"The file exceeds {settings.max_upload_bytes} bytes", code=CODE_UPLOAD_TOO_LARGE
+            ) from None
+        if size == 0:
+            storage.delete(key)
+            raise HTTPException(400, "The file is empty")
+        project = next(
+            (p for p, _ in await projects.list_for_user(web_user.user.id) if p.project_id == project_id), None
+        )
+        checked = None
+        if ifcgraph is not None and project is not None and project.block_on_validation_errors:
+            checked = await ifcgraph.check_now(project_id=project_id, storage_key=key, file_name=file_name)
+            if checked is not None and checked.get("error_count"):
+                storage.delete(key)  # the project refuses a file with errors (ADR 0021)
+                return _message(
+                    request,
+                    web_user,
+                    tr(request, "docs.message.refused"),
+                    tr(request, "docs.message.refused_text", errors=int(checked["error_count"])),
+                    status_code=422,
+                    hint=tr(request, "docs.message.refused_hint"),
+                )
+        try:
+            record = await documents.create_version(
+                project_id=project_id,
+                document_id=None,
+                title=title,
+                version_number="1",
                 file_name=file_name,
                 size_in_bytes=size,
                 sha256=sha256,
+                storage_key=key,
                 author=web_user.user.username,
-                project_name=project.name if project else "",
-            ),
-        )
-    except BaseException:
-        storage.delete(key)
-        raise
-    if ifcgraph is not None:
-        await ifcgraph.schedule(
-            project_id=project_id,
-            storage_key=key,
-            file_name=file_name,
-            document_id=record.document_id,
-            version_index=record.version_index,
-            version_id=record.version_id,
-            checked=checked,
-        )
-    return RedirectResponse(request.url.path.removesuffix("/upload"), status_code=303, headers=NO_STORE)
+                metadata=default_metadata(
+                    file_name=file_name,
+                    size_in_bytes=size,
+                    sha256=sha256,
+                    author=web_user.user.username,
+                    project_name=project.name if project else "",
+                ),
+            )
+        except BaseException:
+            storage.delete(key)
+            raise
+        if ifcgraph is not None:
+            await ifcgraph.schedule(
+                project_id=project_id,
+                storage_key=key,
+                file_name=file_name,
+                document_id=record.document_id,
+                version_index=record.version_index,
+                version_id=record.version_id,
+                checked=checked,
+            )
+        return RedirectResponse(request.url.path.removesuffix("/upload"), status_code=303, headers=NO_STORE)
 
 
 # ---------------------------------------------------------------------------- details page
