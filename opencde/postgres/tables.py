@@ -130,6 +130,16 @@ SELECT to_jsonb(t) AS data FROM change_set_drafts t ORDER BY t.changeset_id OFFS
 CHANGE_SET_DRAFTS_IN = """
 INSERT INTO change_set_drafts SELECT * FROM jsonb_populate_recordset(NULL::change_set_drafts, $1::jsonb)
 """
+AUDIT_EVENTS_OUT = "SELECT to_jsonb(t) AS data FROM audit_events t ORDER BY t.id OFFSET $1 LIMIT $2"
+AUDIT_EVENTS_IN = "INSERT INTO audit_events SELECT * FROM jsonb_populate_recordset(NULL::audit_events, $1::jsonb)"
+REQUEST_LOG_ENTRIES_OUT = "SELECT to_jsonb(t) AS data FROM request_log_entries t ORDER BY t.id OFFSET $1 LIMIT $2"
+REQUEST_LOG_ENTRIES_IN = """
+INSERT INTO request_log_entries SELECT * FROM jsonb_populate_recordset(NULL::request_log_entries, $1::jsonb)
+"""
+SIGN_IN_THROTTLES_OUT = "SELECT to_jsonb(t) AS data FROM sign_in_throttles t ORDER BY t.key OFFSET $1 LIMIT $2"
+SIGN_IN_THROTTLES_IN = """
+INSERT INTO sign_in_throttles SELECT * FROM jsonb_populate_recordset(NULL::sign_in_throttles, $1::jsonb)
+"""
 
 TABLES: tuple[Table, ...] = (
     Table("users", 1, USERS_OUT, USERS_IN),
@@ -164,6 +174,9 @@ TABLES: tuple[Table, ...] = (
     Table("clashes", 5, CLASHES_OUT, CLASHES_IN),
     Table("merges", 5, MERGES_OUT, MERGES_IN),
     Table("change_set_drafts", 5, CHANGE_SET_DRAFTS_OUT, CHANGE_SET_DRAFTS_IN),
+    Table("audit_events", 6, AUDIT_EVENTS_OUT, AUDIT_EVENTS_IN),
+    Table("request_log_entries", 6, REQUEST_LOG_ENTRIES_OUT, REQUEST_LOG_ENTRIES_IN),
+    Table("sign_in_throttles", 6, SIGN_IN_THROTTLES_OUT, SIGN_IN_THROTTLES_IN),
 )
 BY_NAME = {table.name: table for table in TABLES}
 #: Every table at once, for ``restore --force`` and ``seed --reset``, into a database with every migration.
@@ -172,7 +185,7 @@ TRUNCATE users, projects, memberships, teams, team_members, web_sessions, oauth_
          access_tokens, refresh_tokens, documents, document_versions, publications, upload_sessions, upload_parts,
          selection_sessions, topics, related_topics, header_files, document_references, comments, viewpoints,
          components, bitmaps, bcf_documents, bcf_events, conversions, validations, proposals, clashes, merges,
-         change_set_drafts
+         change_set_drafts, audit_events, request_log_entries, sign_in_throttles
 """
 PRESENT = "SELECT tablename FROM pg_tables WHERE schemaname = current_schema()"
 COLUMNS = """

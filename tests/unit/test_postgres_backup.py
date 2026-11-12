@@ -98,8 +98,8 @@ async def test_a_dump_reads_one_snapshot_page_by_page_and_refuses_a_table_it_doe
     assert database.transactions == 1 and database.statements[0][0].startswith("SET TRANSACTION ISOLATION LEVEL")
     assert [args for query, args in database.statements if query == tables.USERS_OUT] == [(0, 2), (2, 2)]
 
-    with pytest.raises(ValueError, match="does not know: audit_events"):
-        await tables.dump(a_database({}, extra=("audit_events",)), lambda table, row: None)  # ty: ignore[invalid-argument-type]
+    with pytest.raises(ValueError, match="does not know: not_a_table"):
+        await tables.dump(a_database({}, extra=("not_a_table",)), lambda table, row: None)  # ty: ignore[invalid-argument-type]
 
 
 async def test_a_load_puts_rows_in_at_the_backups_migration_and_migrates_the_rest(
@@ -128,9 +128,9 @@ async def test_a_load_puts_rows_in_at_the_backups_migration_and_migrates_the_res
     assert database.transactions == 1
 
     for until, given, words in (
-        (6, rows, "after this server's 0005"),
+        (7, rows, "after this server's 0006"),
         (3, [("topics", {"guid": "t"})], "does not have at 0003: 'topics'"),
-        (None, [("audit_events", {})], "does not have at 0005: 'audit_events'"),
+        (5, [("audit_events", {})], "does not have at 0005: 'audit_events'"),
     ):
         with pytest.raises(ValueError, match=words):
             await tables.load(FakePostgres(), lambda given=given: iter(given), until=until)  # ty: ignore[invalid-argument-type]
@@ -321,8 +321,6 @@ def test_what_has_no_place_in_postgresql_is_refused_all_at_once() -> None:
     nodes = [
         (["User"], {**USER[1], "favourite_colour": "green"}),
         PROJECT,
-        (["AuditEvent"], {"id": "a1", "type": "web.sign_in", "at": T}),
-        (["AuditEvent"], {"id": "a2", "type": "web.sign_out", "at": T}),
         (
             ["Topic"],
             {
@@ -335,11 +333,14 @@ def test_what_has_no_place_in_postgresql_is_refused_all_at_once() -> None:
         ),
     ]
     relationships = [("LIKES", ["User", "id", "u1"], ["Project", "project_id", "p1"])]
+    found = gathered(nodes, relationships)
+    for ghost in ("g1", "g2"):  # a keyed label of a later release, which no table of this one holds
+        found.add_node(("Ghost",), ("Ghost", "id", ghost), {"id": ghost})
     with pytest.raises(ValueError) as refused:
-        gathered(nodes, relationships).rows(migration_columns())
+        found.rows(migration_columns())
     told = str(refused.value)
     for words in (
-        "AuditEvent: no table in PostgreSQL holds it (2)",
+        "Ghost: no table in PostgreSQL holds it (2)",
         "LIKES from User to Project: a relationship with no place (1)",
         "users.favourite_colour: no column holds it (1)",
         "topics.project_id: a value it must have is missing (1)",
@@ -367,9 +368,9 @@ async def test_a_backup_with_postgresql_holds_its_rows_beside_the_models(tmp_pat
     ifc = Graph("ifc", model_nodes())
     database = a_database({"users": [{"id": "u1", "username": "anna"}], "topics": [{"guid": "t1"}]})
     manifest = await backups.export(ifc, LocalStorage(tmp_path / "s"), tmp_path / "b", postgres=database)  # type: ignore[arg-type]
-    assert (manifest.store_dialect, manifest.rows, manifest.store_migration, manifest.nodes) == ("postgres", 2, 5, 2)
+    assert (manifest.store_dialect, manifest.rows, manifest.store_migration, manifest.nodes) == ("postgres", 2, 6, 2)
     written = json.loads((tmp_path / "b" / "manifest.json").read_text(encoding="utf-8"))
-    assert written["store_dialect"] == "postgres" and written["rows"] == 2 and written["store_migration"] == 5
+    assert written["store_dialect"] == "postgres" and written["rows"] == 2 and written["store_migration"] == 6
     assert set(written["checksums"]) == {*backups.GRAPH_FILES, backups.STORE_ROWS}
     with gzip.open(tmp_path / "b" / backups.STORE_ROWS, "rt", encoding="utf-8") as handle:
         assert [json.loads(line) for line in handle] == [
@@ -380,9 +381,9 @@ async def test_a_backup_with_postgresql_holds_its_rows_beside_the_models(tmp_pat
 
     alone = await backups.export(None, LocalStorage(tmp_path / "s"), tmp_path / "c", postgres=a_database({}))  # type: ignore[arg-type]
     assert (alone.nodes, alone.dialect, alone.rows) == (0, "none", 0), "no graph, no nodes"
-    with pytest.raises(backups.BackupError, match="does not know: audit_events"):
+    with pytest.raises(backups.BackupError, match="does not know: not_a_table"):
         await backups.export(
-            None, LocalStorage(tmp_path / "s"), tmp_path / "d", postgres=a_database({}, extra=("audit_events",))
+            None, LocalStorage(tmp_path / "s"), tmp_path / "d", postgres=a_database({}, extra=("not_a_table",))
         )  # type: ignore[arg-type]
     assert not (tmp_path / "d").exists(), "refused before anything is written"
 
@@ -402,7 +403,7 @@ async def test_a_backup_of_postgresql_restores_into_postgresql_alone(
 
     into = Graph("ifc")
     await backups.restore(into, LocalStorage(tmp_path / "again"), tmp_path / "b", postgres=FakePostgres())  # type: ignore[arg-type]
-    assert loaded == [([("users", {"id": "u1"})], 5)]
+    assert loaded == [([("users", {"id": "u1"})], 6)]
     assert into.labels() == {"Model", "Entity", "IfcWall"}, "the models to the IFC graph"
     with pytest.raises(backups.BackupError, match="restores into PostgreSQL alone"):
         await backups.restore(Graph("ifc"), LocalStorage(tmp_path / "x"), tmp_path / "b")  # type: ignore[arg-type]

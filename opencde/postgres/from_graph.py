@@ -9,8 +9,7 @@ JSON text where PostgreSQL keeps ``jsonb`` (a version's metadata, an upload's fi
 says again what a row holds already (``CREATED_BY``, ``DERIVED_FROM``, a BCF document's ``UPLOADED_BY``) adds
 nothing. A job's properties that are not its table's columns are its ``fields``, as the jobs' repositories keep them.
 
-What has no place is refused rather than guessed, all of it in one message: a label without a table here (the audit
-log's ``AuditEvent`` and the sign-in throttle's ``SignInThrottle``, until their areas follow), a relationship of
+What has no place is refused rather than guessed, all of it in one message: a label without a table here, a relationship of
 another kind, a property no column holds, a row without a value its table requires. What a graph's backup never held,
 the nodes without a unique key (teams, a version's publication, a viewpoint's components, the trials of change sets,
 clash checks and merges), is not among the rows either.
@@ -49,6 +48,8 @@ TABLE_OF = {
     "Conversion": "conversions",
     "Validation": "validations",
     "ChangeSetDraft": "change_set_drafts",
+    "AuditEvent": "audit_events",
+    "SignInThrottle": "sign_in_throttles",
 }
 #: A project's BCF extensions are its row's ``extensions``.
 EXTENSIONS = "Extensions"
