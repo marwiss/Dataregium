@@ -56,8 +56,9 @@ def _settings():
 
 
 def _run(work: Callable[..., Awaitable[T]]) -> T:
-    """Run ``work(store, settings)`` against the server's own data: the store, or the IFC graph's connection when no
-    store of its own is configured (ADR 0027)."""
+    """Run ``work(store, settings)`` against the server's own data (``bootstrap.Store``): in PostgreSQL when
+    ``OPENCDE_STORE_URL`` names it (ADR 0029), else in the store's graph, or the IFC graph's connection when no store
+    of its own is configured (ADR 0027)."""
     from opencde.bootstrap import store_session
 
     settings = _settings()
@@ -69,15 +70,15 @@ def _run(work: Callable[..., Awaitable[T]]) -> T:
     return _until_done(main())
 
 
-def _run_both(work: Callable[..., Awaitable[T]]) -> T:
-    """Run ``work(graphs, settings)`` with the IFC graph and the store (``bootstrap.Graphs``), for what touches the
-    models too."""
+def _run_both(work: Callable[..., Awaitable[T]], **session: Any) -> T:
+    """Run ``work(graphs, settings)`` with the IFC graph and the server's own data (``bootstrap.Graphs``), for what
+    touches the models too; ``session`` goes to ``bootstrap.graph_session``."""
     from opencde.bootstrap import graph_session
 
     settings = _settings()
 
     async def main() -> T:
-        async with graph_session(settings) as graphs:
+        async with graph_session(settings, **session) as graphs:
             return await work(graphs, settings)
 
     return _until_done(main())
@@ -85,10 +86,12 @@ def _run_both(work: Callable[..., Awaitable[T]]) -> T:
 
 def _until_done(main: Coroutine[Any, Any, T]) -> T:
     from opencde.bootstrap import GraphUnavailable
+    from opencde.postgres.database import PostgresUnavailable
+    from opencde.postgres.schema import MigrationError
 
     try:
         return asyncio.run(main)
-    except GraphUnavailable as exc:
+    except (GraphUnavailable, PostgresUnavailable, MigrationError) as exc:
         typer.secho(f"FAIL    {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from None
 
@@ -296,16 +299,19 @@ def _write_local_env(path: Path) -> None:
 def doctor() -> None:
     """Check the configuration, the database and its schema, the storage, the clock and the server's headers."""
     from opencde.admin.doctor import run_checks
-    from opencde.bootstrap import make_graph, make_storage, make_store
+    from opencde.bootstrap import make_graph, make_postgres, make_storage, make_store
 
     settings = _settings()
 
     async def work():
         graph = make_graph(settings)
         store = make_store(settings) or graph
+        postgres = make_postgres(settings)
         try:
-            return await run_checks(settings, graph, make_storage(settings), store=store)
+            return await run_checks(settings, graph, make_storage(settings), store=store, postgres=postgres)
         finally:
+            if postgres is not None:
+                await postgres.close()
             if store is not graph:
                 await store.close()
             await graph.close()
@@ -320,20 +326,25 @@ def doctor() -> None:
 @app.command()
 def cleanup() -> None:
     """Delete expired codes, tokens and sessions now (the server also does this on a timer)."""
+    from opencde.bootstrap import make_storage
     from opencde.graph.cleanup import delete_expired
+    from opencde.postgres.cleanup import delete_expired as delete_expired_rows
 
-    async def work(graph, _settings):
-        return await delete_expired(graph)
+    async def work(store, settings):
+        if store.postgres is not None:  # and the files of the rows that own one, as the server's round does
+            return await delete_expired_rows(store.postgres, storage=make_storage(settings)), "rows"
+        return await delete_expired(store.graph), "nodes"
 
-    print(f"OK      deleted {_run(work)} expired nodes")
+    deleted, what = _run(work)
+    print(f"OK      deleted {deleted} expired {what}")
 
 
 @app.command()
 def backup(
     target: Annotated[Path, typer.Argument(help="Directory that receives a new, timestamped backup folder.")],
 ) -> None:
-    """Export the IFC graph, the server's own graph when it has one, and all stored files to a folder (restorable
-    into Neo4j or Memgraph)."""
+    """Export the IFC graph, the server's own data (its own graph, or its tables in PostgreSQL) and all stored files
+    to a folder (restorable into Neo4j or Memgraph, or into PostgreSQL)."""
     from opencde import backup as backups
     from opencde.bootstrap import make_storage
     from opencde.timeutil import now
@@ -341,11 +352,22 @@ def backup(
     folder = target / ("opencde-backup-" + now().strftime("%Y%m%dT%H%M%SZ"))
 
     async def work(graphs, settings):
-        return await backups.export(graphs.graph, make_storage(settings), folder, store=graphs.store)
+        return await backups.export(
+            graphs.graph if graphs.models else None,
+            make_storage(settings),
+            folder,
+            store=graphs.store,
+            postgres=graphs.postgres,
+        )
 
-    manifest = _run_both(work)
+    try:
+        manifest = _run_both(work)
+    except backups.BackupError as exc:
+        raise _fail(str(exc)) from None
     print(f"OK      {folder}")
     print(f"        {manifest.nodes} nodes, {manifest.relationships} relationships, {manifest.files} files")
+    if manifest.rows is not None:
+        print(f"        {manifest.rows} rows of PostgreSQL, migration {manifest.store_migration:04d}")
     if manifest.skipped_nodes:
         print(f"WARN    {manifest.skipped_nodes} nodes without a unique key were not exported")
 
@@ -355,30 +377,48 @@ def restore(
     source: Annotated[Path, typer.Argument(help="A backup folder written by `opencde backup`.")],
     force: Annotated[bool, typer.Option("--force", help="Wipe the database and storage first.")] = False,
 ) -> None:
-    """Load a backup. Refuses to touch a database that is not empty unless --force is given."""
+    """Load a backup. Refuses to touch a database that is not empty unless --force is given. With the server's own
+    data in PostgreSQL, a backup of PostgreSQL or of a graph restores into it; a backup of PostgreSQL does not
+    restore into a graph."""
     from opencde import backup as backups
     from opencde.bootstrap import make_storage
+    from opencde.postgres import tables
+    from opencde.postgres.schema import migrate
     from opencde.seed import is_empty, wipe
 
     try:
         manifest = backups.read_manifest(source)
     except backups.BackupError as exc:
         raise _fail(str(exc)) from None
+    occupied = backups.BackupError("the database is not empty; use --force to replace its contents")
 
     async def work(graphs, settings):
         for graph in graphs.distinct():
             if not await is_empty(graph):
                 if not force:
-                    raise backups.BackupError("the database is not empty; use --force to replace its contents")
+                    raise occupied
                 await wipe(graph)
-        return await backups.restore(graphs.graph, make_storage(settings), source, store=graphs.store)
+        if graphs.postgres is not None and not await tables.is_empty(graphs.postgres):
+            if not force:
+                raise occupied
+            await migrate(graphs.postgres)  # so that it has every table to empty
+            await tables.wipe(graphs.postgres)
+        return await backups.restore(
+            graphs.graph if graphs.models else None,
+            make_storage(settings),
+            source,
+            store=graphs.store,
+            postgres=graphs.postgres,
+        )
 
     try:
-        _run_both(work)
+        _run_both(work, migrations=False)  # the restore migrates PostgreSQL as it puts the rows back
     except backups.BackupError as exc:
         raise _fail(str(exc)) from None
     print(f"OK      restored backup from {manifest.created_at} ({manifest.dialect}, server {manifest.server_version})")
     print(f"        {manifest.nodes} nodes, {manifest.relationships} relationships, {manifest.files} files")
+    if manifest.rows is not None:
+        print(f"        {manifest.rows} rows of PostgreSQL")
 
 
 @app.command()
@@ -388,23 +428,15 @@ def revoke(
     everything: Annotated[bool, typer.Option("--all", help="Revoke every token and session on the server.")] = False,
 ) -> None:
     """Revoke access: after a leaked laptop, a compromised client, or as the first step of an incident response."""
-    from opencde.auth.dependencies import token_repository
-    from opencde.store.accounts.users import UserRepository
-
     if sum(bool(x) for x in (username, client_id, everything)) != 1:
         raise _fail("give exactly one of --user, --client or --all")
 
-    async def work(graph, settings):
-        tokens = token_repository(graph, settings)
+    async def work(store, _settings):
+        tokens = store.tokens
         if everything:
-            counters = await graph.write(
-                lambda tx: tx.counters(
-                    "MATCH (t) WHERE t:AccessToken OR t:RefreshToken OR t:AuthorizationCode OR t:WebSession DETACH DELETE t"
-                )
-            )
-            return counters.nodes_deleted
+            return await tokens.revoke_all()
         if username:
-            user = await UserRepository(graph).get_by_username(username)
+            user = await store.users.get_by_username(username)
             if user is None:
                 raise typer.BadParameter(f"no user named {username}")
             return await tokens.revoke_all_for_user(user.id)
@@ -424,6 +456,7 @@ def seed(
 ) -> None:
     """Load demonstration users, projects, clients, the sample model and a topic into an empty database."""
     from opencde import seed as seeding
+    from opencde.postgres import tables
     from opencde.storage import LocalStorage
 
     async def work(graphs, settings):
@@ -434,6 +467,10 @@ def seed(
                 raise typer.Exit(code=1)
             for graph in graphs.distinct():
                 await seeding.wipe(graph)
+            if graphs.postgres is not None:
+                await tables.wipe(graphs.postgres)
+        elif graphs.postgres is not None and graphs.models and not await seeding.is_empty(graphs.graph):
+            raise _fail("the IFC graph is not empty; seeding only runs into empty databases")
         storage = LocalStorage(settings.data_dir)
         try:
             loaded = await seeding.seed(
@@ -446,11 +483,14 @@ def seed(
                 allow_localhost_redirects=settings.allow_localhost_redirects,
                 id_prefix=settings.server_assigned_id_prefix,
                 max_image_bytes=settings.max_image_bytes,
+                postgres=graphs.postgres,
             )
         except seeding.SeedError as exc:
             raise _fail(str(exc)) from None
         model = (
-            await seeding.build_sample_graph(graphs.graph, storage, settings, loaded, store=graphs.store)
+            await seeding.build_sample_graph(
+                graphs.graph, storage, settings, loaded, store=graphs.store, postgres=graphs.postgres
+            )
             if settings.ifcgraph_enabled
             else None
         )
@@ -486,14 +526,14 @@ def user_create(
     admin: Annotated[bool, typer.Option("--admin", help="Server administrator (admin UI, all management).")] = False,
 ) -> None:
     """Create a user."""
-    from opencde.store.accounts.users import AccountError, UserRepository
+    from opencde.store.accounts.users import AccountError
 
     generated = password is None
     pw = password or secrets.token_urlsafe(12)
 
-    async def work(graph, _settings):
+    async def work(store, _settings):
         try:
-            return await UserRepository(graph).create(username, pw, email=email, full_name=full_name, is_admin=admin)
+            return await store.users.create(username, pw, email=email, full_name=full_name, is_admin=admin)
         except AccountError as exc:
             raise _fail(str(exc)) from None
 
@@ -506,10 +546,9 @@ def user_create(
 @user_app.command("list")
 def user_list() -> None:
     """List users with their project roles."""
-    from opencde.store.accounts.users import UserRepository
 
-    async def work(graph, _settings):
-        repo = UserRepository(graph)
+    async def work(store, _settings):
+        repo = store.users
         users = await repo.search()
         return [(u, await repo.memberships(u.id)) for u in users]
 
@@ -525,12 +564,12 @@ def user_set_password(
     username: str, password: Annotated[str | None, typer.Option(help="Omit to generate one.")] = None
 ) -> None:
     """Set a user's password (shown once when generated)."""
-    from opencde.store.accounts.users import AccountError, UserRepository
+    from opencde.store.accounts.users import AccountError
 
     pw = password or secrets.token_urlsafe(12)
 
-    async def work(graph, _settings):
-        repo = UserRepository(graph)
+    async def work(store, _settings):
+        repo = store.users
         user = await repo.get_by_username(username)
         if user is None:
             raise _fail("no such user")
@@ -548,10 +587,10 @@ def user_disable(
     username: str, enable: Annotated[bool, typer.Option("--enable", help="Re-enable instead.")] = False
 ) -> None:
     """Disable (or re-enable) a user. Disabled users cannot sign in and their tokens stop working."""
-    from opencde.store.accounts.users import AccountError, UserRepository
+    from opencde.store.accounts.users import AccountError
 
-    async def work(graph, _settings):
-        repo = UserRepository(graph)
+    async def work(store, _settings):
+        repo = store.users
         user = await repo.get_by_username(username)
         if user is None:
             raise _fail("no such user")
@@ -568,20 +607,19 @@ def user_disable(
 def user_grant(username: str, project_id: str, role: str) -> None:
     """Give a user a role (viewer, contributor, editor, manager) in a project."""
     from opencde.accounts.roles import Role
-    from opencde.store.accounts.projects import ProjectRepository
-    from opencde.store.accounts.users import AccountError, UserRepository
+    from opencde.store.accounts.users import AccountError
 
     try:
         wanted = Role(role)
     except ValueError:
         raise _fail("role must be one of viewer, contributor, editor, manager") from None
 
-    async def work(graph, _settings):
-        user = await UserRepository(graph).get_by_username(username)
+    async def work(store, _settings):
+        user = await store.users.get_by_username(username)
         if user is None:
             raise _fail("no such user")
         try:
-            await ProjectRepository(graph).set_member(project_id, user.id, wanted)
+            await store.projects.set_member(project_id, user.id, wanted)
         except AccountError as exc:
             raise _fail(str(exc)) from None
 
@@ -595,11 +633,11 @@ def user_grant(username: str, project_id: str, role: str) -> None:
 @project_app.command("create")
 def project_create(name: str) -> None:
     """Create a project with default BCF extensions."""
-    from opencde.store.accounts.projects import AccountError, ProjectRepository
+    from opencde.store.accounts.projects import AccountError
 
-    async def work(graph, _settings):
+    async def work(store, _settings):
         try:
-            return await ProjectRepository(graph).create(name)
+            return await store.projects.create(name)
         except AccountError as exc:
             raise _fail(str(exc)) from None
 
@@ -610,10 +648,9 @@ def project_create(name: str) -> None:
 @project_app.command("list")
 def project_list() -> None:
     """List projects and their members."""
-    from opencde.store.accounts.projects import ProjectRepository
 
-    async def work(graph, _settings):
-        repo = ProjectRepository(graph)
+    async def work(store, _settings):
+        repo = store.projects
         return [(p, await repo.members(p.project_id)) for p in await repo.all()]
 
     for project, members in _run(work):
@@ -639,12 +676,11 @@ def client_create(
     ] = False,
 ) -> None:
     """Register an OAuth2 client. A confidential client's secret is shown once."""
-    from opencde.store.oauth2.clients import ClientError, ClientRepository
+    from opencde.store.oauth2.clients import ClientError
 
-    async def work(graph, settings):
-        repo = ClientRepository(graph, allow_localhost_redirects=settings.registers_localhost)
+    async def work(store, _settings):
         try:
-            return await repo.create(
+            return await store.clients.create(
                 name, redirect_uri, public=public, description=description, pkce_optional=without_pkce
             )
         except ClientError as exc:
@@ -661,10 +697,9 @@ def client_create(
 @client_app.command("list")
 def client_list() -> None:
     """List OAuth2 clients."""
-    from opencde.store.oauth2.clients import ClientRepository
 
-    async def work(graph, settings):
-        return await ClientRepository(graph, allow_localhost_redirects=settings.registers_localhost).all()
+    async def work(store, _settings):
+        return await store.clients.all()
 
     for client in _run(work):
         kind = "public" if client.is_public else "confidential"
@@ -676,13 +711,11 @@ def client_list() -> None:
 @client_app.command("rotate-secret")
 def client_rotate_secret(client_id: str) -> None:
     """Replace a confidential client's secret. The old secret stops working at once."""
-    from opencde.store.oauth2.clients import ClientError, ClientRepository
+    from opencde.store.oauth2.clients import ClientError
 
-    async def work(graph, settings):
+    async def work(store, _settings):
         try:
-            return await ClientRepository(graph, allow_localhost_redirects=settings.registers_localhost).rotate_secret(
-                client_id
-            )
+            return await store.clients.rotate_secret(client_id)
         except ClientError as exc:
             raise _fail(str(exc)) from None
 
@@ -692,12 +725,11 @@ def client_rotate_secret(client_id: str) -> None:
 @client_app.command("approve")
 def client_approve(client_id: str) -> None:
     """Approve a self-registered client that waits for an administrator."""
-    from opencde.store.oauth2.clients import ClientError, ClientRepository
+    from opencde.store.oauth2.clients import ClientError
 
-    async def work(graph, settings):
-        repo = ClientRepository(graph, allow_localhost_redirects=settings.registers_localhost)
+    async def work(store, _settings):
         try:
-            await repo.update(client_id, disabled=False)
+            await store.clients.update(client_id, disabled=False)
         except ClientError as exc:
             raise _fail(str(exc)) from None
 
@@ -713,11 +745,9 @@ def client_prune(
 ) -> None:
     """Delete self-registered clients unused for OPENCDE_DYNAMIC_CLIENT_UNUSED_DAYS, with their tokens.
     The server does this on its own timer as well; this command does it now."""
-    from opencde.store.oauth2.clients import ClientRepository
 
-    async def work(graph, settings):
-        repo = ClientRepository(graph, allow_localhost_redirects=settings.registers_localhost)
-        return await repo.prune_dynamic(all_dynamic=all_dynamic)
+    async def work(store, _settings):
+        return await store.clients.prune_dynamic(all_dynamic=all_dynamic)
 
     print(f"OK      deleted {_run(work)} self-registered client(s)")
 
@@ -730,7 +760,10 @@ def ifcgraph_list(project_id: Annotated[str | None, typer.Option("--project")] =
     """List imported models with their state."""
     from opencde.ifcgraph.maintenance import list_models
 
-    for model in _run(lambda store, _settings: list_models(store, project_id=project_id)):  # the server's records
+    async def work(store, _settings):  # the server's records of the models
+        return await list_models(store.graph, project_id=project_id, postgres=store.postgres)
+
+    for model in _run(work):
         document = model.get("document_id") or model.get("bcf_document_guid") or "-"
         version = model.get("version_index")
         moment = model.get("done_at") or model.get("failed_at") or model.get("created_at") or ""
@@ -761,7 +794,9 @@ def ifcgraph_prune(
             project_id=project_id,
             everything=everything,
             storage=make_storage(settings),
-        )
+            postgres=graphs.postgres,
+        ),
+        models=True,
     )
     print(f"OK      deleted {result['models']} model(s) and {result['entities']} entities")
 
@@ -786,14 +821,16 @@ def ifcgraph_export(
     from opencde.ifcgraph.service import IfcGraphService
 
     async def work(graphs, settings):
-        service = IfcGraphService(graphs.graph, make_storage(settings), settings, store=graphs.store)
+        service = IfcGraphService(
+            graphs.graph, make_storage(settings), settings, store=graphs.store, postgres=graphs.postgres
+        )
         instances = await service.export(model_id, target)
         found = await service.validate_against_upload(model_id, target) if validate else None
         answer = await service.compare_with_upload(model_id, target, geometry=geometry) if verify else None
         return instances, found, answer
 
     try:
-        instances, found, answer = _run_both(work)
+        instances, found, answer = _run_both(work, models=True)
     except typer.Exit:
         raise
     except (NotExportable, RuntimeError, ValueError, OSError) as exc:

@@ -8,7 +8,8 @@ models that failed and the finished models superseded by a newer finished one
 of the same document; queued and running models are never touched, and the
 documents and their files stay. ``everything`` empties a whole project.
 ``delete_project`` deletes a project's models in the IFC graph, and then the
-project with what it owns in the store (ADR 0027).
+project with what it owns in the store (ADR 0027). The conversions are the
+store's: in PostgreSQL when a ``postgres`` is given (ADR 0029), else in the graph.
 """
 
 from __future__ import annotations
@@ -19,10 +20,16 @@ from ifc_db.importer import delete_model
 
 from opencde.graph.graph import Graph
 from opencde.storage import LocalStorage
-from opencde.store.jobs.conversions import ConversionRepository
 
 if TYPE_CHECKING:
-    from opencde.store.protocols import ProjectStore
+    from opencde.postgres.database import Postgres
+    from opencde.store.protocols import ConversionStore, ProjectStore
+
+
+def _conversions(graph: Graph, postgres: Postgres | None) -> ConversionStore:
+    from opencde.store.jobs.postgres import conversion_store  # it imports what imports this module
+
+    return conversion_store(graph, postgres)
 
 
 def delete_geometry(storage: LocalStorage, model_id: str) -> int:
@@ -35,14 +42,18 @@ def delete_geometry(storage: LocalStorage, model_id: str) -> int:
     return gone
 
 
-async def list_models(graph: Graph, *, project_id: str | None = None) -> list[dict[str, Any]]:
-    return await ConversionRepository(graph).all(project_id=project_id)
+async def list_models(
+    graph: Graph, *, project_id: str | None = None, postgres: Postgres | None = None
+) -> list[dict[str, Any]]:
+    return await _conversions(graph, postgres).all(project_id=project_id)
 
 
-async def superseded_or_failed(graph: Graph, *, project_id: str | None = None) -> list[str]:
+async def superseded_or_failed(
+    graph: Graph, *, project_id: str | None = None, postgres: Postgres | None = None
+) -> list[str]:
     """Ids of the models to drop: every failed one, and every finished one that a newer finished conversion of the
     same document (Documents API ``document_id`` or BCF ``bcf_document_guid``) has replaced."""
-    return await ConversionRepository(graph).superseded_or_failed(project_id=project_id)
+    return await _conversions(graph, postgres).superseded_or_failed(project_id=project_id)
 
 
 async def prune_models(
@@ -52,17 +63,18 @@ async def prune_models(
     project_id: str | None = None,
     everything: bool = False,
     storage: LocalStorage | None = None,
+    postgres: Postgres | None = None,
 ) -> dict[str, int]:
     """Delete models from the IFC graph ``graph``, their conversions from the ``store`` (the IFC graph itself when
-    none is given) and their geometry files; returns ``{"models": n, "entities": n}``."""
+    none is given, PostgreSQL when ``postgres`` is) and their geometry files; returns ``{"models": n, "entities": n}``."""
     store = store or graph
+    conversions = _conversions(store, postgres)
     if everything:
         if project_id is None:
             raise ValueError("deleting every model needs a project")
-        ids = [model["id"] for model in await list_models(store, project_id=project_id)]
+        ids = [model["id"] for model in await conversions.all(project_id=project_id)]
     else:
-        ids = await superseded_or_failed(store, project_id=project_id)
-    conversions = ConversionRepository(store)
+        ids = await conversions.superseded_or_failed(project_id=project_id)
     entities = 0
     for model_id in ids:
         entities += await delete_model(graph, model_id)

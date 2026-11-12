@@ -18,6 +18,8 @@ from opencde import __version__
 from opencde.graph.driver import ping_within
 from opencde.graph.graph import Graph
 from opencde.graph.schema import KEYED
+from opencde.postgres.database import Postgres
+from opencde.postgres.schema import applied, migrations
 from opencde.settings import Settings
 from opencde.storage import LocalStorage
 from opencde.timeutil import now_iso
@@ -105,9 +107,36 @@ async def schema_check(graph: Graph, key: str = "schema") -> Check:
     return Check(key, complete, "schema_count" if complete else "schema_short", counts)
 
 
-async def store_checks(settings: Settings, graph: Graph, store: Graph | None) -> list[Check]:
-    """The graph of the server's own data, when it is not the IFC graph's connection (ADR 0027): whether it answers,
-    and its constraints."""
+async def postgres_checks(settings: Settings, postgres: Postgres) -> list[Check]:
+    """PostgreSQL of the server's own data (ADR 0029): whether it answers, and its migrations beside those the
+    server ships, which it applies when it starts."""
+    where = {"url": postgres.url}
+    if not await postgres.ping(settings.graph_connect_timeout_seconds):
+        return [Check("store", False, "postgres_silent", where), Check("store_schema", False, "schema_no_database")]
+    had = await applied(postgres)
+    shipped = migrations()
+    unknown = sorted(set(had) - {migration.version for migration in shipped})
+    if unknown:
+        named = ", ".join(f"{version:04d}" for version in unknown)
+        return [
+            Check("store", True, "postgres_ok", where),
+            Check("store_schema", False, "migrations_newer", {"unknown": named}),
+        ]
+    counts = {"applied": len(had), "shipped": len(shipped), "last": had[max(had)] if had else "-"}
+    complete = len(had) == len(shipped)
+    return [
+        Check("store", True, "postgres_ok", where),
+        Check("store_schema", complete, "migrations_count" if complete else "migrations_short", counts),
+    ]
+
+
+async def store_checks(
+    settings: Settings, graph: Graph, store: Graph | None, postgres: Postgres | None = None
+) -> list[Check]:
+    """The server's own data when it is not in the IFC graph's connection: in a graph of its own (ADR 0027), whether
+    it answers and its constraints; in PostgreSQL (ADR 0029), whether it answers and its migrations."""
+    if postgres is not None:
+        return await postgres_checks(settings, postgres)
     if store is None or store is graph:
         return [Check("store", True, "store_shared")]
     reachable = await ping_within(store.driver, store.database, settings.graph_connect_timeout_seconds)
@@ -138,9 +167,15 @@ async def headers_check(settings: Settings, transport: httpx.AsyncBaseTransport 
 
 
 async def run_checks(
-    settings: Settings, graph: Graph, storage: LocalStorage, *, store: Graph | None = None
+    settings: Settings,
+    graph: Graph,
+    storage: LocalStorage,
+    *,
+    store: Graph | None = None,
+    postgres: Postgres | None = None,
 ) -> list[Check]:
-    """Every check, of the IFC graph ``graph`` and of the ``store`` of the server's own data beside it."""
+    """Every check, of the IFC graph ``graph`` and of the ``store`` of the server's own data beside it, or of
+    ``postgres`` when it holds that data. Without IFC-DB a server with PostgreSQL uses no graph, and none is asked."""
     checks = [Check("version", True, value=__version__), Check("environment", True, value=settings.environment)]
     checks.append(Check("apis", True, value=", ".join(settings.apis)))
     https = settings.public_url.startswith("https://")
@@ -150,11 +185,14 @@ async def run_checks(
         if https
         else Check("public_url", fine, "public_url_http", {"url": settings.public_url})
     )
-    reachable = await ping_within(graph.driver, graph.database, settings.graph_connect_timeout_seconds)
-    where = {"dialect": graph.dialect.name.value, "uri": settings.graph_uri, "database": settings.database_name}
-    checks.append(Check("graph", reachable, "graph_ok" if reachable else "graph_silent", where))
-    checks.append(await schema_check(graph) if reachable else Check("schema", False, "schema_no_database"))
-    checks += await store_checks(settings, graph, store)
+    if postgres is not None and not settings.ifcgraph_enabled:
+        checks.append(Check("graph", True, "graph_unused"))
+    else:
+        reachable = await ping_within(graph.driver, graph.database, settings.graph_connect_timeout_seconds)
+        where = {"dialect": graph.dialect.name.value, "uri": settings.graph_uri, "database": settings.database_name}
+        checks.append(Check("graph", reachable, "graph_ok" if reachable else "graph_silent", where))
+        checks.append(await schema_check(graph) if reachable else Check("schema", False, "schema_no_database"))
+    checks += await store_checks(settings, graph, store, postgres)
     probe = storage.root / ".write-probe"
     try:
         probe.write_bytes(b"ok")

@@ -12,6 +12,10 @@ The ids of the seeded document, topic, viewpoint and comment are fixed
 (``SEED_*`` below), so that clients and their test suites, Dataspatium's among
 them, can refer to them; the model's wall GlobalIds and GTINs are in
 ``SAMPLE_MODEL_WALLS``.
+
+The seed goes where the server's own data is, to PostgreSQL when it is there (ADR 0029), through the same stores as
+the routes; the model goes to the IFC graph. Only the inspection plan's context, a reviewer and a building beside the
+project, is the graph's alone: PostgreSQL has no table for it.
 """
 
 from __future__ import annotations
@@ -36,15 +40,16 @@ from opencde.documents.assembly import store_stream
 from opencde.graph.graph import Graph
 from opencde.ids import new_id
 from opencde.ifcgraph.service import IfcGraphService
+from opencde.postgres import tables
+from opencde.postgres.database import Postgres
 from opencde.settings import Settings
 from opencde.storage import LocalStorage, make_key
-from opencde.store.accounts.projects import ProjectRepository
-from opencde.store.accounts.users import UserRepository
-from opencde.store.bcf.comments import CommentRepository
-from opencde.store.bcf.topics import TopicRepository
-from opencde.store.bcf.viewpoints import ViewpointRepository
-from opencde.store.documents.versions import DocumentRepository, default_metadata
+from opencde.store.accounts.postgres import project_store, user_store
+from opencde.store.bcf.postgres import comment_store, topic_store, viewpoint_store
+from opencde.store.documents.postgres import document_store
+from opencde.store.documents.versions import default_metadata
 from opencde.store.oauth2.clients import ClientRepository
+from opencde.store.oauth2.postgres import PostgresClientRepository
 from opencde.timeutil import now_iso
 
 DEMO_USERS: tuple[tuple[str, str, str, bool], ...] = (
@@ -96,6 +101,7 @@ class SeedResult:
     viewpoint_guid: str = SEED_VIEWPOINT_GUID
     comment_guid: str = SEED_COMMENT_GUID
     sample_model_key: str = ""
+    sample_version_id: str = ""
 
 
 class SeedError(RuntimeError):
@@ -124,13 +130,19 @@ async def seed(
     allow_localhost_redirects: bool = False,
     id_prefix: str = "ISSUE-",
     max_image_bytes: int = 10_485_760,
+    postgres: Postgres | None = None,
 ) -> SeedResult:
-    if not await is_empty(graph):
+    """The demonstration data in the server's own data: the graph ``graph``, or ``postgres`` when it is given."""
+    if not await (tables.is_empty(postgres) if postgres is not None else is_empty(graph)):
         raise SeedError("the database is not empty; seeding only runs into an empty database")
 
-    users = UserRepository(graph)
-    projects = ProjectRepository(graph)
-    clients = ClientRepository(graph, allow_localhost_redirects=allow_localhost_redirects)
+    users = user_store(graph, postgres)
+    projects = project_store(graph, postgres)
+    clients = (
+        PostgresClientRepository(postgres, allow_localhost_redirects=allow_localhost_redirects)
+        if postgres is not None
+        else ClientRepository(graph, allow_localhost_redirects=allow_localhost_redirects)
+    )
     result = SeedResult()
 
     created = {}
@@ -154,20 +166,21 @@ async def seed(
     await projects.set_member(demolition_permit.project_id, created["developer"].id, Role.CONTRIBUTOR)
 
     # Context nodes from the inspection-plan use case: the reviewing organisation (a municipality in the
-    # original story, hence the name) that issues the permit, and the building it concerns.
-    await graph.run(
-        """
-        MATCH (p:Project {project_id: $project_id})
-        CREATE (r:Reviewer {id: $reviewer_id, name: 'Example Municipality', created_at: $now})
-        CREATE (b:Building {id: $building_id, status: 'Under construction', created_at: $now})
-        CREATE (r)-[:ISSUES]->(p)
-        CREATE (p)-[:CONCERNS]->(b)
-        """,
-        project_id=building_permit.project_id,
-        reviewer_id=secrets.token_hex(16),
-        building_id=secrets.token_hex(16),
-        now=now_iso(),
-    )
+    # original story, hence the name) that issues the permit, and the building it concerns. The graph's alone.
+    if postgres is None:
+        await graph.run(
+            """
+            MATCH (p:Project {project_id: $project_id})
+            CREATE (r:Reviewer {id: $reviewer_id, name: 'Example Municipality', created_at: $now})
+            CREATE (b:Building {id: $building_id, status: 'Under construction', created_at: $now})
+            CREATE (r)-[:ISSUES]->(p)
+            CREATE (p)-[:CONCERNS]->(b)
+            """,
+            project_id=building_permit.project_id,
+            reviewer_id=secrets.token_hex(16),
+            building_id=secrets.token_hex(16),
+            now=now_iso(),
+        )
 
     redirects = public_redirects or ["http://127.0.0.1/callback"]
     public_client, _ = await clients.create(
@@ -188,50 +201,63 @@ async def seed(
     result.confidential_client_id = confidential_client.client_id
     result.confidential_client_secret = secret or ""
 
-    result.sample_model_key = await _seed_content(
-        graph, storage, building_permit.project_id, id_prefix=id_prefix, max_image_bytes=max_image_bytes
+    result.sample_model_key, result.sample_version_id = await _seed_content(
+        graph,
+        storage,
+        building_permit.project_id,
+        id_prefix=id_prefix,
+        max_image_bytes=max_image_bytes,
+        postgres=postgres,
     )
     return result
 
 
 async def build_sample_graph(
-    graph: Graph, storage: LocalStorage, settings: Settings, result: SeedResult, *, store: Graph | None = None
+    graph: Graph,
+    storage: LocalStorage,
+    settings: Settings,
+    result: SeedResult,
+    *,
+    store: Graph | None = None,
+    postgres: Postgres | None = None,
 ) -> dict:
     """The sample model in the IFC graph ``graph``, and checked against the IFC schema, as if it had been uploaded;
-    the seed is in the ``store``, the IFC graph itself when none is given.
+    the seed is in the ``store``, the IFC graph itself when none is given, or in ``postgres``.
 
     Returns its ``Conversion``'s properties.
     """
-    service = IfcGraphService(graph, storage, settings, store=store)
+    service = IfcGraphService(graph, storage, settings, store=store, postgres=postgres)
     project_id = result.projects["Building permit"]
-    version = await service.store.one(
-        "MATCH (:Document {document_id: $id})-[:HAS_VERSION]->(v:DocumentVersion {version_index: 1}) RETURN v.id AS id",
-        id=SEED_DOCUMENT_ID,
-    )
     await service.schedule(
         project_id=project_id,
         storage_key=result.sample_model_key,
         file_name=SAMPLE_MODEL_FILE_NAME,
         document_id=SEED_DOCUMENT_ID,
         version_index=1,
-        version_id=version["id"] if version else None,
+        version_id=result.sample_version_id or None,
     )
     await service.wait_idle()
     return (await service.status(project_id))[0]
 
 
 async def _seed_content(
-    graph: Graph, storage: LocalStorage, project_id: str, *, id_prefix: str, max_image_bytes: int
-) -> str:
+    graph: Graph,
+    storage: LocalStorage,
+    project_id: str,
+    *,
+    id_prefix: str,
+    max_image_bytes: int,
+    postgres: Postgres | None = None,
+) -> tuple[str, str]:
     """The sample model as a document, and a topic with a viewpoint on its first wall and a comment.
 
-    Returns where the model is stored.
+    Returns where the model is stored, and its version's id.
     """
-    documents = DocumentRepository(graph)
+    documents = document_store(graph, postgres)
     key = make_key("documents", new_id())
     with SAMPLE_MODEL.open("rb") as source:
         size, sha256 = store_stream(storage, source, key, SAMPLE_MODEL_MAX_BYTES)
-    await documents.create_version(
+    version = await documents.create_version(
         project_id=project_id,
         document_id=None,
         requested_document_id=SEED_DOCUMENT_ID,
@@ -251,7 +277,7 @@ async def _seed_content(
         ),
     )
 
-    topics = TopicRepository(graph, id_prefix=id_prefix)
+    topics = topic_store(graph, postgres, id_prefix=id_prefix)
     first_wall = next(iter(SAMPLE_MODEL_WALLS))
     await topics.create(
         project_id=project_id,
@@ -268,7 +294,7 @@ async def _seed_content(
             "Reuse. Confirm the marking on site before the inspection.",
         ),
     )
-    viewpoints = ViewpointRepository(graph, storage, topics, max_image_bytes=max_image_bytes)
+    viewpoints = viewpoint_store(graph, postgres, storage, topics, max_image_bytes=max_image_bytes)
     await viewpoints.create(
         project_id=project_id,
         topic_guid=SEED_TOPIC_GUID,
@@ -288,7 +314,7 @@ async def _seed_content(
             ),
         ),
     )
-    comments = CommentRepository(graph, topics)
+    comments = comment_store(graph, postgres, topics)
     await comments.create(
         project_id=project_id,
         topic_guid=SEED_TOPIC_GUID,
@@ -299,4 +325,4 @@ async def _seed_content(
             viewpoint_guid=SEED_VIEWPOINT_GUID,
         ),
     )
-    return key
+    return key, version.version_id

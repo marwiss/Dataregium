@@ -117,7 +117,7 @@ def test_the_export_builds_the_service_with_both(
     built: list[tuple[Any, Any]] = []
 
     class Service:
-        def __init__(self, graph: Any, storage: Any, settings: Any, *, store: Any = None) -> None:
+        def __init__(self, graph: Any, storage: Any, settings: Any, *, store: Any = None, postgres: Any = None) -> None:
             built.append((graph, store))
 
         async def export(self, model_id: str, target: Path) -> int:
@@ -139,7 +139,9 @@ def test_the_seed_goes_to_the_store_and_its_model_to_the_ifc_graph(
         given.append(("seed", graph, None))
         return seeding.SeedResult()
 
-    async def build_sample_graph(graph: Any, storage: Any, settings: Any, result: Any, *, store: Any = None) -> dict:
+    async def build_sample_graph(
+        graph: Any, storage: Any, settings: Any, result: Any, *, store: Any = None, postgres: Any = None
+    ) -> dict:
         given.append(("model", graph, store))
         return {"state": "done", "entities": 1}
 
@@ -156,7 +158,9 @@ def test_the_doctor_checks_both(two_graphs: tuple[Graph, Graph, list[str]], monk
     ifc, store, opened = two_graphs
     given: list[tuple[Any, Any]] = []
 
-    async def run_checks(settings: Any, graph: Any, storage: Any, *, store: Any = None) -> list[doctor.Check]:
+    async def run_checks(
+        settings: Any, graph: Any, storage: Any, *, store: Any = None, postgres: Any = None
+    ) -> list[doctor.Check]:
         given.append((graph, store))
         return [doctor.Check("version", True, value="x")]
 
