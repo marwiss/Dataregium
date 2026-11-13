@@ -8,9 +8,10 @@ them, run with Node from a copy of the file: the port must answer the same, refs
 wheel the same operations. The tools and fields of commit 437982f (``define_type``, ``create_element``,
 ``edit_element``, a typed wall, slab, roof and opening, load_bearing and status, a storey's description, a room's
 number and type, a material's category and the vertical datum) are tried by the calls in
-``fixtures/write_tools_437982f.json``, one sequence that builds and one that is refused, with the answers and
-operations that the app's file at 437982f gave for them; at 437982f the app still answers the examples below as it
-did at 64e116e. JavaScript's own ways with numbers, texts and objects are tried one by one below.
+``fixtures/write_tools_9dc4f9f.json``, one sequence that builds and one that is refused, and so are the tools and
+fields of commit 9dc4f9f (a curtain wall of ``create_element`` with its type, and ``set_responsible_party``), with
+the answers and operations that the app's file at 9dc4f9f gave for them; at 9dc4f9f the app still answers the
+examples below as it did at 64e116e. JavaScript's own ways with numbers, texts and objects are tried one by one below.
 """
 
 from __future__ import annotations
@@ -23,8 +24,8 @@ import pytest
 from opencde.mcp import write_tools
 from tests.conftest import FIXTURES_DIR
 
-#: What the app's write-tools.js at 437982f answered: per sequence the calls with their answers, and the wheel's list.
-AT_437982F = json.loads((FIXTURES_DIR / "write_tools_437982f.json").read_text(encoding="utf-8"))
+#: What the app's write-tools.js at 9dc4f9f answered: per sequence the calls with their answers, and the wheel's list.
+AT_9DC4F9F = json.loads((FIXTURES_DIR / "write_tools_9dc4f9f.json").read_text(encoding="utf-8"))
 #: The server's words where the app's name a tool the server does not offer, or quote a text of the call (the
 #: module's docstring).
 SERVER_WORDS = (
@@ -787,37 +788,42 @@ def test_the_port_answers_the_apps_examples_as_the_app_does(calls: list[Any], wh
     assert write_tools.to_wheel(cs["ops"]) == wheel, "the operations the server tries"
 
 
-@pytest.mark.parametrize("sequence", ["built", "refused"])
-def test_the_port_answers_the_calls_of_437982f_as_the_app_does(sequence: str) -> None:
+@pytest.mark.parametrize("sequence", list(AT_9DC4F9F))
+def test_the_port_answers_the_calls_of_9dc4f9f_as_the_app_does(sequence: str) -> None:
     cs: dict[str, Any] = {"ops": [], "refs": 0}
-    for name, arguments, answer in AT_437982F[sequence]["calls"]:
+    for name, arguments, answer in AT_9DC4F9F[sequence]["calls"]:
         if "error" in answer:
             for app, server in SERVER_WORDS:
                 answer["error"] = answer["error"].replace(app, server)
         assert write_tools.call(cs, name, arguments) == answer, name
-    assert write_tools.to_wheel(cs["ops"]) == AT_437982F[sequence]["wheel"], "the operations the server tries"
+    assert write_tools.to_wheel(cs["ops"]) == AT_9DC4F9F[sequence]["wheel"], "the operations the server tries"
 
 
-def test_the_sequence_of_437982f_gives_every_new_tool_and_field() -> None:
-    """Every tool that 437982f added and every field it added to a tool is given, not null, in a call the app took."""
+def test_the_sequences_give_every_new_tool_and_field() -> None:
+    """Every tool that 437982f and 9dc4f9f added and every field they added to a tool is given, not null, in a call
+    the app took."""
     given: dict[str, set[str]] = {}
-    for name, arguments, answer in AT_437982F["built"]["calls"]:
+    for name, arguments, answer in AT_9DC4F9F["built"]["calls"] + AT_9DC4F9F["curtains_and_parties"]["calls"]:
         if not answer.get("ok"):
             continue
         fields = {key for key, value in arguments.items() if value not in (None, "", [])}
         for key in ("storeys", "rooms"):
             fields |= {f"{key}.{sub}" for item in arguments.get(key) or [] for sub, v in item.items() if v}
-        for key in ("shape", "stair"):  # the objects of create_element; a roof's shape is a word
+        for key in ("shape", "stair", "curtain"):  # the objects of create_element; a roof's shape is a word
             nested = arguments.get(key) if isinstance(arguments.get(key), dict) else {}
             fields |= {f"{key}.{sub}" for sub, v in nested.items() if v is not None}
         given.setdefault(name, set()).update(fields)
     added = {
         "define_type": {"kind", "name", "layers", "predefined_type", "material", "material_category", "operation",
-                        "partitioning", "width", "height", "lining_depth"},
+                        "partitioning", "width", "height", "lining_depth", "panel_material", "member_width",
+                        "member_depth", "panel_thickness"},
         "create_element": {"storey", "ifc_class", "predefined_type", "object_type", "type", "name", "at", "z",
                            "rotation", "shape", "stair", "part_of", "host", "shape.profile", "shape.x", "shape.y",
                            "shape.radius", "shape.outline", "shape.depth", "shape.along", "stair.risers",
-                           "stair.riser_height", "stair.tread_length", "stair.width", "stair.landing"},
+                           "stair.riser_height", "stair.tread_length", "stair.width", "stair.landing", "curtain",
+                           "curtain.start", "curtain.end", "curtain.height", "curtain.base", "curtain.bays",
+                           "curtain.bay_width", "curtain.rows", "curtain.row_height"},
+        "set_responsible_party": {"organization", "role", "user_role", "designation", "contact_role"},
         "edit_element": {"id", "name", "end", "thickness", "height", "type", "offset", "width", "sill", "pitch",
                          "overhang", "base"},
         "create_wall": {"type", "partition", "load_bearing", "status"},
@@ -887,6 +893,7 @@ def test_the_tools_and_their_parameters_are_the_apps_in_its_order() -> None:
         "transform_elements",
         "delete_elements",
         "set_site",
+        "set_responsible_party",
         "manage_changeset",
     ]
     assert write_tools.CREATES[-2:] == ("define_type", "create_element"), "the new tools that hand out a ref"
@@ -895,11 +902,11 @@ def test_the_tools_and_their_parameters_are_the_apps_in_its_order() -> None:
     ]  # fmt: skip
     assert list(write_tools.tool("define_type")["properties"]) == [
         "kind", "name", "layers", "predefined_type", "material", "material_category", "operation", "partitioning",
-        "width", "height", "lining_depth"
+        "width", "height", "lining_depth", "panel_material", "member_width", "member_depth", "panel_thickness"
     ]  # fmt: skip
     assert list(write_tools.tool("create_element")["properties"]) == [
         "storey", "ifc_class", "predefined_type", "object_type", "type", "name", "at", "z", "rotation", "shape",
-        "stair", "part_of", "host"
+        "stair", "curtain", "part_of", "host"
     ]  # fmt: skip
     assert list(write_tools.tool("edit_element")["properties"]) == [
         "id", "name", "start", "end", "thickness", "height", "type", "outline", "offset", "width", "sill", "pitch",

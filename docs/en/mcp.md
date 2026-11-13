@@ -183,8 +183,8 @@ No tool approves: a person does, in Dataspatium.
 - The write tools `create_storeys_and_grid`, `define_type`, `create_wall`,
   `create_slab`, `create_roof`, `create_opening`, `create_element`,
   `create_spaces`, `set_properties`, `set_classification`, `assign`,
-  `edit_element`, `transform_elements`, `delete_elements` (with `confirm: true`)
-  and `set_site`: Dataspatium's own, with its schemas unchanged and `changeset_id`
+  `edit_element`, `transform_elements`, `delete_elements` (with `confirm: true`),
+  `set_site` and `set_responsible_party`: Dataspatium's own, with its schemas unchanged and `changeset_id`
   first. A call is one operation of the change set's `ops` in the form
   `dataspatium-tools/1`, exactly as the app makes it (the defaults filled in, the
   numbers checked, the texts cut at 200 characters, an optional field only when it

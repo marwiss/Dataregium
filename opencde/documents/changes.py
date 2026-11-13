@@ -57,6 +57,7 @@ Tool = Literal[
     "transform_elements",
     "delete_elements",
     "set_site",
+    "set_responsible_party",
 ]
 OPS_TOOLS: tuple[str, ...] = get_args(Tool)
 

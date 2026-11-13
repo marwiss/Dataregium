@@ -584,7 +584,7 @@ Breytingasafn sem gert er með skrifverkfærum Dataspatium ber líka aðgerðir 
 `dataspatium-tools/1`, svo að nýjar einingar, eyðingar og tengsl fylgi tillögunni. Hver aðgerð nefnir verkfæri sitt
 sem `tool` og hefur rök verkfærisins við hliðina, lengdir í metrum: `create_storeys_and_grid`, `define_type`,
 `create_wall`, `create_slab`, `create_roof`, `create_opening`, `create_element`, `create_spaces`, `set_properties`,
-`set_classification`, `assign`, `edit_element`, `transform_elements`, `delete_elements` og `set_site`. Þjónninn
+`set_classification`, `assign`, `edit_element`, `transform_elements`, `delete_elements`, `set_site` og `set_responsible_party`. Þjónninn
 keyrir þær með afriti af eigin kóða appsins (`opencde/ifcgraph/ops.py`), svo að sömu aðgerðir gefa sama líkan í
 appinu og á þjóninum, í einingu skrárinnar, með þann sem lagði til og þjóninn í eigendasögunum sem IfcOpenShell býr
 til. Það sem gerða-, vegg-, plötu-, þak-, ops- og einingaaðgerðirnar búa til heitir `new-1`, `new-2` … í röð þeirra,
@@ -631,6 +631,13 @@ eða `Qto_` á móti sniðmáti IfcOpenShell fyrir skema skrárinnar og hafnar �
 og tölu með einingu sinni; eigið safn líkansins má ekki byrja svo. `transform_elements` færir hurð eða glugga með opi
 sínu og aldrei lóðina, bygginguna eða hæð. Í IFC4X3 hefur hæð hæðartölu sína í staðsetningunni einni, og rými er
 `SPACE`, aldrei `INTERNAL` eða `EXTERNAL` (regla buildingSMART IFC102).
+
+`create_element` býr líka til glerhjúp, `IfcCurtainWall` eftir `curtain` (upphaf, endi, hæð, grunn, og bil og raðir
+eftir fjölda eða millibili), með pósta, þverpósta og plötur sem hluta sína, af `curtain_wall`-gerð úr `define_type`
+með efni og málum rammans og platnanna. `set_responsible_party` tilgreinir stofnunina sem ber ábyrgð á líkaninu, með
+hlutverk sitt í `IfcRoleEnum`, sem `IfcActor` tengdan verkefninu; nafn manneskju kemur aldrei frá gervigreind.
+`delete_elements` tekur hluta heildar með sér, og rýmin fá rýmismörk á fyrsta stigi með fletum sínum, sem eru gerð
+upp á nýtt þegar veggur, plata eða hurð nálægt þeim breytist.
 
 Prófunin beitir fyrst aðgerðunum og síðan breytingunum, og telur hvort tveggja í `change_count`. Aðgerð sem ekki er
 hægt að beita er athugasemd af taginu `op` með vísi sínum (`op`) og `tool`, með orðum kóða appsins, sem geta vitnað í

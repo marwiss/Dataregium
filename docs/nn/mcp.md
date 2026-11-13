@@ -185,8 +185,8 @@ grunnen `role`. Ingen verktøy godkjenner: det gjer ein person, i Dataspatium.
 - Skriveverktøya `create_storeys_and_grid`, `define_type`, `create_wall`,
   `create_slab`, `create_roof`, `create_opening`, `create_element`,
   `create_spaces`, `set_properties`, `set_classification`, `assign`,
-  `edit_element`, `transform_elements`, `delete_elements` (med `confirm: true`) og
-  `set_site`: dei Dataspatium sjølv har, med skjemaa uendra og `changeset_id`
+  `edit_element`, `transform_elements`, `delete_elements` (med `confirm: true`), `set_site`
+  og `set_responsible_party`: dei Dataspatium sjølv har, med skjemaa uendra og `changeset_id`
   først. Eit kall er éin operasjon i `ops` i endringssettet i forma
   `dataspatium-tools/1`, nøyaktig slik appen lagar han (standardverdiane fylte
   inn, tala prøvde, tekstane kutta ved 200 teikn, eit valfritt felt berre når det

@@ -593,8 +593,8 @@ Et ændringssæt lavet med Dataspatiums skriveværktøjer bærer også deres ope
 `dataspatium-tools/1`, så nye elementer, sletninger og relationer kommer med i forslaget. Hver operation angiver sit
 værktøj som `tool` og har værktøjets argumenter ved siden af sig, længder i meter: `create_storeys_and_grid`,
 `define_type`, `create_wall`, `create_slab`, `create_roof`, `create_opening`, `create_element`, `create_spaces`,
-`set_properties`, `set_classification`, `assign`, `edit_element`, `transform_elements`, `delete_elements` og
-`set_site`. Serveren kører dem med en kopi af appens egen kode (`opencde/ifcgraph/ops.py`), så de samme operationer
+`set_properties`, `set_classification`, `assign`, `edit_element`, `transform_elements`, `delete_elements`, `set_site`
+og `set_responsible_party`. Serveren kører dem med en kopi af appens egen kode (`opencde/ifcgraph/ops.py`), så de samme operationer
 giver den samme model i appen og på serveren, i filens enhed, med den, der foreslog, og serveren i de
 ejerhistorikker, som IfcOpenShell laver. Det, som type-, væg-, dæk-, tag-, åbnings- og elementoperationerne skaber,
 hedder `new-1`, `new-2` … i deres rækkefølge, og det gør hvert rum, som `create_spaces` opregner, også. En operation
@@ -641,6 +641,13 @@ prøver et sæt, der hedder `Pset_` eller `Qto_`, mod IfcOpenShells skabelon for
 egenskab, en værdi af forkert type og et tal med sin enhed; et eget sæt må ikke begynde sådan. `transform_elements`
 flytter en dør eller et vindue med sin åbning og aldrig grunden, bygningen eller en etage. I IFC4X3 har en etage sin
 højde i sin placering alene, og et rum er `SPACE`, aldrig `INTERNAL` eller `EXTERNAL` (buildingSMARTs regel IFC102).
+
+`create_element` laver også en glasfacade, en `IfcCurtainWall` langs `curtain` (start, slut, højde, base, og fag og
+rækker efter antal eller afstand), med sine lodposter, tværposter og paneler som dele, af en `curtain_wall`-type fra
+`define_type` med rammens og panelernes materialer og mål. `set_responsible_party` angiver den organisation, der står
+inde for modellen, med dens rolle i `IfcRoleEnum`, som en `IfcActor` tildelt projektet; en persons navn kommer aldrig
+fra en AI. `delete_elements` tager en helheds dele med, og rummene får rumgrænser af første niveau med deres flader,
+som laves om, når en væg, et dæk eller en dør nær dem ændres.
 
 Prøven anvender først operationerne og derefter ændringerne og tæller begge i `change_count`. En operation, der ikke
 kan anvendes, er en anmærkning af arten `op` med sit indeks (`op`) og `tool`, med ordene i appens kode, som kan

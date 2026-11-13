@@ -1,15 +1,15 @@
 # This file was generated with the assistance of an AI coding tool.
 """Dataspatium's write tools as the MCP endpoint offers them (ADR 0028, the design's §2): a copy, kept in step by hand.
 
-A copy of ``src/ai/write-tools.js`` (Dataspatium, branch f43, commit 334ec55 of 2026-11-12, whose errors
-name a place instead of quoting the call, as this copy's did first): the tools' schemas and
+A copy of ``src/ai/write-tools.js`` (Dataspatium, branch f43, commit 9dc4f9f of 2026-11-13, with its curtain walls
+and ``set_responsible_party``): the tools' schemas and
 descriptions (``TOOLS``), ``build()`` with its checks, which turns one call into one operation in the form
 ``dataspatium-tools/1`` (the defaults filled in, the numbers checked, the texts cut at 200 characters, an optional
 field on the operation only when given), ``call()``, which appends the operation to the open change set with the
 refs counted as the app counts them (``new-1``, ``new-2`` … in the order of ``create_wall``, ``create_slab``,
 ``create_roof``, ``create_opening``, ``define_type``, ``create_element`` and the rooms that ``create_spaces`` lists),
 advises the guidance's naming for a set of the model's own and runs ``manage_changeset``, ``describe()`` with the
-English lines of the app's catalogue (``src/ui/i18n/en.js``, the keys ``ai.change.*``), ``unitIn`` (:func:`unit_in`)
+English lines of the app's catalogue (``src/ui/i18n/en.js``, the keys ``ai.change.*`` and ``party.role.*``), ``unitIn`` (:func:`unit_in`)
 and ``toWheel``, which leaves the refs out, since the code that applies the operations (``ifcgraph/ops.py``) counts
 them itself. An id is an element's or a type's GlobalId, its STEP id or a ref (F34 a). The server keeps the change set
 as a draft (``store/jobs/drafts.py``), whose ``ops`` are this module's. The app's ``withGuids``, which names the
@@ -59,7 +59,7 @@ MAX_ROOMS = 200
 #: The kinds of define_type: with material layers, and without (a material at most; doors and windows with their
 #: geometry).
 LAYERED_KINDS = ("wall", "slab", "roof", "covering")
-ELEMENT_KINDS = ("column", "beam", "footing", "railing", "door", "window")
+ELEMENT_KINDS = ("column", "beam", "footing", "railing", "door", "window", "curtain_wall")
 TYPE_KINDS = LAYERED_KINDS + ELEMENT_KINDS
 #: The type class of each kind (IFC4 and later); slab and roof types are both IfcSlabType, so their names must differ.
 TYPE_CLASS = {
@@ -73,6 +73,7 @@ TYPE_CLASS = {
     "railing": "IfcRailingType",
     "door": "IfcDoorType",
     "window": "IfcWindowType",
+    "curtain_wall": "IfcCurtainWallType",
 }
 #: The door OperationTypes and window PartitioningTypes whose geometry IfcOpenShell draws; the first is the default.
 DOOR_OPERATIONS = (
@@ -113,6 +114,7 @@ ELEMENT_CLASSES = (
     "IfcFurniture",
     "IfcFurnishingElement",
     "IfcStair",
+    "IfcCurtainWall",
 )
 CLASS_KIND = {
     "IfcColumn": "column",
@@ -120,8 +122,18 @@ CLASS_KIND = {
     "IfcFooting": "footing",
     "IfcCovering": "covering",
     "IfcRailing": "railing",
+    "IfcCurtainWall": "curtain_wall",
 }
 MAX_RISERS = 60
+#: A curtain wall's members' width and depth and its panels' thickness in metres without a type, as the wheel's
+#: ``CURTAIN_SIZES``.
+CURTAIN_SIZES = {"member_width": 0.05, "member_depth": 0.15, "panel_thickness": 0.03}
+#: The most a bay is wide or a row high without a count or a spacing, and the most bays, rows and panels (the wheel's
+#: the same).
+CURTAIN_SPACING = 1.5
+MAX_BAYS = 100
+MAX_ROWS = 40
+MAX_PANELS = 200
 MAX_OUTLINE = 500
 MAX_LAYERS = 20
 #: IfcMaterial.Category as IfcOpenShell recommends it, and the roles of IfcMaterialLayer.Category (the wheel spells
@@ -142,6 +154,14 @@ MATERIAL_CATEGORIES = (
 LAYER_ROLES = ("load_bearing", "insulation", "inner_finish", "outer_finish")
 #: Pset_*Common.Status: the schema's values for an element's life (the wheel checks them against the template).
 STATUSES = ("NEW", "EXISTING", "DEMOLISH", "TEMPORARY")
+#: IfcRoleEnum as IFC4 and IFC4X3 spell it, the disciplines that design first (the wheel spells
+#: COMMISSIONINGENGINEER as IFC2X3 does there).
+ROLES = (
+    "ARCHITECT", "STRUCTURALENGINEER", "MECHANICALENGINEER", "ELECTRICALENGINEER", "CIVILENGINEER", "ENGINEER",
+    "CONSULTANT", "COSTENGINEER", "COMMISSIONINGENGINEER", "PROJECTMANAGER", "CONSTRUCTIONMANAGER",
+    "FIELDCONSTRUCTIONMANAGER", "CONTRACTOR", "SUBCONTRACTOR", "SUPPLIER", "MANUFACTURER", "RESELLER", "CLIENT",
+    "OWNER", "BUILDINGOWNER", "BUILDINGOPERATOR", "FACILITIESMANAGER", "USERDEFINED",
+)  # fmt: skip
 #: Units a value might carry after its number ("40 dB"), in lower case without spaces, as the wheel's ``_CS_UNITS``.
 UNITS = frozenset(
     (
@@ -244,29 +264,34 @@ TOOLS: tuple[dict[str, Any], ...] = (
         "name": "define_type",
         "description": "Define a type before the elements that use it. kind is wall (an IfcWallType), slab (an "
         "IfcSlabType), roof (an IfcSlabType ROOF for the roof slabs of create_roof) or covering (an IfcCoveringType), "
-        "each with its material layers; or column, beam, footing, railing, door or window (an IfcColumnType, "
-        "IfcBeamType, IfcFootingType, IfcRailingType, IfcDoorType or IfcWindowType; IfcDoorStyle and IfcWindowStyle "
-        "in IFC2X3) with layers null and, when known, its material as material and material_category. name is the "
-        "type's name, such as YV1. layers are its material layers, each {material, thickness in metres, category, "
-        "role}: for a wall from its right side to its left as seen from its start toward its end (so the outside "
-        "first when the outer walls run counter-clockwise), for a slab, a roof or a covering from the top down (a "
-        "cladding from its outer face in). category (and material_category) is the material's IFC category (concrete, "
-        "steel, aluminium, block, brick, stone, wood, glass, gypsum, plastic or earth) and role the layer's "
-        "(load_bearing, insulation, inner_finish or outer_finish); give them only when known, else null. "
-        "predefined_type is the type's PredefinedType from its class's list, such as SOLIDWALL or PARTITIONING for a "
-        "wall, FLOOR or BASESLAB for a slab, FLOORING, CEILING or CLADDING for a covering, PAD_FOOTING or "
-        "STRIP_FOOTING for a footing and HANDRAIL or GUARDRAIL for a railing (null: FLOOR for a slab, COLUMN, BEAM, "
-        "DOOR and WINDOW, NOTDEFINED for the others; a roof type is ROOF). A door type has operation, its "
-        "OperationType: SINGLE_SWING_LEFT (the default), SINGLE_SWING_RIGHT, DOUBLE_SWING_LEFT, DOUBLE_SWING_RIGHT, "
-        "DOUBLE_DOOR_SINGLE_SWING, DOUBLE_DOOR_DOUBLE_SWING, SLIDING_TO_LEFT, SLIDING_TO_RIGHT or "
-        "DOUBLE_DOOR_SLIDING, LEFT with the hinges on the left as seen in the direction it opens. A window type has "
-        "partitioning, its PartitioningType: SINGLE_PANEL (the default), DOUBLE_PANEL_VERTICAL, "
+        "each with its material layers; or column, beam, footing, railing, door, window or curtain_wall (an "
+        "IfcColumnType, IfcBeamType, IfcFootingType, IfcRailingType, IfcDoorType, IfcWindowType or "
+        "IfcCurtainWallType; IfcDoorStyle and IfcWindowStyle in IFC2X3) with layers null and, when known, its "
+        "material as material and material_category. name is the type's name, such as YV1. layers are its material "
+        "layers, each {material, thickness in metres, category, role}: for a wall from its right side to its left as "
+        "seen from its start toward its end (so the outside first when the outer walls run counter-clockwise), for a "
+        "slab, a roof or a covering from the top down (a cladding from its outer face in). category (and "
+        "material_category) is the material's IFC category (concrete, steel, aluminium, block, brick, stone, wood, "
+        "glass, gypsum, plastic or earth) and role the layer's (load_bearing, insulation, inner_finish or "
+        "outer_finish); give them only when known, else null. predefined_type is the type's PredefinedType from its "
+        "class's list, such as SOLIDWALL or PARTITIONING for a wall, FLOOR or BASESLAB for a slab, FLOORING, CEILING "
+        "or CLADDING for a covering, PAD_FOOTING or STRIP_FOOTING for a footing and HANDRAIL or GUARDRAIL for a "
+        "railing (null: FLOOR for a slab, COLUMN, BEAM, DOOR and WINDOW, NOTDEFINED for the others; a roof type is "
+        "ROOF). A door type has operation, its OperationType: SINGLE_SWING_LEFT (the default), SINGLE_SWING_RIGHT, "
+        "DOUBLE_SWING_LEFT, DOUBLE_SWING_RIGHT, DOUBLE_DOOR_SINGLE_SWING, DOUBLE_DOOR_DOUBLE_SWING, SLIDING_TO_LEFT, "
+        "SLIDING_TO_RIGHT or DOUBLE_DOOR_SLIDING, LEFT with the hinges on the left as seen in the direction it opens. "
+        "A window type has partitioning, its PartitioningType: SINGLE_PANEL (the default), DOUBLE_PANEL_VERTICAL, "
         "DOUBLE_PANEL_HORIZONTAL, TRIPLE_PANEL_VERTICAL, TRIPLE_PANEL_HORIZONTAL, TRIPLE_PANEL_BOTTOM, "
         "TRIPLE_PANEL_TOP, TRIPLE_PANEL_LEFT or TRIPLE_PANEL_RIGHT. Both have width and height in metres (null: 0.9 × "
         "2.1 for a door, 1.2 × 1.2 for a window) and lining_depth, the depth of the lining across the wall (at least "
-        "0.05 m, the default; the wall's thickness fills the reveal), and get their geometry from these. Answers the "
-        "ref of the type, which create_wall, create_slab, create_roof, create_element and create_opening take as "
-        "type; put shared properties on the type with set_properties and its ref.",
+        "0.05 m, the default; the wall's thickness fills the reveal), and get their geometry from these. A curtain "
+        "wall type's material and material_category are its frame's, the mullions' and transoms' (null: Aluminium), "
+        "panel_material is its panels' glass (null: Glass), member_width and member_depth the members' width in the "
+        "façade and depth across it (null: 0.05 and 0.15 m) and panel_thickness the panels' (null: 0.03 m, less than "
+        "the depth); predefined_type stays null, and the app gives its panels an IfcPlateType CURTAIN_PANEL and its "
+        "mullions and transoms an IfcMemberType MULLION of its name. Answers the ref of the type, which create_wall, "
+        "create_slab, create_roof, create_element and create_opening take as type; put shared properties on the type "
+        "with set_properties and its ref.",
         "properties": {
             "kind": {"type": "string"},
             "name": {"type": "string"},
@@ -292,6 +317,10 @@ TOOLS: tuple[dict[str, Any], ...] = (
             "width": _num(),
             "height": _num(),
             "lining_depth": _num(),
+            "panel_material": _str(),
+            "member_width": _num(),
+            "member_depth": _num(),
+            "panel_thickness": _num(),
         },
     },
     {
@@ -393,26 +422,34 @@ TOOLS: tuple[dict[str, Any], ...] = (
         "name": "create_element",
         "description": "Add a building element that has no tool of its own, of the most specific IFC class: "
         "IfcColumn, IfcBeam, IfcMember, IfcFooting, IfcPile, IfcCovering, IfcRailing, IfcChimney, IfcShadingDevice, "
-        "IfcSanitaryTerminal, IfcFurniture (IfcFurnishingElement in IFC2X3) or IfcStair for a straight stair; never "
-        "IfcBuildingElementProxy. predefined_type is a value of the class's list, such as COLUMN; BEAM or LINTEL; "
-        "STUD or RAFTER; PAD_FOOTING or STRIP_FOOTING; BORED or DRIVEN; FLOORING, CEILING, CLADDING, ROOFING or "
-        "INSULATION; HANDRAIL, GUARDRAIL or BALUSTRADE; JALOUSIE or AWNING; WASHHANDBASIN or TOILETPAN; TABLE or BED; "
-        "null for NOTDEFINED or the type's, and USERDEFINED only with object_type. type is the ref of a define_type "
-        "step of the class's kind (column, beam, footing, covering or railing) or a type's GlobalId or id. at is [x, "
-        "y] metres in the storey's plane, z metres above the storey and rotation degrees counter-clockwise from x. "
-        "shape is the body: profile rectangle (x by y metres), circle (radius) or polygon (outline, [x, y] corners in "
-        "the storey's plane; at and rotation are then ignored), extruded depth metres. along z (the default) stands "
-        "the profile in the plan centred on at and extrudes it up from z: a column, footing, pile, covering, chimney, "
-        "sanitary terminal or furniture (give a footing or a pile a negative z to reach down). along x lays the "
-        "profile across, centred on a line at height z, and extrudes it from at in the direction of rotation, x its "
-        "width and y its height: a beam, member or railing. A covering with a type takes its depth from the type's "
-        "layers, so leave depth null. part_of (a ref, GlobalId or id) makes the element a part of a whole, such as a "
-        "railing of a stair: aggregated in it and on its storey, not in the storey itself, so leave storey null. host "
-        "(only for IfcCovering) is the element or space it covers. For IfcStair shape is null and stair is the "
-        "flight: risers (the number of risers, from 2), riser_height and tread_length in metres, width (default 1), "
-        "thickness (the waist at right angles to the slope, at least riser_height; default 0.2) and landing (the "
-        "length in metres of a landing at the top, or null); at is the foot of the first riser's middle and rotation "
-        "the direction it rises, and the last riser is the front edge of the landing or of the floor above. Answers "
+        "IfcSanitaryTerminal, IfcFurniture (IfcFurnishingElement in IFC2X3), IfcStair for a straight stair or "
+        "IfcCurtainWall for a glass façade; never IfcBuildingElementProxy. predefined_type is a value of the class's "
+        "list, such as COLUMN; BEAM or LINTEL; STUD or RAFTER; PAD_FOOTING or STRIP_FOOTING; BORED or DRIVEN; "
+        "FLOORING, CEILING, CLADDING, ROOFING or INSULATION; HANDRAIL, GUARDRAIL or BALUSTRADE; JALOUSIE or AWNING; "
+        "WASHHANDBASIN or TOILETPAN; TABLE or BED; null for NOTDEFINED or the type's, and USERDEFINED only with "
+        "object_type. type is the ref of a define_type step of the class's kind (column, beam, footing, covering, "
+        "railing or curtain_wall) or a type's GlobalId or id. at is [x, y] metres in the storey's plane, z metres "
+        "above the storey and rotation degrees counter-clockwise from x. shape is the body: profile rectangle (x by y "
+        "metres), circle (radius) or polygon (outline, [x, y] corners in the storey's plane; at and rotation are then "
+        "ignored), extruded depth metres. along z (the default) stands the profile in the plan centred on at and "
+        "extrudes it up from z: a column, footing, pile, covering, chimney, sanitary terminal or furniture (give a "
+        "footing or a pile a negative z to reach down). along x lays the profile across, centred on a line at height "
+        "z, and extrudes it from at in the direction of rotation, x its width and y its height: a beam, member or "
+        "railing. A covering with a type takes its depth from the type's layers, so leave depth null. part_of (a ref, "
+        "GlobalId or id) makes the element a part of a whole, such as a railing of a stair: aggregated in it and on "
+        "its storey, not in the storey itself, so leave storey null. host (only for IfcCovering) is the element or "
+        "space it covers. For IfcStair shape is null and stair is the flight: risers (the number of risers, from 2), "
+        "riser_height and tread_length in metres, width (default 1), thickness (the waist at right angles to the "
+        "slope, at least riser_height; default 0.2) and landing (the length in metres of a landing at the top, or "
+        "null); at is the foot of the first riser's middle and rotation the direction it rises, and the last riser is "
+        "the front edge of the landing or of the floor above. For IfcCurtainWall at, z, rotation, shape and stair are "
+        "null and curtain is the façade, along its axis as a wall is: start and end [x, y] metres in the storey's "
+        "plane, height (default 3) and base metres above the storey (default 0), and its even grid: bays, the number "
+        "of bays along it, or bay_width, the most a bay is wide in metres, and rows or row_height up it the same way "
+        "(both null: 1.5 m); predefined_type is null. The app makes its mullions and transoms (IfcMember MULLION) and "
+        "its glass panels (IfcPlate CURTAIN_PANEL) as its parts, with the sizes and materials of its type "
+        "(define_type curtain_wall; without one 0.05 × 0.15 m aluminium and 0.03 m glass), and sets its IsExternal "
+        "from the topology, where it counts as a wall: let it meet the walls on their lines, as walls meet. Answers "
         "the ref of the element.",
         "properties": {
             "storey": _str(),
@@ -449,6 +486,21 @@ TOOLS: tuple[dict[str, Any], ...] = (
                     "landing": _num(),
                 },
                 "required": ["risers", "riser_height", "tread_length", "width", "thickness", "landing"],
+                "additionalProperties": False,
+            },
+            "curtain": {
+                "type": ["object", "null"],
+                "properties": {
+                    "start": _xy(),
+                    "end": _xy(),
+                    "height": _num(),
+                    "base": _num(),
+                    "bays": {"type": ["integer", "null"]},
+                    "bay_width": _num(),
+                    "rows": {"type": ["integer", "null"]},
+                    "row_height": _num(),
+                },
+                "required": ["start", "end", "height", "base", "bays", "bay_width", "rows", "row_height"],
                 "additionalProperties": False,
             },
             "part_of": _type_ref(),
@@ -553,7 +605,8 @@ TOOLS: tuple[dict[str, Any], ...] = (
         "description": "Change an existing element in place, keeping its GlobalId: id is its id, GlobalId or ref, and "
         "every other field is null to keep it. A wall takes start and end ([x, y] metres in its storey's plane), "
         "thickness, height and type; its openings keep their place along it while its direction stays the same (else "
-        "their offset from its start), and the app joins it anew with the walls it meets. A slab takes outline (its "
+        "their offset from its start), the app joins it anew with the walls it meets, and the spaces along it follow "
+        "the rooms the walls then enclose (the report names one they no longer enclose). A slab takes outline (its "
         "[x, y] corners in metres), thickness and type, its top staying where it is. An opening, or the door or "
         "window in it, takes offset (metres from the wall's start), width, height and sill; the opening and its door "
         "or window change together and must stay within the wall. A roof takes pitch, overhang and base (the eaves' "
@@ -580,8 +633,11 @@ TOOLS: tuple[dict[str, Any], ...] = (
     {
         "name": "transform_elements",
         "description": "Move elements (ids or refs) by dx, dy, dz metres in their storey's plane. A door or window "
-        "moves with its opening; to slide one along its wall, edit_element with offset is better. The site, the "
-        "building and the storeys are never moved: their place and heights are the whole project's.",
+        "moves with its opening and must stay within its wall; to slide one along its wall, edit_element with offset "
+        "is better. A moved wall takes its doors and windows along, is joined anew with the walls it then meets, and "
+        "the spaces along it follow the rooms the walls then enclose; the report names a space they no longer "
+        "enclose, which keeps its outline until the person decides. The site, the building and the storeys are never "
+        "moved: their place and heights are the whole project's.",
         "properties": {"ids": _ids(), "dx": _num(), "dy": _num(), "dz": _num()},
     },
     {
@@ -615,6 +671,27 @@ TOOLS: tuple[dict[str, Any], ...] = (
             "rotation": _num(),
             "site_name": _str(),
             "vertical_datum": _str(),
+        },
+    },
+    {
+        "name": "set_responsible_party",
+        "description": "Set the model's responsible party: the organisation (company or authority) that answers for "
+        "this model file, only as the person or the brief names it; never guess one, and never write a person's name. "
+        "organization is its name; role its discipline in IFC's list: ARCHITECT, STRUCTURALENGINEER, "
+        "MECHANICALENGINEER, ELECTRICALENGINEER, CIVILENGINEER, ENGINEER, CONSULTANT, COSTENGINEER, "
+        "COMMISSIONINGENGINEER, PROJECTMANAGER, CONSTRUCTIONMANAGER, FIELDCONSTRUCTIONMANAGER, CONTRACTOR, "
+        "SUBCONTRACTOR, SUPPLIER, MANUFACTURER, RESELLER, CLIENT, OWNER, BUILDINGOWNER, BUILDINGOPERATOR, "
+        "FACILITIESMANAGER, USERDEFINED (MECHANICALENGINEER for heating, ventilation and plumbing), USERDEFINED with "
+        "user_role the role's own name, or null when not given. designation is the short designation the project "
+        "gives the party, such as A for the architect, and contact_role whom to contact there as a role, such as "
+        "project lead; null when not given. Written in IFC as an IfcActor of the IfcOrganization with its "
+        "IfcActorRole, assigned to the IfcProject. One call per model is enough: a second call changes the party.",
+        "properties": {
+            "organization": {"type": "string"},
+            "role": _str(),
+            "user_role": _str(),
+            "designation": _str(),
+            "contact_role": _str(),
         },
     },
     {
@@ -653,6 +730,7 @@ _JS_SPACE_CHARS = "\t\n\v\f\r   " + "".join(map(chr, range(0x2000, 0x200B))) 
 _JS_SPACE = re.escape(_JS_SPACE_CHARS)  # within a character class
 _SPACES = re.compile(f"[{_JS_SPACE}]+")
 _SPACES_OR_HYPHENS = re.compile(f"[{_JS_SPACE}-]+")
+_SPACES_UNDERSCORES_OR_HYPHENS = re.compile(f"[{_JS_SPACE}_-]+")
 _ENUM_VALUE = re.compile(r"[A-Z][A-Z0-9_]*", re.ASCII)
 _STANDARD_SET = re.compile(r"(pset|qto)_", re.ASCII | re.IGNORECASE)
 #: A number with a unit written after it ("40 dB"), as the app's ``unitIn`` reads it; ``.`` takes no line terminator.
@@ -1126,14 +1204,15 @@ def _fill_size(a: dict[str, Any], typed: dict[str, Any], key: str) -> Any:
 
 
 def _element_type(cs: dict[str, Any], a: dict[str, Any], cls: str) -> dict[str, Any] | None:
-    """The type of create_element, as {ref, kind, thickness}: a define_type ref of the class's kind (a covering's
-    with its layers' thickness), or a type of the model, which the wheel checks; null without a type."""
+    """The type of create_element, as {ref, kind, thickness, member_width}: a define_type ref of the class's kind (a
+    covering's with its layers' thickness, a curtain wall's with its members' width), or a type of the model, which the
+    wheel checks; null without a type."""
     if not _given(a.get("type")):
         return None
     ref = _id_or_ref(cs, a["type"], "type")
     kind = CLASS_KIND.get(cls)
     if not _is_ref(ref):
-        return {"ref": ref, "kind": kind, "thickness": None}
+        return {"ref": ref, "kind": kind, "thickness": None, "member_width": None}
     found = _step_of(cs, ref)
     if not found or found["tool"] != "define_type":
         raise WriteToolError(
@@ -1145,7 +1224,88 @@ def _element_type(cs: dict[str, Any], a: dict[str, Any], cls: str) -> dict[str, 
         )
     if found["kind"] != kind:
         raise WriteToolError(f"type {ref} is a {found['kind']} type; {cls} takes a {kind} type")
-    return {"ref": ref, "kind": kind, "thickness": _layers_thickness(found["layers"]) if found["layers"] else None}
+    return {
+        "ref": ref,
+        "kind": kind,
+        "thickness": _layers_thickness(found["layers"]) if found["layers"] else None,
+        "member_width": found.get("member_width") or None,
+    }
+
+
+def _curtain_count(count: Any, spacing: Any, span: float) -> int:
+    """How many bays (or rows) divide a span evenly: the count, else as many as keep each within the spacing (the
+    wheel's ``curtain_count``)."""
+    if _integer(count):
+        return count
+    return max(1, math.ceil(span / (spacing if _finite(spacing) and spacing > 0 else CURTAIN_SPACING) - 1e-9))
+
+
+def _curtain_grid(c: dict[str, Any]) -> list[int]:
+    """A curtain's [bays, rows]."""
+    span = math.hypot(c["end"][0] - c["start"][0], c["end"][1] - c["start"][1])
+    return [_curtain_count(c["bays"], c["bay_width"], span), _curtain_count(c["rows"], c["row_height"], c["height"])]
+
+
+def _curtain_of(c: Any, typed: dict[str, Any] | None) -> dict[str, Any]:
+    """create_element's curtain, checked: the axis from start to end, height and base, and per direction a count or a
+    spacing (both null: CURTAIN_SPACING), with room for the panels between members of the type's width (or the
+    default)."""
+    if not isinstance(c, dict):
+        raise WriteToolError(
+            "an IfcCurtainWall needs curtain: {start, end, height, base, bays, bay_width, rows, row_height}"
+        )
+    start = _point(c.get("start"), "curtain.start")
+    end = _point(c.get("end"), "curtain.end")
+    length = math.hypot(end[0] - start[0], end[1] - start[1])
+    if length < 0.3:
+        raise WriteToolError("curtain.start and curtain.end must be at least 0.3 m apart")
+    out: dict[str, Any] = {
+        "start": start,
+        "end": end,
+        "height": _prefixed("curtain.", _number, c, "height", fallback=3, positive=True),
+        "base": _prefixed("curtain.", _number, c, "base", fallback=0),
+        "bays": None,
+        "bay_width": None,
+        "rows": None,
+        "row_height": None,
+    }
+    if out["height"] > 200:
+        raise WriteToolError("curtain.height must be at most 200 m")
+    for count_key, spacing_key, span, most in (
+        ("bays", "bay_width", length, MAX_BAYS),
+        ("rows", "row_height", out["height"], MAX_ROWS),
+    ):
+        if _given(c.get(count_key)) and _given(c.get(spacing_key)):
+            raise WriteToolError(f"give curtain.{count_key} or curtain.{spacing_key}, not both")
+        if _given(c.get(count_key)):
+            if not _integer(c[count_key]) or c[count_key] < 1 or c[count_key] > most:
+                raise WriteToolError(f"curtain.{count_key} must be a whole number from 1 to {most}")
+            out[count_key] = c[count_key]
+            continue
+        spacing = out[spacing_key] = _prefixed(
+            "curtain.", _number, c, spacing_key, fallback=CURTAIN_SPACING, positive=True
+        )
+        n = _curtain_count(None, spacing, span)
+        if n > most:
+            raise WriteToolError(
+                f"curtain.{spacing_key} {_fmt(spacing)} m divides {_fmt(span)} m into {n}; at most {most}, so give a "
+                "larger spacing"
+            )
+    n, m = _curtain_grid(out)
+    if n * m > MAX_PANELS:
+        raise WriteToolError(
+            f"{n} bays by {m} rows are {n * m} panels; at most {MAX_PANELS} in one curtain wall, so give fewer or make "
+            "several"
+        )
+    w = typed["member_width"] if typed and typed.get("member_width") else CURTAIN_SIZES["member_width"]
+    width = (length - w) / n - w
+    high = (out["height"] - w) / m - w
+    if width < 0.05 or high < 0.05:
+        raise WriteToolError(
+            f"the panels would be {_fmt(width)} m wide and {_fmt(high)} m high between members {_fmt(w)} m wide; give "
+            "fewer bays or rows"
+        )
+    return out
 
 
 def _prefixed(prefix: str, read: Any, *args: Any, **kwargs: Any) -> Any:
@@ -1291,6 +1451,8 @@ def _element_type_op(cs: dict[str, Any], tool: str, kind: str, type_name: str, a
     if material:
         op["material"] = material
         op["material_category"] = category or None
+    if kind == "curtain_wall":
+        return _curtain_type_op(a, op, predefined)
     if kind not in ("door", "window"):
         return op
     key = "operation" if kind == "door" else "partitioning"
@@ -1307,6 +1469,82 @@ def _element_type_op(cs: dict[str, Any], tool: str, kind: str, type_name: str, a
     if op["lining_depth"] < 0.05 or op["lining_depth"] > 2:
         raise WriteToolError("lining_depth must be 0.05 to 2 m")
     return op
+
+
+def _curtain_type_op(a: dict[str, Any], op: dict[str, Any], predefined: str | None) -> dict[str, Any]:
+    """define_type's curtain wall type: NOTDEFINED (its parts' types carry CURTAIN_PANEL and MULLION), the panels'
+    material when given, and the members' width and depth and the panels' thickness (CURTAIN_SIZES when not given),
+    as the wheel's ``curtain_sizes`` checks them."""
+    if predefined and predefined != "NOTDEFINED":
+        raise WriteToolError(
+            "a curtain wall type is NOTDEFINED: the app gives its panels CURTAIN_PANEL and its mullions and transoms "
+            "MULLION on types of their own; leave predefined_type null"
+        )
+    given_panel = _text(a, "panel_material")
+    panel = _trim(given_panel) if given_panel else ""
+    if panel:
+        op["panel_material"] = panel
+    for key in ("member_width", "member_depth", "panel_thickness"):
+        op[key] = _number(a, key, fallback=CURTAIN_SIZES[key], positive=True)
+    if op["member_width"] < 0.02 or op["member_width"] > 0.5 or op["member_depth"] < 0.02 or op["member_depth"] > 1:
+        raise WriteToolError("member_width must be 0.02 to 0.5 m and member_depth 0.02 to 1 m")
+    if op["panel_thickness"] < 0.004 or op["panel_thickness"] >= op["member_depth"]:
+        raise WriteToolError(
+            f"panel_thickness must be at least 0.004 m and less than member_depth ({_fmt(op['member_depth'])} m)"
+        )
+    return op
+
+
+def _party_op(a: dict[str, Any], *, person: bool = False) -> dict[str, Any]:
+    """The operation set_responsible_party, checked, in the shape the wheel reads (recommendation 8 of the study of
+    the IFC and BCF guidelines): organization required, role a value of ROLES or null, user_role only with
+    USERDEFINED, and designation and contact_role only when given. contact_person, a person's name, is taken only
+    from the person's own form in the app (``person``), never from an AI, and never on the server. A message never
+    quotes what was sent."""
+
+    def clean(key: str) -> str:
+        return _slice(_trim(_SPACES.sub(" ", _string(a[key]))), 255) if _given(a.get(key)) else ""
+
+    organization = clean("organization")
+    if not organization:
+        raise WriteToolError(
+            "organization is required: the name of the company or authority that answers for the model"
+        )
+    typed = _SPACES_UNDERSCORES_OR_HYPHENS.sub("", clean("role").upper())
+    role = "COMMISSIONINGENGINEER" if typed == "COMISSIONINGENGINEER" else typed  # IFC2X3's spelling
+    if role and role not in ROLES:
+        raise WriteToolError(f"role must be {_either(ROLES)}, or null")
+    user_role = clean("user_role")
+    if role == "USERDEFINED" and not user_role:
+        raise WriteToolError("role USERDEFINED needs user_role, the name of the role")
+    if user_role and role != "USERDEFINED":
+        raise WriteToolError("user_role goes with role USERDEFINED; leave it null for a role of the list")
+    op: dict[str, Any] = {"tool": "set_responsible_party", "organization": organization, "role": role or None}
+    if user_role:
+        op["user_role"] = user_role
+    for key in ("designation", "contact_role"):
+        value = clean(key)
+        if value:
+            op[key] = value
+    # A name sets the contact person, '' removes it, and leaving it out keeps the one the party has.
+    contact = clean("contact_person")
+    if contact and not person:
+        raise WriteToolError(
+            "contact_person is not taken here: a person's name is personal data that only the person enters, in the "
+            "model's form"
+        )
+    if person and (contact or a.get("contact_person") == ""):
+        op["contact_person"] = contact
+    return op
+
+
+def _party_role(p: dict[str, Any]) -> str:
+    """A party's role in the person's language: the role's own name for USERDEFINED, '' without one."""
+    if not p or not p.get("role"):
+        return ""
+    if p["role"] == "USERDEFINED":
+        return _string(p.get("user_role") or p.get("userRole") or "") or _t("party.role.userdefined")
+    return _t("party.role." + p["role"].lower()) if p["role"] in ROLES else p["role"]
 
 
 def _define_type(cs: dict[str, Any], name: str, a: dict[str, Any]) -> dict[str, Any]:
@@ -1401,8 +1639,8 @@ def _create_element(cs: dict[str, Any], name: str, a: dict[str, Any]) -> dict[st
     if typed:
         op["type"] = typed["ref"]
     if cls == "IfcStair":
-        if _given(a.get("shape")):
-            raise WriteToolError("an IfcStair takes stair, not shape")
+        if _given(a.get("shape")) or _given(a.get("curtain")):
+            raise WriteToolError("an IfcStair takes stair, not shape or curtain")
         if _given(a.get("part_of")) or _given(a.get("host")):
             raise WriteToolError(
                 "a stair is not part_of another element and covers nothing, so part_of and host must be null"
@@ -1414,6 +1652,37 @@ def _create_element(cs: dict[str, Any], name: str, a: dict[str, Any]) -> dict[st
         op["at"] = _point(a.get("at"), "at")
         op["stair"] = _stair_of(a.get("stair"))
         return op
+    if cls == "IfcCurtainWall":
+        if _given(a.get("shape")) or _given(a.get("stair")):
+            raise WriteToolError("an IfcCurtainWall takes curtain, not shape or stair")
+        if (
+            _given(a.get("at"))
+            or (_given(a.get("z")) and a["z"] != 0)
+            or (_given(a.get("rotation")) and a["rotation"] != 0)
+        ):
+            raise WriteToolError(
+                "a curtain wall runs along its axis as a wall does: give curtain.start, curtain.end and curtain.base, "
+                "and at, z and rotation null"
+            )
+        if _given(a.get("part_of")) or _given(a.get("host")):
+            raise WriteToolError(
+                "a curtain wall is not part_of another element and covers nothing, so part_of and host must be null"
+            )
+        if predefined and predefined not in ("NOTDEFINED", "USERDEFINED"):
+            raise WriteToolError(
+                "an IfcCurtainWall is NOTDEFINED (null), or USERDEFINED with object_type; the app gives its panels "
+                "CURTAIN_PANEL and its mullions and transoms MULLION"
+            )
+        op.update({"z": None, "rotation": None, "curtain": _curtain_of(a.get("curtain"), typed)})
+        # The parts' names in the person's language, as create_spaces names its rooms (the wheel falls back on English).
+        op["part_names"] = {
+            "panel": _t("ai.change.curtain.panel"),
+            "mullion": _t("ai.change.curtain.mullion"),
+            "transom": _t("ai.change.curtain.transom"),
+        }
+        return op
+    if _given(a.get("curtain")):
+        raise WriteToolError(f"curtain is for IfcCurtainWall; {cls} takes shape")
     if _given(a.get("stair")):
         raise WriteToolError(f"stair is for IfcStair; {cls} takes shape")
     op["shape"] = _shape_of(a.get("shape"), typed)
@@ -1736,6 +2005,8 @@ def build(cs: dict[str, Any], name: str, args: dict[str, Any] | None) -> dict[st
                 "site_name": _text(a, "site_name"),
             },
         )
+    if name == "set_responsible_party":
+        return _party_op(a)
     raise WriteToolError(f"unknown tool {name}")
 
 
@@ -1896,6 +2167,42 @@ _TEXTS = {
     "ai.change.edit.pitch": "pitch {value}°",
     "ai.change.edit.overhang": "overhang {value} m",
     "ai.change.edit.base": "eaves height {value} m",
+    "party.role.architect": "Architect",
+    "party.role.structuralengineer": "Structural engineer",
+    "party.role.mechanicalengineer": "Mechanical engineer (HVAC)",
+    "party.role.electricalengineer": "Electrical engineer",
+    "party.role.civilengineer": "Civil engineer",
+    "party.role.engineer": "Engineer",
+    "party.role.consultant": "Consultant",
+    "party.role.costengineer": "Cost engineer",
+    "party.role.commissioningengineer": "Commissioning engineer",
+    "party.role.projectmanager": "Project manager",
+    "party.role.constructionmanager": "Construction manager",
+    "party.role.fieldconstructionmanager": "Site manager",
+    "party.role.contractor": "Contractor",
+    "party.role.subcontractor": "Subcontractor",
+    "party.role.supplier": "Supplier",
+    "party.role.manufacturer": "Manufacturer",
+    "party.role.reseller": "Reseller",
+    "party.role.client": "Client",
+    "party.role.owner": "Owner",
+    "party.role.buildingowner": "Building owner",
+    "party.role.buildingoperator": "Building operator",
+    "party.role.facilitiesmanager": "Facilities manager",
+    "party.role.userdefined": "Other role",
+    "ai.change.set_responsible_party": "Responsible party: {organization}{role}",
+    "ai.change.party.designation": ", designation {designation}",
+    "ai.change.party.contact": ", contact {contact}",
+    "ai.change.party.person": ", with a contact person",
+    "ai.change.party.noperson": ", without a contact person",
+    "ai.change.type.curtain_wall": "Curtain wall type",
+    "ai.change.define_type.curtain": ": mullions and transoms {width} × {depth} m, glass {thickness} m",
+    "ai.change.define_type.panel": ", glass {material}",
+    "ai.change.curtain": "curtain wall from ({x1}, {y1}) to ({x2}, {y2}), {height} m high, {bays} × {rows} panels",
+    "ai.change.curtain.base": ", from {base} m above the storey",
+    "ai.change.curtain.panel": "Panel",
+    "ai.change.curtain.mullion": "Mullion",
+    "ai.change.curtain.transom": "Transom",
 }
 
 
@@ -1977,8 +2284,19 @@ def _describe_type(op: dict[str, Any]) -> str:
             if op.get("width")
             else ""
         )
+        curtain = (
+            _t(
+                "ai.change.define_type.curtain",
+                width=_fmt(op["member_width"]),
+                depth=_fmt(op["member_depth"]),
+                thickness=_fmt(op["panel_thickness"]),
+            )
+            if op.get("member_width")
+            else ""
+        )
         material = _t("ai.change.define_type.material", material=op["material"]) if op.get("material") else ""
-        return _t("ai.change.define_type.element", **base) + size + material
+        panel = _t("ai.change.define_type.panel", material=op["panel_material"]) if op.get("panel_material") else ""
+        return _t("ai.change.define_type.element", **base) + size + curtain + material + panel
     layers = ", ".join(f"{layer['material']} {_fmt(layer['thickness'])} m" for layer in op["layers"])
     return _t("ai.change.define_type", **base, layers=layers, thickness=_fmt(_layers_thickness(op["layers"])))
 
@@ -1987,7 +2305,20 @@ def _describe_element(op: dict[str, Any]) -> str:
     s: Any = op.get("shape")
     depth = _fmt(s["depth"]) if s and s.get("depth") is not None else "–"
     stair = op.get("stair")
-    if stair:
+    c = op.get("curtain")
+    if c:
+        bays, rows = _curtain_grid(c)
+        body = _t(
+            "ai.change.curtain",
+            x1=_fmt(c["start"][0]),
+            y1=_fmt(c["start"][1]),
+            x2=_fmt(c["end"][0]),
+            y2=_fmt(c["end"][1]),
+            height=_fmt(c["height"]),
+            bays=_fmt(bays),
+            rows=_fmt(rows),
+        ) + (_t("ai.change.curtain.base", base=_fmt(c["base"])) if c.get("base") else "")
+    elif stair:
         body = _t(
             "ai.change.stair",
             risers=_fmt(stair["risers"]),
@@ -2175,6 +2506,23 @@ def describe(op: dict[str, Any]) -> str:
         )
     if tool == "delete_elements":
         return _t("ai.change.delete_elements", ids=_ids_text(op.get("ids")))
+    if tool == "set_responsible_party":  # the contact person is said, never named: the line goes to the log
+        return (
+            _t(
+                "ai.change.set_responsible_party",
+                organization=op["organization"],
+                role=f" ({_party_role(op)})" if op.get("role") else "",
+            )
+            + (_t("ai.change.party.designation", designation=op["designation"]) if op.get("designation") else "")
+            + (_t("ai.change.party.contact", contact=op["contact_role"]) if op.get("contact_role") else "")
+            + (
+                _t("ai.change.party.person")
+                if op.get("contact_person")
+                else _t("ai.change.party.noperson")
+                if op.get("contact_person") == ""
+                else ""
+            )
+        )
     if tool == "set_site":
 
         def deg(v: float) -> str:

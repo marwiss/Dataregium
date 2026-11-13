@@ -75,6 +75,7 @@ TITLES = {
     "transform_elements": "Move elements",
     "delete_elements": "Delete elements",
     "set_site": "Place the model on earth",
+    "set_responsible_party": "Name the responsible party",
     "manage_changeset": "List or mend the change set",
 }
 

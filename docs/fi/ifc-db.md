@@ -606,8 +606,8 @@ Dataspatiumin kirjoitustyökaluilla tehty muutosjoukko kantaa myös niiden toimi
 `dataspatium-tools/1`, jotta uudet elementit, poistot ja suhteet tulevat mukaan ehdotukseen. Jokainen toiminto nimeää
 työkalunsa kentässä `tool` ja pitää työkalun argumentit rinnallaan, pituudet metreinä: `create_storeys_and_grid`,
 `define_type`, `create_wall`, `create_slab`, `create_roof`, `create_opening`, `create_element`, `create_spaces`,
-`set_properties`, `set_classification`, `assign`, `edit_element`, `transform_elements`, `delete_elements` ja
-`set_site`. Palvelin ajaa ne kopiolla sovelluksen omasta koodista (`opencde/ifcgraph/ops.py`), joten samat toiminnot
+`set_properties`, `set_classification`, `assign`, `edit_element`, `transform_elements`, `delete_elements`, `set_site`
+ja `set_responsible_party`. Palvelin ajaa ne kopiolla sovelluksen omasta koodista (`opencde/ifcgraph/ops.py`), joten samat toiminnot
 antavat saman mallin sovelluksessa ja palvelimella, tiedoston yksikössä, ja IfcOpenShellin tekemissä
 omistajahistorioissa ovat ehdottaja ja palvelin. Tyyppi-, seinä-, laatta-, katto-, aukko- ja elementtitoimintojen
 luomat nimetään `new-1`, `new-2` … niiden järjestyksessä, ja niin nimetään myös jokainen huone, jonka `create_spaces`
@@ -656,6 +656,14 @@ ja hylkää tuntemattoman ominaisuuden, väärän tyyppisen arvon ja luvun yksik
 niin. `transform_elements` siirtää oven tai ikkunan aukkonsa mukana eikä koskaan tonttia, rakennusta tai kerrosta.
 IFC4X3:ssa kerroksen korkeus on vain sen sijoituksessa, ja tila on `SPACE`, ei koskaan `INTERNAL` tai `EXTERNAL`
 (buildingSMARTin sääntö IFC102).
+
+`create_element` tekee myös lasijulkisivun, `IfcCurtainWall`-elementin `curtain`-akselin mukaan (alku, loppu, korkeus,
+pohja sekä jaot ja rivit lukumäärän tai välin mukaan), jonka osia ovat pystylistat, vaakalistat ja paneelit,
+`define_type`-työkalun `curtain_wall`-tyypistä, jolla on kehyksen ja paneelien materiaalit ja mitat.
+`set_responsible_party` nimeää mallista vastaavan organisaation ja sen roolin `IfcRoleEnum`-luettelosta projektiin
+liitettynä `IfcActor`-oliona; henkilön nimi ei koskaan tule tekoälyltä. `delete_elements` poistaa myös kokonaisuuden
+osat, ja tilat saavat ensimmäisen tason tilarajat pintoineen, jotka tehdään uudelleen, kun niiden lähellä oleva seinä,
+laatta tai ovi muuttuu.
 
 Kokeilu soveltaa ensin toiminnot ja sitten muutokset ja laskee molemmat kenttään `change_count`. Toiminto, jota ei
 voida soveltaa, on lajin `op` huomautus, jossa on sen indeksi (`op`) ja `tool`, sovelluksen koodin sanoin, jotka

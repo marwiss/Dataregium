@@ -184,8 +184,8 @@ grunden `role`. Intet værktøj godkender: det gør en person, i Dataspatium.
 - Skriveværktøjerne `create_storeys_and_grid`, `define_type`, `create_wall`,
   `create_slab`, `create_roof`, `create_opening`, `create_element`,
   `create_spaces`, `set_properties`, `set_classification`, `assign`,
-  `edit_element`, `transform_elements`, `delete_elements` (med `confirm: true`) og
-  `set_site`: Dataspatiums egne, med dets skemaer uændrede og `changeset_id`
+  `edit_element`, `transform_elements`, `delete_elements` (med `confirm: true`), `set_site`
+  og `set_responsible_party`: Dataspatiums egne, med dets skemaer uændrede og `changeset_id`
   først. Et kald er én operation i ændringssættets `ops` i formen
   `dataspatium-tools/1`, præcis som appen laver den (standardværdierne udfyldt,
   tallene prøvet, teksterne afkortet ved 200 tegn, et valgfrit felt kun når det er

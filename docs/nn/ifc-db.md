@@ -600,8 +600,8 @@ Eit endringssett laga med skriveverktøya til Dataspatium ber òg operasjonane d
 `dataspatium-tools/1`, slik at nye element, slettingar og relasjonar kjem med i forslaget. Kvar operasjon oppgjev
 verktøyet sitt som `tool` og har argumenta til verktøyet ved sida av seg, lengder i meter: `create_storeys_and_grid`,
 `define_type`, `create_wall`, `create_slab`, `create_roof`, `create_opening`, `create_element`, `create_spaces`,
-`set_properties`, `set_classification`, `assign`, `edit_element`, `transform_elements`, `delete_elements` og
-`set_site`. Serveren køyrer dei med ein kopi av den eigne koden til appen (`opencde/ifcgraph/ops.py`), slik at dei
+`set_properties`, `set_classification`, `assign`, `edit_element`, `transform_elements`, `delete_elements`, `set_site`
+og `set_responsible_party`. Serveren køyrer dei med ein kopi av den eigne koden til appen (`opencde/ifcgraph/ops.py`), slik at dei
 same operasjonane gjev den same modellen i appen og på serveren, i eininga til fila, med den som foreslo og serveren i
 eigarhistorikkane som IfcOpenShell lagar. Det som type-, vegg-, dekke-, tak-, opnings- og elementoperasjonane skaper,
 heiter `new-1`, `new-2` … i rekkjefølgja si, og det gjer òg kvart rom som `create_spaces` listar opp. Ein operasjon
@@ -649,6 +649,13 @@ skjemaet til fila og avviser ein ukjend eigenskap, ein verdi av feil type og eit
 ikkje byrje slik. `transform_elements` flyttar ei dør eller eit vindauge med opninga si og aldri tomta, bygningen
 eller ein etasje. I IFC4X3 har ein etasje høgda si i plasseringa åleine, og eit rom er `SPACE`, aldri `INTERNAL` eller
 `EXTERNAL` (regelen IFC102 til buildingSMART).
+
+`create_element` lagar òg ein glasfasade, ein `IfcCurtainWall` langs `curtain` (start, slutt, høgd, base, og felt og
+rader etter tal eller avstand), med stolpar, losholtar og panel som delar, av ein `curtain_wall`-type frå
+`define_type` med materiala og måla til ramma og panela. `set_responsible_party` set organisasjonen som svarar for
+modellen, med rolla i `IfcRoleEnum`, som ein `IfcActor` tilordna prosjektet; eit personnamn kjem aldri frå ein AI.
+`delete_elements` tek med seg delane av ein heilskap, og romma får romgrenser på første nivå med flatene sine, som
+blir laga på nytt når ein vegg, eit dekke eller ei dør nær dei blir endra.
 
 Prøven bruker først operasjonane og så endringane, og tel begge i `change_count`. Ein operasjon som ikkje kan
 brukast, er ein merknad av slaget `op` med indeksen sin (`op`) og `tool`, med orda i koden til appen, som kan sitere

@@ -6,7 +6,8 @@ units of a millimetre file, the owner histories, and the classes and values the 
 Dataspatium's 437982f on IFC4 and IFC4X3, layered and door, window, column and covering types, the building
 elements and stairs of create_element, wall joins, base quantities and the common sets, a storey's description, a
 room's number and type, a material's category, the vertical datum, elements changed in place, the templates that hold
-a standard set, and a door moved with its opening while the site, the building and the storeys stay. The trial around
+a standard set, and a door moved with its opening while the site, the building and the storeys stay; and, from 9dc4f9f, a
+curtain wall with its parts, the responsible party and a deletion that takes a whole's parts. The trial around
 it is proved against a database in ``tests/integration/test_ifc_proposal.py``."""
 
 from __future__ import annotations
@@ -973,3 +974,41 @@ def test_a_door_moves_with_its_opening_and_the_site_building_and_storeys_stay(sc
     for whole in (*model.by_type("IfcSite"), *model.by_type("IfcBuilding"), model.by_type("IfcBuildingStorey")[0]):
         answer = run(model, [{**step, "ids": [whole.GlobalId]}], proposer="anna")
         assert answer["failed"]["error"].startswith(f"{whole.is_a()} #{whole.id()} {whole.Name!r} is not moved: ")
+
+
+CURTAIN = {"start": [0, 0], "end": [6, 0], "height": 3, "base": 0, "bays": 4, "bay_width": None, "rows": 2,
+           "row_height": None}  # fmt: skip
+PARTS = {"panel": "Panel", "mullion": "Mullion", "transom": "Transom"}
+
+
+@pytest.mark.parametrize("schema", ["IFC4", "IFC4X3"])
+def test_a_curtain_wall_with_its_parts_a_responsible_party_and_a_deletion_that_takes_the_parts(schema: str) -> None:
+    """From Dataspatium's 9dc4f9f: create_element's IfcCurtainWall gets its mullions, transoms and panels as its
+    parts, of the types its curtain wall type makes; set_responsible_party names the organisation that answers for
+    the model, the last call standing; delete_elements takes a whole's aggregated parts with it."""
+    model = new_model(schema)
+    curtain_type = {"tool": "define_type", "kind": "curtain_wall", "name": "GF1", "layers": None,
+                    "predefined_type": None, "material": "Aluminium", "material_category": "aluminium",
+                    "panel_material": "Triple glazing", "member_width": 0.06, "member_depth": 0.2,
+                    "panel_thickness": 0.04}  # fmt: skip
+    facade = {"tool": "create_element", "storey": "Level 1", "ifc_class": "IfcCurtainWall", "predefined_type": None,
+              "object_type": None, "name": "South", "at": None, "z": None, "rotation": None, "shape": None,
+              "stair": None, "part_of": None, "host": None, "type": "new-1", "curtain": CURTAIN,
+              "part_names": PARTS}  # fmt: skip
+    party = {"tool": "set_responsible_party", "organization": "Arkitektkontoret AB", "role": "ARCHITECT",
+             "designation": "A"}  # fmt: skip
+    answer = run(model, [STOREYS, curtain_type, facade, party], proposer="anna")
+    assert answer["failed"] is None, answer
+    (wall,) = model.by_type("IfcCurtainWall")
+    assert (wall.Name, ifcopenshell.util.element.get_type(wall).Name) == ("South", "GF1")
+    parts = [p for r in wall.IsDecomposedBy for p in r.RelatedObjects]
+    panels = [p for p in parts if p.is_a("IfcPlate")]
+    assert len(panels) == 4 * 2, "a panel per bay and row"
+    assert {ifcopenshell.util.element.get_type(p).PredefinedType for p in panels} == {"CURTAIN_PANEL"}
+    assert any(p.is_a("IfcMember") for p in parts), "its mullions and transoms"
+    (actor,) = model.by_type("IfcActor")
+    assert actor.TheActor.Name == "Arkitektkontoret AB"
+    assert [r.Role for r in actor.TheActor.Roles] == ["ARCHITECT"]
+    deleted = run(model, [{"tool": "delete_elements", "ids": [wall.GlobalId], "confirm": True}], proposer="anna")
+    assert deleted["failed"] is None, deleted
+    assert not model.by_type("IfcCurtainWall") and not model.by_type("IfcPlate"), "the parts went with it"

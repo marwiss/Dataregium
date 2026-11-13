@@ -211,7 +211,8 @@ def test_a_type_an_element_and_an_edit_go_through_the_apps_schemas(client: TestC
     layers = [{"material": "Betong", "thickness": 0.2, "category": "concrete", "role": "load_bearing"}]
     wall_type = {"kind": "wall", "name": "YV1", "layers": layers, "predefined_type": None, "material": None,
                  "material_category": None, "operation": None, "partitioning": None, "width": None, "height": None,
-                 "lining_depth": None}  # fmt: skip
+                 "lining_depth": None, "panel_material": None, "member_width": None, "member_depth": None,
+                 "panel_thickness": None}  # fmt: skip
     assert ok(call(client, "define_type", {"changeset_id": handle, **wall_type}))["ref"] == "new-1"
     typed = ok(call(client, "create_wall", {"changeset_id": handle, **WALL, "type": "new-1", "load_bearing": True}))
     assert typed["description"] == (
@@ -220,8 +221,8 @@ def test_a_type_an_element_and_an_edit_go_through_the_apps_schemas(client: TestC
     )
     shape = {"profile": "rectangle", "x": 0.3, "y": 0.3, "radius": None, "outline": None, "depth": 3, "along": None}
     column = {"storey": None, "ifc_class": "IfcColumn", "predefined_type": None, "object_type": None, "type": None,
-              "name": "P1", "at": [2, 0], "z": None, "rotation": None, "shape": shape, "stair": None, "part_of": None,
-              "host": None}  # fmt: skip
+              "name": "P1", "at": [2, 0], "z": None, "rotation": None, "shape": shape, "stair": None, "curtain": None,
+              "part_of": None, "host": None}  # fmt: skip
     assert ok(call(client, "create_element", {"changeset_id": handle, **column}))["ref"] == "new-3"
     partial = {**column, "shape": {"profile": "circle", "radius": 0.2}}
     assert "shape" in refused(call(client, "create_element", {"changeset_id": handle, **partial}))

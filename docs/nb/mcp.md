@@ -184,8 +184,8 @@ Ingen verktøy godkjenner: det gjør en person, i Dataspatium.
 - Skriveverktøyene `create_storeys_and_grid`, `define_type`, `create_wall`,
   `create_slab`, `create_roof`, `create_opening`, `create_element`,
   `create_spaces`, `set_properties`, `set_classification`, `assign`,
-  `edit_element`, `transform_elements`, `delete_elements` (med `confirm: true`) og
-  `set_site`: Dataspatiums egne, med dets skjemaer uendret og `changeset_id`
+  `edit_element`, `transform_elements`, `delete_elements` (med `confirm: true`), `set_site`
+  og `set_responsible_party`: Dataspatiums egne, med dets skjemaer uendret og `changeset_id`
   først. Et kall er én operasjon i endringssettets `ops` i formen
   `dataspatium-tools/1`, nøyaktig slik appen lager den (standardverdiene fylt inn,
   tallene prøvd, tekstene kuttet ved 200 tegn, et valgfritt felt bare når det er

@@ -77,6 +77,7 @@ def test_capabilities_document_has_the_agreed_shape_and_no_secrets(client: TestC
         "transform_elements",
         "delete_elements",
         "set_site",
+        "set_responsible_party",
     ]
     assert extensions["project_administration"] == {
         "enabled": True,

@@ -188,8 +188,8 @@ samþykkir: það gerir manneskja, í Dataspatium.
 - Skrifverkfærin `create_storeys_and_grid`, `define_type`, `create_wall`,
   `create_slab`, `create_roof`, `create_opening`, `create_element`,
   `create_spaces`, `set_properties`, `set_classification`, `assign`,
-  `edit_element`, `transform_elements`, `delete_elements` (með `confirm: true`) og
-  `set_site`: verkfæri Dataspatium sjálfs, með skemum þess óbreyttum og
+  `edit_element`, `transform_elements`, `delete_elements` (með `confirm: true`), `set_site`
+  og `set_responsible_party`: verkfæri Dataspatium sjálfs, með skemum þess óbreyttum og
   `changeset_id` fremst. Kall er ein aðgerð í `ops` breytingasettsins á forminu
   `dataspatium-tools/1`, nákvæmlega eins og forritið gerir hana (sjálfgefin gildi
   fyllt út, tölur prófaðar, textar styttir við 200 stafi, valfrjálst svið aðeins

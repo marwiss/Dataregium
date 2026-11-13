@@ -191,7 +191,7 @@ henkilö, Dataspatiumissa.
   `create_slab`, `create_roof`, `create_opening`, `create_element`,
   `create_spaces`, `set_properties`, `set_classification`, `assign`,
   `edit_element`, `transform_elements`, `delete_elements`
-  (`confirm: true` -arvolla) ja `set_site`: Dataspatiumin omat, sen skeemat
+  (`confirm: true` -arvolla), `set_site` ja `set_responsible_party`: Dataspatiumin omat, sen skeemat
   muuttamattomina ja `changeset_id` ensimmäisenä. Kutsu on yksi operaatio
   muutosjoukon `ops`-luettelossa muodossa `dataspatium-tools/1` täsmälleen niin
   kuin sovellus sen tekee (oletusarvot täytettyinä, luvut tarkistettuina, tekstit

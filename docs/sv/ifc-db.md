@@ -593,7 +593,7 @@ Ett ändringsset som gjorts med Dataspatiums skrivverktyg bär också deras oper
 `dataspatium-tools/1`, så att nya element, raderingar och samband kommer med i förslaget. Varje operation anger sitt
 verktyg som `tool` och har verktygets argument bredvid sig, längder i meter: `create_storeys_and_grid`, `define_type`,
 `create_wall`, `create_slab`, `create_roof`, `create_opening`, `create_element`, `create_spaces`, `set_properties`,
-`set_classification`, `assign`, `edit_element`, `transform_elements`, `delete_elements` och `set_site`. Servern kör
+`set_classification`, `assign`, `edit_element`, `transform_elements`, `delete_elements`, `set_site` och `set_responsible_party`. Servern kör
 dem med en kopia av appens egen kod (`opencde/ifcgraph/ops.py`), så att samma operationer ger samma modell i appen och
 på servern, i filens enhet, med den som föreslog och servern i de ägarhistoriker som IfcOpenShell gör. Det som typ-,
 vägg-, bjälklags-, tak-, öppnings- och elementoperationerna skapar heter `new-1`, `new-2` … i deras ordning, och så
@@ -641,6 +641,13 @@ topologin; det den inte kan göra blir en rad i `notes`. `set_properties` pröva
 sin enhet; en egen mängd får inte börja så. `transform_elements` flyttar en dörr eller ett fönster med sin öppning och
 aldrig tomten, byggnaden eller en våning. I IFC4X3 har en våning sin höjd enbart i sin placering, och ett utrymme är
 `SPACE`, aldrig `INTERNAL` eller `EXTERNAL` (buildingSMART:s regel IFC102).
+
+`create_element` gör också en glasfasad, en `IfcCurtainWall` längs `curtain` (start, slut, höjd, bas, och fack och
+rader efter antal eller avstånd), med sina profiler, tvärprofiler och paneler som delar, av en typ `curtain_wall` från
+`define_type` med ramens och panelernas material och mått. `set_responsible_party` anger den organisation som svarar
+för modellen, med sin roll i `IfcRoleEnum`, som en `IfcActor` tilldelad projektet; en persons namn kommer aldrig från
+en AI. `delete_elements` tar med sig en helhets delar, och rummen får rumsgränser av första nivån med sina ytor, som
+görs om när en vägg, ett bjälklag eller en dörr nära dem ändras.
 
 Prövningen tillämpar först operationerna och sedan ändringarna, och räknar båda i `change_count`. En operation som
 inte kan tillämpas är en anmärkning av slaget `op` med sitt index (`op`) och `tool`, med orden i appens kod, som kan

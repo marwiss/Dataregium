@@ -588,8 +588,8 @@ A change set made with Dataspatium's write tools also carries their operations a
 `dataspatium-tools/1`, so that new elements, deletions and relationships reach the proposal. Each operation names
 its tool as `tool` and holds the tool's arguments beside it, lengths in metres: `create_storeys_and_grid`,
 `define_type`, `create_wall`, `create_slab`, `create_roof`, `create_opening`, `create_element`, `create_spaces`,
-`set_properties`, `set_classification`, `assign`, `edit_element`, `transform_elements`, `delete_elements` and
-`set_site`. The server runs them with a copy of the app's own code (`opencde/ifcgraph/ops.py`), so that the same
+`set_properties`, `set_classification`, `assign`, `edit_element`, `transform_elements`, `delete_elements`, `set_site`
+and `set_responsible_party`. The server runs them with a copy of the app's own code (`opencde/ifcgraph/ops.py`), so that the same
 operations give the same model in the app and on the server, in the file's unit, with the proposer and the server in
 the owner histories that IfcOpenShell makes. What the type, wall, slab, roof, opening and element operations create
 is named `new-1`, `new-2` … in their order, and so is each room that `create_spaces` lists. An operation names an
@@ -637,6 +637,13 @@ property, a value of the wrong type and a number with its unit; a set of the mod
 `transform_elements` moves a door or window with its opening and never the site, the building or a storey. In IFC4X3
 a storey has its height in its placement alone and a space is `SPACE`, never `INTERNAL` or `EXTERNAL`
 (buildingSMART's rule IFC102).
+
+`create_element` also makes a curtain wall, an `IfcCurtainWall` along `curtain` (start, end, height, base, and bays
+and rows by count or spacing), with its mullions, transoms and panels as its parts, of a `define_type`
+`curtain_wall` type with its frame's and panels' materials and sizes. `set_responsible_party` names the organisation
+that answers for the model, with its role in `IfcRoleEnum`, as an `IfcActor` assigned to the project; a person's
+name never comes from an AI. `delete_elements` takes a whole's parts with it, and the spaces get first-level space
+boundaries with their faces, made anew when a wall, slab or door near them changes.
 
 The trial applies the operations first, then the changes, and counts both in `change_count`. An operation that
 cannot be applied is a finding of kind `op` with its index (`op`) and `tool`, in the words of the app's code, which

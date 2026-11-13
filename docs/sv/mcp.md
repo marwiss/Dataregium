@@ -183,8 +183,8 @@ Inget verktyg godkänner: en person gör det, i Dataspatium.
 - Skrivverktygen `create_storeys_and_grid`, `define_type`, `create_wall`,
   `create_slab`, `create_roof`, `create_opening`, `create_element`,
   `create_spaces`, `set_properties`, `set_classification`, `assign`,
-  `edit_element`, `transform_elements`, `delete_elements` (med `confirm: true`)
-  och `set_site`: Dataspatiums egna, med dess scheman oförändrade och
+  `edit_element`, `transform_elements`, `delete_elements` (med `confirm: true`),
+  `set_site` och `set_responsible_party`: Dataspatiums egna, med dess scheman oförändrade och
   `changeset_id` först. Ett anrop är en operation i ändringssetets `ops` i formen
   `dataspatium-tools/1`, precis som appen gör den (standardvärdena ifyllda, talen
   prövade, texterna kapade vid 200 tecken, ett valfritt fält bara när det anges),

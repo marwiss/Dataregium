@@ -1174,6 +1174,10 @@ ON_A_DRAFT: dict[str, dict[str, Any]] = {
         "width": None,
         "height": None,
         "lining_depth": None,
+        "panel_material": None,
+        "member_width": None,
+        "member_depth": None,
+        "panel_thickness": None,
     },
     "create_wall": {
         "storey": "Plan 1",
@@ -1240,6 +1244,7 @@ ON_A_DRAFT: dict[str, dict[str, Any]] = {
             "along": "z",
         },
         "stair": None,
+        "curtain": None,
         "part_of": None,
         "host": None,
     },
@@ -1295,6 +1300,13 @@ ON_A_DRAFT: dict[str, dict[str, Any]] = {
         "site_name": "Site",
         "vertical_datum": None,
     },
+    "set_responsible_party": {
+        "organization": "Arkitektkontoret AB",
+        "role": "ARCHITECT",
+        "user_role": None,
+        "designation": "A",
+        "contact_role": "Uppdragsledare",
+    },
     "manage_changeset": {"action": "list"},
     "change_attribute": {
         "guid": WALL_A,
@@ -1315,11 +1327,38 @@ STAIR = {"risers": 16, "riser_height": 0.175, "tread_length": 0.27, "width": 1, 
 POLYGON = {"profile": "polygon", "x": None, "y": None, "radius": None, "outline": OUTLINE, "depth": 3, "along": "z"}
 #: Other calls the stand-ins answer, for the arguments that a tool's call above leaves null: a stair, a polygon and
 #: an outline.
+CURTAIN = {"start": [0, 0], "end": [6, 0], "height": 3, "base": None, "bays": 4, "bay_width": None, "rows": None,
+           "row_height": 1.5}  # fmt: skip
 OTHER_FORMS: dict[str, list[dict[str, Any]]] = {
     "create_element": [
         ON_A_DRAFT["create_element"]
         | {"ifc_class": "IfcStair", "predefined_type": None, "shape": None, "stair": STAIR},
         ON_A_DRAFT["create_element"] | {"shape": POLYGON},
+        ON_A_DRAFT["create_element"]
+        | {
+            "ifc_class": "IfcCurtainWall",
+            "predefined_type": None,
+            "at": None,
+            "z": None,
+            "rotation": None,
+            "shape": None,
+            "curtain": CURTAIN,
+        },
+    ],
+    "define_type": [
+        ON_A_DRAFT["define_type"]
+        | {
+            "kind": "curtain_wall",
+            "layers": None,
+            "predefined_type": None,
+            "panel_material": "Glass",
+            "member_width": 0.05,
+            "member_depth": 0.15,
+            "panel_thickness": 0.03,
+        },
+    ],
+    "set_responsible_party": [
+        ON_A_DRAFT["set_responsible_party"] | {"role": "USERDEFINED", "user_role": "Acoustician"}
     ],
     "edit_element": [ON_A_DRAFT["edit_element"] | {"start": None, "end": None, "outline": OUTLINE}],
 }
@@ -1360,11 +1399,21 @@ def _added(before: dict[str, dict[str, Any]], after: dict[str, dict[str, Any]]) 
     return added
 
 
+def _as_given(text: str) -> tuple[str, ...]:
+    """A text as a tool keeps it: as it is, or with its white space run together and trimmed, as
+    set_responsible_party keeps a name (the app's ``partyOp``)."""
+    return (text, " ".join(text.split()))
+
+
 def _held_as_data(kept: Any, text: str) -> bool:
     """Whether what a call kept holds ``text`` as one string, whole or cut where the tool cuts it; else it holds
     nothing of it, as a tool leaves out an argument it has no use for."""
     found = list(_strings(kept))
-    held = any(string and text.startswith(string) and len(string) >= min(len(text), 60) for string in found)
+    held = any(
+        string and form.startswith(string) and len(string) >= min(len(form), 60)
+        for string in found
+        for form in _as_given(text)
+    )
     assert held or not any(trace in string for string in found for trace in traces(text)), (text[:40], found)
     return held
 
@@ -1385,7 +1434,8 @@ def _answered_as_data(result: dict[str, Any]) -> None:
     untraced(json.dumps(list(_keys(answer))))
     for found in _strings(answer):
         for text in INJECTIONS:
-            assert text[:60] in found or not any(trace in found for trace in traces(text)), (text[:40], found[:300])
+            shown = any(form[:60] in found for form in _as_given(text))
+            assert shown or not any(trace in found for trace in traces(text)), (text[:40], found[:300])
 
 
 @pytest.mark.parametrize("name", list(ON_A_DRAFT))

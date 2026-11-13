@@ -2,14 +2,15 @@
 """Dataspatium's write tools on an IFC model and its topology of the walls, with Dataspatium's own code (ADR 0021).
 
 A copy of Dataspatium's class ``_ChangeSet`` and of its topology (``_ifc_topology``), with the module-level helpers
-they call (``python/dataspatium.py``, branch f43, commit 334ec55 of 2026-11-12), kept in step by hand, so that one
+they call (``python/dataspatium.py``, branch f43, commit 9dc4f9f of 2026-11-13), kept in step by hand, so that one
 list of operations gives the same model in the app and on the server, and the server finds the rooms the app finds.
 A change set that carries the operations as ``ops`` (``documents/changes.py``) is tried by the apply worker
 (``apply.py``), which runs them with :func:`run` on the base version's file before its changes; the topology worker
 (``topology.py``) finds the rooms of a file (the owner's decision F36 a: the server makes the client's room check).
 The operations are the AI's write tools in the app: ``create_storeys_and_grid``, ``define_type``, ``create_wall``,
 ``create_slab``, ``create_roof``, ``create_opening``, ``create_element``, ``create_spaces``, ``set_properties``,
-``set_classification``, ``assign``, ``edit_element``, ``transform_elements``, ``delete_elements`` and ``set_site``,
+``set_classification``, ``assign``, ``edit_element``, ``transform_elements``, ``delete_elements``, ``set_site`` and
+``set_responsible_party``,
 each a JSON object with its tool's name as ``tool`` and its arguments beside it; ``_ChangeSet``'s docstring lists the
 fields each release of the form added. Lengths are metres, scaled to the file's unit. A wall, a slab, a roof or an
 opening (or the door or window that fills it), a type of ``define_type`` and an element of ``create_element`` get the
@@ -45,9 +46,10 @@ Against the original only this differs, so that the next copy is a diff away:
 - ``_ifc_topology`` also gives each storey the GlobalIds of the walls it could not read (``unread_walls``), and
   ``_topo_plan`` those of the walls with an open end (``dangling``), for the report's rooms, which name elements by
   GlobalId; the lines that do so are marked ``# Dataregium``;
-- ruff formats the copy in lines of 120 characters and lets its idioms be (``pyproject.toml``), and thirty-four
-  comments quiet bandit (``# nosec B110`` and ``B112``, eleven) and ty (``# ty: ignore``, twenty-three); no other
-  statement changed.
+- ruff formats the copy in lines of 120 characters and lets its idioms be (``pyproject.toml``), and forty-two
+  comments quiet bandit (``# nosec B110`` and ``B112``, seventeen) and ty (``# ty: ignore``, twenty-five); no other
+  statement changed. The original defines ``unbound`` and ``host_of`` twice in ``_ChangeSet``, where the second
+  counts, and so does the copy.
 """
 
 from __future__ import annotations
@@ -599,6 +601,10 @@ class _ChangeSet:
     At the end of apply IsExternal follows the topology on the walls the change set created or changed, on their doors and windows,
     and on its roofs and roof slabs (write_external).
 
+    Since PLAN.md item 5 (2026-11-13), the space boundaries are first level with their faces: create_spaces bounds each space by the
+    faces of its walls and of the doors, windows and openings in them, and at the end of apply the spaces near what the change set
+    created or changed (a wall made after the rooms, a slab below or above, a door, a moved wall) get theirs anew (space_boundaries).
+
     Since recommendations 2 and 3 of the Praxi study and 14 of the native IFC study (2026-11-12), all optional:
 
         create_storeys_and_grid {storeys: [{..., description, long_name}]}
@@ -613,6 +619,18 @@ class _ChangeSet:
             are known; the CRS gets a Description in plain words and the metre as MapUnit, every parent representation context its
             own IfcMapConversion with the same values and the file's unit as Scale, and IFC4 and IFC2X3 buildings the height in
             ElevationOfRefHeight (map_conversion, building_height).
+
+    Since recommendation 8 of the study of the IFC and BCF guidelines (2026-11-12), one new operation:
+
+        set_responsible_party {organization, role, user_role, designation, contact_role, contact_person}
+            the organisation that answers for the model file (organization, required) with its role (role: a value of IfcRoleEnum,
+            COMMISSIONINGENGINEER spelled as IFC2X3 spells it there; USERDEFINED with user_role, the role's name; null for none),
+            written natively: an IfcActor of the IfcOrganization, the role an IfcActorRole among its Roles, assigned to the
+            IfcProject by an IfcRelAssignsToActor with that ActingRole. designation (the actor's Name: the short designation the
+            project gives the party) and contact_role (its Description: whom to contact there, as a role) are optional;
+            contact_person (optional, personal data the person enters) makes the actor an IfcPersonAndOrganization: a name sets it,
+            "" removes it, and null or missing keeps the one the party has as long as the organisation stays. A second call
+            changes the party in place and keeps its GlobalIds (op_set_responsible_party).
 
     Since recommendation 7 of the Praxi study and 17 of the native IFC study (2026-11-12), elements are changed in place so that their
     GlobalId stays for their whole life:
@@ -649,6 +667,27 @@ class _ChangeSet:
         create_opening {..., type, side}
             type (optional) is a door or window type; the filling takes its size and its mapped geometry, stands flush with the
             wall's left face (side right: the right face) and a door opens toward that side (place_typed_fill).
+
+    Since recommendation 4 of the native IFC study, glass façades (2026-11-13), with one new class and new optional fields:
+
+        define_type {kind: ... | curtain_wall, ..., material, material_category, panel_material, member_width, member_depth,
+                     panel_thickness}
+            curtain_wall makes an IfcCurtainWallType (NOTDEFINED) with a ref, and its parts' types of the same name: an IfcPlateType
+            CURTAIN_PANEL with one material layer of panel_material (null: Glass, category glass) panel_thickness thick, and an
+            IfcMemberType MULLION, for mullions and transoms alike (IfcMemberTypeEnum has no TRANSOM), of material (null: Aluminium,
+            category aluminium; material_category for another) with a member_width by member_depth rectangle as its material
+            profile (IFC2X3: the material alone); metres, null: 0.05, 0.15 and 0.03 (curtain_types).
+        create_element {ifc_class: IfcCurtainWall, ..., curtain: {start: [x, y], end: [x, y], height, base, bays, bay_width, rows,
+                        row_height}, part_names: {panel, mullion, transom}}
+            a curtain wall with a ref along its axis from start to end in the storey's plane, height (null: 3) from base (null: 0)
+            metres above the storey, with an 'Axis' and no body of its own, aggregating its parts on an even grid: bays (a count) or
+            bay_width (the most a bay is wide; null and null: 1.5 m), rows or row_height likewise; at, shape, stair, part_of and
+            host are null. Its mullions, transoms (IfcMember MULLION) and panels (IfcPlate CURTAIN_PANEL) get no refs and are named
+            with part_names (optional, the person's words; null: Panel, Mullion, Transom). A curtain wall type types them and gives
+            their sizes and materials (create_curtain_wall). It gets Qto_CurtainWallQuantities, and IsExternal in
+            Pset_CurtainWallCommon from the topology, which reads it as a wall.
+        delete_elements
+            a whole goes with its parts (a curtain wall's, a stair's, a roof's), so that none is left in no storey and no whole.
     """
 
     CREATES = (
@@ -684,7 +723,12 @@ class _ChangeSet:
         self.marks = {"LoadBearing": {}, "Status": {}}  # element id -> what its create step gave (write_marked)
         self.written = set()  # (element id, set, property) that set_properties wrote, which write_external may replace
         self.rejoin = set()  # ids of walls whose joins edit_element or transform_elements undid, for join_walls
+        self.moved = {}  # wall id -> (axis, thickness) before the change set first moved or resized it, for fit_spaces
+        self.slid = set()  # ids of doors and windows that moved along a wall that stayed, for fit_spaces
         self.fill_sizes = {}  # (width, height) in metres of the door and window types this change set defines, by STEP id
+        self.unbounded = (
+            set()
+        )  # ids of spaces a deleted element bounded, whose other faces space_boundaries writes anew
 
     # -- units, lookups and bookkeeping
     def u(self, metres):
@@ -1343,21 +1387,550 @@ class _ChangeSet:
                 self.bound(b.RelatingSpace, e, b.InternalOrExternalBoundary == "EXTERNAL")
 
     # -- spaces and their boundaries
-    def bound(self, space, element, external):
-        """A physical IfcRelSpaceBoundary of a space against a wall, door or window, without connection geometry for now."""
-        import ifcopenshell.guid
+    # First-level boundaries (IFC4: IfcRelSpaceBoundary1stLevel; IFC2X3, which has no such class: IfcRelSpaceBoundary named '1stLevel',
+    # the implementer agreement's name): one per planar face where a wall, a slab, a door, a window or an opening bounds the space.
+    # A face is an IfcConnectionSurfaceGeometry with an IfcCurveBoundedPlane in the space's object coordinates (the form IFC gives for a
+    # planar boundary in all three schemas, which IfcOpenShell's kernel builds; IfcFaceBasedSurfaceModel is deprecated in IFC4 and
+    # IFC4.3, rule IFC102): an IfcPlane whose Axis points away from the space, and closed 2D IfcPolylines in its (u, v), the outer one
+    # counter-clockwise about the Axis and the inner ones clockwise. As IFC4 defines the first level, a door's, a window's or an
+    # opening's face overlaps its wall's, which is not cut, and names it as ParentBoundary (IFC4 and later).
+    BOUND_CLASSES = ("IfcWall", "IfcSlab", "IfcDoor", "IfcWindow", "IfcOpeningElement")
+    BOUND_EPS = (
+        1e-5  # metres: how near a wall's face a stretch of the outline inside the walls must lie to be that face
+    )
+    BOUND_MIN = 0.01  # metres: the narrowest face written
+    BOUND_TOUCH = (
+        0.05  # metres: how far a wall may stand from a space, or a slab from its floor or top, and still bound it
+    )
 
-        rel = self.m.create_entity(
-            "IfcRelSpaceBoundary",
-            GlobalId=ifcopenshell.guid.new(),
-            RelatingSpace=space,
-            RelatedBuildingElement=element,
-            PhysicalOrVirtualBoundary="PHYSICAL",
-            InternalOrExternalBoundary="EXTERNAL" if external else "INTERNAL",
+    def bound(self, space, element, external, face=None, virtual=False, parent=None, reuse=None):
+        """A first-level space boundary of a space against an element: PHYSICAL (VIRTUAL for an opening without a door or window),
+        INTERNAL or EXTERNAL by `external` (True, False, or None for the value of the boundary reused, else NOTDEFINED), with the face
+        (face_geometry) as its ConnectionGeometry when given, and in IFC4 and later the boundary it lies in as ParentBoundary. `reuse` is
+        an earlier boundary of the pair, which keeps its GlobalId (an IfcRelSpaceBoundary of IFC4 becomes IfcRelSpaceBoundary1stLevel)."""
+        import ifcopenshell.guid
+        import ifcopenshell.util.element
+
+        first = self.m.schema != "IFC2X3"
+        cls = "IfcRelSpaceBoundary1stLevel" if first else "IfcRelSpaceBoundary"
+        side = (
+            "EXTERNAL"
+            if external is True
+            else "INTERNAL"
+            if external is False
+            else (reuse.InternalOrExternalBoundary if reuse is not None else None) or "NOTDEFINED"
         )
-        if self.owner is not None:
+        guid = None
+        if reuse is not None and reuse.is_a() != cls:
+            guid = reuse.GlobalId
+            self.unbound(reuse)
+            reuse = None
+        rel = reuse if reuse is not None else self.m.create_entity(cls, GlobalId=guid or ifcopenshell.guid.new())
+        old = rel.ConnectionGeometry
+        if old is not None:
+            rel.ConnectionGeometry = None
+            ifcopenshell.util.element.remove_deep2(self.m, old)
+        rel.RelatingSpace = space
+        rel.RelatedBuildingElement = element
+        rel.PhysicalOrVirtualBoundary = "VIRTUAL" if virtual else "PHYSICAL"
+        rel.InternalOrExternalBoundary = side
+        rel.ConnectionGeometry = self.face_geometry(space, face) if face is not None else None
+        if first:
+            rel.ParentBoundary = parent
+        else:
+            rel.Name = "1stLevel"
+        if self.owner is not None and rel.OwnerHistory is None:
             rel.OwnerHistory = self.owner
         return rel
+
+    def unbound(self, rel):
+        """Remove a space boundary and its connection geometry."""
+        import ifcopenshell.api.boundary
+
+        ifcopenshell.api.boundary.remove_boundary(self.m, boundary=rel)
+
+    def face_geometry(self, space, face):
+        """The IfcConnectionSurfaceGeometry of a face in the space's object coordinates, in file units. face: "o" (the plane's origin),
+        "x" (its u direction) and "z" (its normal, away from the space) in the world in metres, and "rings": the outer ring and the
+        holes as 3D points in the world in metres, on the plane."""
+        from shapely.geometry import Polygon
+        from shapely.geometry.polygon import orient
+
+        back = _cs_invert(_cs_placement(space.ObjectPlacement))
+        s = self.scale
+
+        def local(p):
+            return _cs_at(back, [float(c) / s for c in p])
+
+        o = local(face["o"])
+        x = _cs_unit(_cs_turn(back, face["x"]))
+        z = _cs_unit(_cs_turn(back, face["z"]))
+        y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]]
+
+        def uv(p):
+            q = [a - b for a, b in zip(local(p), o)]
+            return round(_cs_dot(q, x), 6) + 0.0, round(_cs_dot(q, y), 6) + 0.0
+
+        rings = [[uv(p) for p in ring] for ring in face["rings"]]
+        poly = orient(
+            Polygon(rings[0], rings[1:]), sign=1.0
+        )  # the outer ring counter-clockwise about the normal, the holes clockwise
+
+        def curve(ring):
+            pts = []
+            for c in list(ring.coords)[:-1]:
+                if not pts or pts[-1] != c:
+                    pts.append(c)
+            return self.closed(pts)
+
+        position = self.m.createIfcAxis2Placement3D(
+            self.point(*[round(c, 9) + 0.0 for c in o]),
+            self.direction(*[round(c, 12) + 0.0 for c in z]),
+            self.direction(*[round(c, 12) + 0.0 for c in x]),
+        )
+        surface = self.m.createIfcCurveBoundedPlane(
+            self.m.createIfcPlane(position), curve(poly.exterior), [curve(r) for r in poly.interiors]
+        )
+        return self.m.createIfcConnectionSurfaceGeometry(surface, None)
+
+    def maintained(self, rel):
+        """Whether the app writes a boundary anew: a first-level one (not IfcRelSpaceBoundary2ndLevel, not named '2ndLevel') against a
+        wall, slab, door, window or opening. Another program's second-level boundaries, and boundaries to other elements, stay."""
+        if rel.is_a("IfcRelSpaceBoundary2ndLevel") or str(rel.Name or "").strip().lower() == "2ndlevel":
+            return False
+        e = rel.RelatedBuildingElement
+        return e is not None and any(e.is_a(c) for c in self.BOUND_CLASSES)
+
+    def prism_of(self, product):
+        """(outline, bottom, top) of a product whose body is one extrusion straight up of a polygonal profile (a Boolean result by its
+        first operand): the outline a shapely polygon in the world's plan with the profile's voids as holes, the heights in the world,
+        all in metres; None for another body."""
+        from shapely.geometry import Polygon
+
+        m = _cs_placement(getattr(product, "ObjectPlacement", None))
+        rep = getattr(product, "Representation", None)
+        if m is None or rep is None:
+            return None
+        items = [
+            i
+            for r in (rep.Representations or ())
+            if (r.RepresentationIdentifier or "Body") == "Body"
+            for i in (r.Items or ())
+        ]
+        while len(items) == 1 and items[0].is_a("IfcBooleanResult"):
+            items = [items[0].FirstOperand]
+        if len(items) != 1 or not items[0].is_a("IfcExtrudedAreaSolid"):
+            return None
+        item = items[0]
+        p = _cs_compose(m, _cs_axes(item.Position))
+        d = _cs_unit(_cs_turn(p, [float(c) for c in item.ExtrudedDirection.DirectionRatios]))
+        if d is None or abs(d[2]) < 0.9999 or abs(p[2][2]) < 0.9999:
+            return None
+        profile = item.SweptArea
+        rings = [_cs_profile_points(profile)]
+        for c in getattr(profile, "InnerCurves", None) or ():
+            pts = (
+                [[float(v) for v in q.Coordinates][:2] for q in c.Points]
+                if c.is_a("IfcPolyline")
+                else [[float(v) for v in q][:2] for q in c.Points.CoordList]
+                if c.is_a("IfcIndexedPolyCurve")
+                else []
+            )
+            if len(pts) >= 3:
+                rings.append(pts)
+        if len(rings[0]) < 3:
+            return None
+        s = self.scale
+        world = [[(q[0] * s, q[1] * s) for q in (_cs_at(p, (x, y, 0.0)) for x, y in ring)] for ring in rings]
+        poly = Polygon(world[0], world[1:])
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        if poly.is_empty or poly.geom_type != "Polygon":
+            return None
+        z0 = p[3][2] * s
+        z1 = z0 + float(item.Depth) * d[2] * s
+        return poly, min(z0, z1), max(z0, z1)
+
+    def world_points(self, e):
+        """The corners of an element's body in the world, in metres (_cs_item_points); [] when the app cannot read them."""
+        m = _cs_placement(getattr(e, "ObjectPlacement", None))
+        rep = getattr(e, "Representation", None)
+        if m is None or rep is None:
+            return []
+        s = self.scale
+        return [
+            [c * s for c in _cs_at(m, p)]
+            for r in (rep.Representations or ())
+            if (r.RepresentationIdentifier or "Body") == "Body"
+            for item in (r.Items or ())
+            for p in _cs_item_points(item)
+        ]
+
+    def host_of(self, e):
+        """The element whose opening a door, window or opening is in; None for another element."""
+        opening = e
+        if not e.is_a("IfcOpeningElement"):
+            fills = list(getattr(e, "FillsVoids", None) or ())
+            opening = fills[0].RelatingOpeningElement if fills else None
+        voids = list(getattr(opening, "VoidsElements", None) or ()) if opening is not None else []
+        return voids[0].RelatingBuildingElement if voids else None
+
+    def space_storey(self, space):
+        """The storey a space is aggregated in, through spaces it is part of; None when it is in none."""
+        e = space
+        for _ in range(8):
+            rel = next(iter(getattr(e, "Decomposes", None) or ()), None)
+            if rel is None:
+                return None
+            e = rel.RelatingObject
+            if e.is_a("IfcBuildingStorey"):
+                return e
+        return None
+
+    def bound_context(self, external=None):
+        """The readings the boundaries of one step share: walls per storey, slabs, spaces' bodies and, per storey, the walls the
+        topology finds external and those it finds in rooms (external: {storey id: (external ids, room wall ids)}, given by
+        create_spaces, which has the topology)."""
+        return {"walls": {}, "slabs": None, "solids": {}, "sides": dict(external or {}), "settings": [None]}
+
+    def ctx_walls(self, ctx, storey):
+        """The walls of a storey as the boundaries read them, as the topology does: [{"e", "segs": [(a, b)], "w", "band", "z"}], the
+        straight pieces of the centreline, the thickness and the footprint in the world's plan and the body's bottom and top (None
+        when unread), in metres."""
+        if storey.id() in ctx["walls"]:
+            return ctx["walls"][storey.id()]
+        from shapely.geometry import LineString
+        from shapely.ops import unary_union
+
+        out = []
+        for w in (
+            e
+            for rel in (getattr(storey, "ContainsElements", None) or ())
+            for e in (rel.RelatedElements or ())
+            if e.is_a("IfcWall")
+        ):
+            try:
+                line = _topo_axis(w, self.scale)
+                width = _topo_thickness(w, self.scale) if line else None
+            except Exception:
+                line = None
+            if not line:
+                try:
+                    if ctx["settings"][0] is None:
+                        ctx["settings"][0] = _topo_settings()
+                    line, width = _topo_footprint(w, ctx["settings"][0])
+                except Exception:
+                    line = None
+            segs = [(tuple(a), tuple(b)) for a, b in zip(line or (), (line or ())[1:]) if math.dist(a, b) > 1e-6]
+            if not segs:
+                continue
+            width = float(width or 0.2)
+            zs = [p[2] for p in self.world_points(w)]
+            out.append(
+                {
+                    "e": w,
+                    "segs": segs,
+                    "w": width,
+                    "band": unary_union([LineString([a, b]).buffer(width / 2.0, cap_style="flat") for a, b in segs]),
+                    "z": (min(zs), max(zs)) if zs else None,
+                }
+            )
+        ctx["walls"][storey.id()] = out
+        return out
+
+    def ctx_slabs(self, ctx):
+        """The model's slabs that lie flat as the boundaries read them: [{"e", "foot", "z0", "z1"}] in metres (prism_of)."""
+        if ctx["slabs"] is None:
+            ctx["slabs"] = []
+            for e in self.m.by_type("IfcSlab"):
+                got = self.prism_of(e)
+                if got is not None:
+                    ctx["slabs"].append({"e": e, "foot": got[0], "z0": got[1], "z1": got[2]})
+        return ctx["slabs"]
+
+    def ctx_solid(self, ctx, space):
+        if space.id() not in ctx["solids"]:
+            ctx["solids"][space.id()] = self.prism_of(space)
+        return ctx["solids"][space.id()]
+
+    def ctx_sides(self, ctx, storey):
+        """(external wall ids, wall ids in rooms) of a storey's topology; None when it finds no room there or cannot be computed."""
+        if storey.id() not in ctx["sides"]:
+            try:
+                rec = next(
+                    (
+                        r
+                        for r in _ifc_topology(self.m, storeys={_ifc_text(storey.Name)}, shapes=True)
+                        if r["_storey"].id() == storey.id()
+                    ),
+                    None,
+                )
+            except Exception:
+                rec = None
+            ctx["sides"][storey.id()] = (
+                ({x["wall"] for x in rec["external"]}, {w for room in rec["rooms"] for w in room["walls"]})
+                if rec and rec["rooms"]
+                else None
+            )
+        return ctx["sides"][storey.id()]
+
+    def slab_external(self, slab, storey, floor):
+        """Whether a slab is external to the spaces above it (floor) or below it: the slab's IsExternal when it has one; else true for a
+        roof slab and a base slab, and for a floor on the lowest storey and a ceiling over the highest."""
+        import ifcopenshell.util.element as el
+
+        try:
+            value = el.get_pset(slab, "Pset_SlabCommon", "IsExternal")
+        except Exception:
+            value = None
+        if isinstance(value, bool):
+            return value
+        try:
+            kind = str(el.get_predefined_type(slab) or "")
+        except Exception:
+            kind = str(getattr(slab, "PredefinedType", None) or "")
+        if kind == "ROOF" or (floor and kind == "BASESLAB"):
+            return True
+        levels = [_topo_elevation(s, self.scale) for s in self.m.by_type("IfcBuildingStorey")]
+        z = _topo_elevation(storey, self.scale)
+        return z <= min(levels) + 1e-6 if floor else z >= max(levels) - 1e-6
+
+    def wall_openings(self, wall):
+        """[(element, opening, virtual)]: the doors and windows in a wall's openings by their opening, and in IFC4 and later an opening
+        without one as a virtual boundary of the IfcOpeningElement (IFC2X3's rule WR1 takes no element for a virtual boundary);
+        recesses are left out."""
+        out = []
+        for v in getattr(wall, "HasOpenings", None) or ():
+            o = v.RelatedOpeningElement
+            if str(getattr(o, "PredefinedType", None) or "") == "RECESS":
+                continue
+            fills = [
+                f.RelatedBuildingElement
+                for f in (getattr(o, "HasFillings", None) or ())
+                if f.RelatedBuildingElement.is_a("IfcDoor") or f.RelatedBuildingElement.is_a("IfcWindow")
+            ]
+            if fills:
+                out += [(f, o, False) for f in fills]
+            elif self.m.schema != "IFC2X3":
+                out.append((o, o, True))
+        return out
+
+    def space_faces(self, space, ctx):
+        """The faces that bound a space, or None when its body is not an extrusion straight up of a polygon (prism_of) or it is in no
+        storey: (faces, read), read the ids of the elements the app read for it (the walls of its storey with their doors, windows and
+        openings, and the flat slabs), whose earlier boundaries the faces replace.
+
+        Inside the walls the space's outline is less the walls' footprints; a wall bounds the space along each straight piece of its
+        centreline where that outline runs along the piece's face (half the thickness to either side), from the floor's top (the slab
+        below, else the space's bottom) to the ceiling's underside (the slab above, else the space's top), within the wall's own height.
+        A door, window or opening in such a face bounds it where its opening's body lies, in the same plane. A slab lying flat whose
+        thickness reaches the space's bottom (top), within BOUND_TOUCH, bounds it with its top (underside) inside the walls."""
+        from shapely.geometry import LineString
+        from shapely.ops import unary_union
+
+        solid = self.ctx_solid(ctx, space)
+        storey = self.space_storey(space)
+        if solid is None or storey is None:
+            return None
+        P, z0, z1 = solid
+        walls = self.ctx_walls(ctx, storey)
+        near = [w for w in walls if w["band"].distance(P) <= self.BOUND_TOUCH]
+        inside = P.difference(unary_union([w["band"] for w in near])) if near else P
+        touch, eps, least = self.BOUND_TOUCH, self.BOUND_EPS, self.BOUND_MIN
+        slabs = [x for x in self.ctx_slabs(ctx) if x["foot"].intersects(inside)]
+        floors = [x for x in slabs if x["z0"] - touch <= z0 <= x["z1"] + touch]
+        ceilings = [x for x in slabs if x not in floors and x["z0"] - touch <= z1 <= x["z1"] + touch]
+        bottom = max([z0] + [x["z1"] for x in floors])
+        top = min([z1] + [x["z0"] for x in ceilings])
+        if top - bottom < least:
+            bottom, top = z0, z1
+        sides = self.ctx_sides(ctx, storey)
+        read = (
+            {w["e"].id() for w in walls}
+            | {x["e"].id() for x in self.ctx_slabs(ctx)}
+            | {e.id() for w in walls for e, _, _ in self.wall_openings(w["e"])}
+        )
+        edge = inside.boundary
+        faces = []
+        for w in near:
+            if sides is None:
+                external = None
+            else:
+                external = True if w["e"].id() in sides[0] else False if w["e"].id() in sides[1] else None
+            holes = self.wall_openings(w["e"])
+            lo, hi = (max(bottom, w["z"][0]), min(top, w["z"][1])) if w["z"] else (bottom, top)
+            if hi - lo < least:
+                continue
+            for a, b in w["segs"]:
+                length = math.dist(a, b)
+                d = ((b[0] - a[0]) / length, (b[1] - a[1]) / length)
+                n = (-d[1], d[0])
+                for sign in (1.0, -1.0):
+                    fa = (a[0] + n[0] * sign * w["w"] / 2.0, a[1] + n[1] * sign * w["w"] / 2.0)
+                    fb = (fa[0] + d[0] * length, fa[1] + d[1] * length)
+                    hit = edge.intersection(LineString([fa, fb]).buffer(eps, cap_style="flat"))
+                    spans = []
+                    for g in getattr(hit, "geoms", [hit]):
+                        ts = [(c[0] - fa[0]) * d[0] + (c[1] - fa[1]) * d[1] for c in getattr(g, "coords", ())]
+                        if ts:
+                            spans.append([max(0.0, min(ts)), min(length, max(ts))])
+                    merged = []
+                    for span in sorted(spans):
+                        if merged and span[0] <= merged[-1][1] + 2 * eps:
+                            merged[-1][1] = max(merged[-1][1], span[1])
+                        else:
+                            merged.append(span)
+
+                    def at(t, zz):
+                        return (fa[0] + d[0] * t, fa[1] + d[1] * t, zz)
+
+                    def rect(t0, t1, g0, g1):
+                        start = (
+                            t0 if sign > 0 else t1
+                        )  # u runs along the face as seen from the space, so that the normal points away
+                        return {
+                            "o": at(start, g0),
+                            "x": (sign * d[0], sign * d[1], 0.0),
+                            "z": (-sign * n[0], -sign * n[1], 0.0),
+                            "rings": [[at(t0, g0), at(t1, g0), at(t1, g1), at(t0, g1)]],
+                            "area": (t1 - t0) * (g1 - g0),
+                        }
+
+                    for s0, s1 in merged:
+                        if s1 - s0 < least:
+                            continue
+                        faces.append(dict(rect(s0, s1, lo, hi), e=w["e"], external=external))
+                        parent = len(faces) - 1
+                        for e, opening, virtual in holes:
+                            pts = self.world_points(opening) or self.world_points(e)
+                            if not pts:
+                                continue
+                            ts = [(p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1] for p in pts]
+                            off = sum((p[0] - a[0]) * n[0] + (p[1] - a[1]) * n[1] for p in pts) / len(pts)
+                            if abs(off) > w["w"] / 2.0 + touch:
+                                continue  # in another straight piece of the wall
+                            q0, q1 = max(min(ts), s0), min(max(ts), s1)
+                            g0, g1 = max(min(p[2] for p in pts), lo), min(max(p[2] for p in pts), hi)
+                            if q1 - q0 >= least and g1 - g0 >= least:
+                                faces.append(
+                                    dict(rect(q0, q1, g0, g1), e=e, external=external, virtual=virtual, parent=parent)
+                                )
+        for floor, group in ((True, floors), (False, ceilings)):
+            for x in group:
+                part = inside.intersection(x["foot"])
+                z = x["z1"] if floor else x["z0"]
+                for poly in getattr(part, "geoms", [part]):
+                    if poly.geom_type != "Polygon" or poly.area < least * least:
+                        continue
+                    minx, miny, _, maxy = poly.bounds
+                    rings = [
+                        [(c[0], c[1], z) for c in ring.coords[:-1]] for ring in [poly.exterior] + list(poly.interiors)
+                    ]
+                    faces.append(
+                        {
+                            "o": (minx, maxy if floor else miny, z),
+                            "x": (1.0, 0.0, 0.0),
+                            "z": (0.0, 0.0, -1.0 if floor else 1.0),
+                            "rings": rings,
+                            "area": poly.area,
+                            "e": x["e"],
+                            "external": self.slab_external(x["e"], storey, floor),
+                        }
+                    )
+        return faces, read
+
+    def bound_space(self, space, ctx):
+        """Write a space's first-level boundaries from its faces (space_faces): an earlier boundary of the space to an element the app
+        read is reused for that element's faces in order, so that it keeps its GlobalId, and one left over is removed; boundaries to
+        other elements stay. False, with nothing changed, when the faces cannot be read."""
+        got = self.space_faces(space, ctx)
+        if got is None:
+            return False
+        faces, read = got
+        old = {}
+        for rel in list(getattr(space, "BoundedBy", None) or ()):
+            e = rel.RelatedBuildingElement
+            if e is not None and e.id() in read and self.maintained(rel):
+                old.setdefault(e.id(), []).append(rel)
+        rels = []
+        for f in faces:
+            reuse = old.get(f["e"].id())
+            parent = rels[f["parent"]] if f.get("parent") is not None else None
+            rels.append(
+                self.bound(
+                    space, f["e"], f["external"], f, f.get("virtual", False), parent, reuse.pop(0) if reuse else None
+                )
+            )
+        for rest in old.values():
+            for rel in rest:
+                self.unbound(rel)
+        return True
+
+    def space_boundaries(self):
+        """At the end of apply, after the joins: the boundaries (bound_space) of the spaces that what the change set created or changed
+        bounds or bounded — a wall on their storey within BOUND_TOUCH of them, a slab at their floor or top, a door, window or
+        opening by its wall, and the spaces themselves — so that a wall made after the rooms bounds them and the faces follow a door
+        or a moved wall. A deleted element's boundaries went with it (remove_product), and the spaces it bounded (unbounded) get the
+        others anew, so that the faces next to a deleted wall or under a deleted ceiling reach as far as they now do; a space whose body
+        the app cannot read keeps its boundaries, with a note."""
+        everywhere = self.m.by_type("IfcSpace")
+        if not everywhere:
+            return
+        spaces, walls, slabs = {}, {}, {}
+        for i in sorted(self.unbounded):
+            try:
+                spaces[i] = self.m.by_id(i)
+            except Exception:  # nosec B112
+                continue  # the space itself was deleted
+        for i in dict.fromkeys([r["id"] for r in self.created] + list(self.changed)):
+            try:
+                e = self.m.by_id(i)
+            except Exception:  # nosec B112
+                continue  # deleted later in the change set
+            for x in (
+                e,
+                self.host_of(e) if e.is_a("IfcDoor") or e.is_a("IfcWindow") or e.is_a("IfcOpeningElement") else None,
+            ):
+                for rel in getattr(x, "ProvidesBoundaries", None) or ():
+                    if rel.RelatingSpace is not None and rel.RelatingSpace.is_a("IfcSpace"):
+                        spaces[rel.RelatingSpace.id()] = rel.RelatingSpace
+                for kind, into in (("IfcSpace", spaces), ("IfcWall", walls), ("IfcSlab", slabs)):
+                    if x is not None and x.is_a(kind):
+                        into[x.id()] = x
+        if not (spaces or walls or slabs):
+            return
+        ctx = self.bound_context()
+        storeys = {}
+        for s in everywhere:
+            storey = self.space_storey(s)
+            if storey is not None:
+                storeys.setdefault(storey.id(), []).append(s)
+        for w in walls.values():
+            storey = self.container(w)
+            mine = (
+                next((x for x in self.ctx_walls(ctx, storey) if x["e"].id() == w.id()), None)
+                if storey is not None and storey.id() in storeys
+                else None
+            )
+            for s in storeys[storey.id()] if mine is not None else ():
+                solid = self.ctx_solid(ctx, s)
+                if solid is not None and mine["band"].distance(solid[0]) <= self.BOUND_TOUCH:  # ty: ignore[not-subscriptable]
+                    spaces[s.id()] = s
+        for x in (x for x in self.ctx_slabs(ctx) if x["e"].id() in slabs):
+            for s in everywhere:
+                solid = self.ctx_solid(ctx, s)
+                if (
+                    solid is not None
+                    and x["foot"].intersects(solid[0])
+                    and any(x["z0"] - self.BOUND_TOUCH <= z <= x["z1"] + self.BOUND_TOUCH for z in solid[1:])
+                ):
+                    spaces[s.id()] = s
+        for s in sorted(spaces.values(), key=lambda s: s.id()):
+            if not self.bound_space(s, ctx):
+                self.note_once(
+                    "the boundaries of space %s keep their faces: the app reads only a space in a storey whose body is extruded "
+                    "straight up from a polygon" % self.element_label(s)
+                )
 
     @staticmethod
     def fillings(wall):
@@ -1554,10 +2127,12 @@ class _ChangeSet:
     def op_create_spaces(self, op):
         """The rooms the walls enclose as spaces, from the topology of the file as it stands at this step, so that walls made earlier
         in the change set count: per room an IfcSpace aggregated in its storey, with the room's outline extruded to the height (by
-        default up to the next storey, or to the top of the walls), Qto_SpaceBaseQuantities, and physical space boundaries to the walls
-        along its edge (external where the topology finds the wall external) and to the doors and windows in them that stand on that
-        edge. Listed rooms need the storey and get a ref each, in their order; without a list every room on the storey (or on every
-        storey with rooms) is made, named by default_name with its index for {n}, and none gets a ref."""
+        default up to the next storey, or to the top of the walls), Qto_SpaceBaseQuantities, and first-level physical space boundaries
+        with their faces (bound_space) to the walls along its edge (external where the topology finds the wall external) and to the
+        doors, windows and openings in their faces toward it; the slabs below and above get theirs at the end of apply
+        (space_boundaries), as do walls made later. Listed rooms need the storey and get a ref each, in their order; without a list
+        every room on the storey (or on every storey with rooms) is made, named by default_name with its index for {n}, and none gets
+        a ref."""
         import ifcopenshell.api.aggregate
 
         rooms = op.get("rooms")
@@ -1633,16 +2208,8 @@ class _ChangeSet:
             made += len(chosen)
             h = height or self.storey_height(s)
             external = {e["wall"] for e in topo["external"]}
-            spaces = []
-            for room, name, long_name in chosen:
-                space = self.make_space(s, frame, room, name, long_name, h)
-                spaces.append(space)
-                for wall in (self.m.by_id(i) for i in room["walls"]):
-                    self.bound(space, wall, wall.id() in external)
-                    for f in self.fillings(wall):
-                        mid = self.plan_point(f, float(getattr(f, "OverallWidth", None) or 0.0) / 2.0)
-                        if mid is not None and room["polygon"].boundary.distance(_topo_point(mid)) <= topo["tolerance"]:
-                            self.bound(space, f, wall.id() in external)
+            ctx = self.bound_context({s.id(): (external, {w for r in topo["rooms"] for w in r["walls"]})})
+            spaces = [self.make_space(s, frame, room, name, long_name, h) for room, name, long_name in chosen]
             ifcopenshell.api.aggregate.assign_object(self.m, products=spaces, relating_object=s)
             for space, (room, _, _) in zip(spaces, chosen):
                 self.space_quantities(space, room, h)
@@ -1653,6 +2220,17 @@ class _ChangeSet:
 
                     pset = ifcopenshell.api.pset.add_pset(self.m, product=space, name="Pset_SpaceCommon")
                     ifcopenshell.api.pset.edit_pset(self.m, pset=pset, properties={"IsExternal": False})
+                # The first-level boundaries with their faces (bound_space; walls, doors and windows now, slabs made later at the end
+                # of apply); a wall of the room's that the faces miss is bound without one, as before faces came.
+                self.bound_space(space, ctx)
+                faced = {
+                    r.RelatedBuildingElement.id()
+                    for r in (getattr(space, "BoundedBy", None) or ())
+                    if r.RelatedBuildingElement is not None
+                }
+                for i in room["walls"]:
+                    if i not in faced:
+                        self.bound(space, self.m.by_id(i), i in external)
                 self.register(space, s, ref=listed)
         if not made:
             raise DataspatiumError("every room the walls enclose has a space already")
@@ -1792,7 +2370,9 @@ class _ChangeSet:
         twice. The site, the building and the storeys (IfcSpatialStructureElement other than IfcSpace) are refused: the site's place
         and the storeys' heights are the whole project's and change only by agreement. A placement's point is moved itself when nothing
         else uses it, else replaced, so that no point is left unused (bSI rule IFC106) and nothing else moves along; a moved wall's
-        joins are undone and made anew where it meets other walls (unjoin, join_walls)."""
+        joins are undone and made anew where it meets other walls (unjoin, join_walls), and the spaces along it are fitted to the
+        rooms the walls now enclose or noted (fit_spaces). An opening that moves without its wall must stay within the wall's body
+        (opening_outside)."""
         dx, dy, dz = _cs_num(op, "dx", 0.0), _cs_num(op, "dy", 0.0), _cs_num(op, "dz", 0.0)
         moved = []
         for e in self.elements(op):
@@ -1811,6 +2391,7 @@ class _ChangeSet:
         for e in moved:
             if not any(y.id() != e.id() and self.placed_in(e, y) for y in moved):
                 if e.is_a("IfcWall"):
+                    self.moving_wall(e)
                     self.unjoin(e)
                     for end in (0, 1):
                         self.draw_out(e, end)
@@ -1818,6 +2399,18 @@ class _ChangeSet:
             self.touch(e)
             for rel in getattr(e, "VoidsElements", None) or ():
                 self.touch(rel.RelatingBuildingElement)  # the host's net quantities
+        hosts = {e.id() for e in moved}
+        for o in (e for e in moved if e.is_a("IfcOpeningElement")):
+            for wall in (r.RelatingBuildingElement for r in (getattr(o, "VoidsElements", None) or ())):
+                if wall.id() in hosts:
+                    continue
+                why = self.opening_outside(o, wall)
+                if why:
+                    raise DataspatiumError(
+                        "opening #%d %r would %s; move it within the wall with edit_element (offset, sill), or move the wall with it"
+                        % (o.id(), _ifc_text(o.Name) or "", why)
+                    )
+                self.slid.update(r.RelatedBuildingElement.id() for r in (getattr(o, "HasFillings", None) or ()))
 
     # -- moving and changing in place: placements, points and items that only the element uses
     @staticmethod
@@ -1985,6 +2578,362 @@ class _ChangeSet:
         j = self.join_wall(w, False)
         if j is not None and j["box"] is not None and self.cut_end(j, end, j["a"] if end == 0 else j["b"]):
             self.touch(w)
+
+    def moving_wall(self, wall):
+        """Keep a wall's axis in the world's plan (metres) and its thickness as they were before the change set first moved or resized
+        it, for fit_spaces."""
+        if wall.id() not in self.moved:
+            try:
+                self.moved[wall.id()] = (_topo_axis(wall, self.scale), _topo_thickness(wall, self.scale))
+            except Exception:
+                self.moved[wall.id()] = (None, None)
+
+    def opening_outside(self, opening, wall):
+        """How an opening of create_opening's form (opening_box) reaches out of its wall's body of create_wall's form (wall_box): past
+        its ends, above its top or below its base, or off its thickness; None when it lies within, or when either is of another form."""
+        body, item = self.wall_box(wall), self.wall_box(opening)
+        box = self.opening_box(opening, wall) if body is not None and item is not None else None
+        if box is None:
+            return None
+        s, tol, p, q = self.scale, self.u(0.001), body.SweptArea, item.SweptArea
+        cx, cy = [float(c) for c in p.Position.Location.Coordinates][:2]
+        x0, x1, z0 = cx - float(p.XDim) / 2.0, cx + float(p.XDim) / 2.0, _cs_axes(body.Position)[3][2]
+        rel = _cs_compose(_cs_invert(_cs_placement(wall.ObjectPlacement)), _cs_placement(opening.ObjectPlacement))
+        oy = rel[3][1] + float(q.Position.Location.Coordinates[1])
+        label = "wall #%d %r" % (wall.id(), _ifc_text(wall.Name) or "")
+        if box[0] < x0 - tol or box[1] > x1 + tol:
+            return "reach past the ends of %s (%.4g to %.4g m along it, whose body runs from %.4g to %.4g m)" % (
+                label,
+                box[0] * s,
+                box[1] * s,
+                x0 * s,
+                x1 * s,
+            )
+        if box[2] < z0 - tol or box[3] > z0 + float(body.Depth) + tol:
+            return "reach above or below %s (%.4g to %.4g m up in a body from %.4g to %.4g m)" % (
+                label,
+                box[2] * s,
+                box[3] * s,
+                z0 * s,
+                (z0 + float(body.Depth)) * s,
+            )
+        if (
+            oy - float(q.YDim) / 2.0 > cy - float(p.YDim) / 2.0 + tol
+            or oy + float(q.YDim) / 2.0 < cy + float(p.YDim) / 2.0 - tol
+        ):
+            return "no longer go through %s, %.4g m off its axis" % (label, (oy - cy) * s)
+        return None
+
+    def check_openings(self):
+        """After the joins: a note for each opening of the walls whose joins the change set undid that a join's cut leaves reaching out
+        of its wall's body (opening_outside)."""
+        for i in sorted(self.rejoin):
+            try:
+                wall = self.m.by_id(i)
+            except Exception:  # nosec B112
+                continue  # deleted later in the change set
+            for o in (r.RelatedOpeningElement for r in (getattr(wall, "HasOpenings", None) or ())):
+                why = self.opening_outside(o, wall)
+                if why:
+                    self.note_once(
+                        "opening %s would %s now that the wall is joined; move it with edit_element (offset, width), or ask the person"
+                        % (self.element_label(o), why)
+                    )
+
+    # -- the spaces along walls that moved (the room code of create_spaces, on the topology after the change set)
+    def fit_spaces(self):
+        """After the joins: the spaces along the walls the change set moved or resized in the plan (self.moved), per storey
+        (fit_storey), and the spaces along the walls in which doors and windows moved (refill)."""
+        storeys = {}
+        for i, (axis, thickness) in sorted(self.moved.items()):
+            try:
+                w = self.m.by_id(i)
+            except Exception:  # nosec B112
+                continue  # deleted later in the change set
+            new, now = _topo_axis(w, self.scale), _topo_thickness(w, self.scale)
+            if not axis or not new:
+                if getattr(w, "ProvidesBoundaries", None):
+                    self.note_once(
+                        "wall %s bounds spaces whose outlines stay as they were: the app cannot follow its axis"
+                        % self.element_label(w)
+                    )
+                continue
+            shifted = len(axis) != len(new) or any(math.dist(a, b) > 1e-6 for a, b in zip(axis, new))
+            resized = abs(float(now or 0.0) - float(thickness or 0.0)) > 1e-9
+            s = self.container(w)
+            if (shifted or resized) and s is not None and s.is_a("IfcBuildingStorey"):
+                storeys.setdefault(s.id(), (s, {}))[1][w.id()] = (axis, new, resized)
+        for s, walls in storeys.values():
+            self.fit_storey(s, walls)
+        done = {i for _, walls in storeys.values() for i in walls}
+        for i in sorted(self.slid):
+            try:
+                f = self.m.by_id(i)
+            except Exception:  # nosec B112
+                continue  # deleted later in the change set
+            self.refill(f, done)
+
+    def fit_storey(self, s, walls):
+        """The spaces of storey s along its walls that moved, walls {id: (old axis, new axis, resized)}: a space their old or new axis
+        runs along, or that a boundary relates to one of them, is fitted to the room the walls now enclose, as create_spaces makes it
+        (fit_space), when it is drawn as create_spaces draws it (space_body), no other such space overlaps the same room most, and
+        its outline differs from the room only within the topology's tolerance of the walls' old and new axes; else it keeps its
+        outline and quantities with a note saying why, and loses its boundaries to the moved walls that no longer run along it
+        (loosen)."""
+        from shapely.geometry import LineString, MultiPoint, Polygon
+        from shapely.ops import unary_union
+
+        spaces = [
+            o
+            for rel in (getattr(s, "IsDecomposedBy", None) or ())
+            for o in (rel.RelatedObjects or ())
+            if o.is_a("IfcSpace")
+        ]
+        topo = (
+            next(
+                (
+                    t
+                    for t in _ifc_topology(self.m, storeys={_ifc_text(s.Name)}, shapes=True)
+                    if t["_storey"].id() == s.id()
+                ),
+                None,
+            )
+            if spaces
+            else None
+        )
+        if topo is None:
+            return
+        tol = topo["tolerance"]
+        meets = 2.0 * tol + 0.01  # as in _topo_plan: a wall that only meets an edge runs at most 2 * tol along it
+        lines = {i: (LineString(old), LineString(new)) for i, (old, new, _) in walls.items()}
+        zone = unary_union(
+            [MultiPoint(list(old) + list(new)).convex_hull.buffer(tol) for old, new, _ in walls.values()]
+        )
+        affected = []
+        for p in spaces:
+            outline = self.space_outline(p)
+            bounded = {
+                b.RelatedBuildingElement.id()
+                for b in (getattr(p, "BoundedBy", None) or ())
+                if getattr(b, "RelatedBuildingElement", None) is not None
+            }
+            edge = outline.boundary.buffer(tol) if outline is not None else None
+            if bounded & set(walls) or (
+                edge is not None and any(self.runs_along(x, edge, meets) for pair in lines.values() for x in pair)
+            ):
+                affected.append((p, outline))
+        rooms = topo["rooms"]
+        best = {}
+        for p, outline in affected:
+            top = (
+                max(((outline.intersection(r["polygon"]).area, k) for k, r in enumerate(rooms)), default=(0.0, None))
+                if outline is not None
+                else (0.0, None)
+            )
+            best[p.id()] = top[1] if top[0] > 1e-6 else None
+        for p, outline in affected:
+            k, body = best[p.id()], self.space_body(p)
+            others = [q for q, _ in affected if k is not None and q.id() != p.id() and best[q.id()] == k]
+            why = None
+            if body is None or outline is None:
+                why = "it is not drawn as create_spaces draws it"
+            elif k is None:
+                why = "the walls no longer enclose a room there"
+            elif others:
+                why = "it now lies in one room with space %s" % ", ".join(self.element_label(q) for q in others)
+            elif outline.symmetric_difference(Polygon(rooms[k]["polygon"].exterior)).difference(zone).area > 1e-4:
+                why = "its outline does not follow the walls' axes where they stayed, as create_spaces draws it"
+            if why is None:
+                self.fit_space(
+                    p, body, outline, rooms[k], topo, any(walls[i][2] for i in rooms[k]["walls"] if i in walls)
+                )
+            else:
+                self.loosen(p, outline, walls, lines, tol, meets, why)
+
+    @staticmethod
+    def runs_along(line, zone, meets):
+        """Whether a wall's axis (shapely) runs within zone, the buffer of a space's edge, for more than meets metres in one piece; a
+        wall that crosses the edge, or only meets it, does not."""
+        part = line.intersection(zone)
+        return max([g.length for g in getattr(part, "geoms", [part])] or [0.0]) > meets
+
+    def space_body(self, space):
+        """(the extruded solid, the absolute matrix of its profile's plane) of a space drawn as create_spaces draws it: one
+        IfcExtrudedAreaSolid of an arbitrary closed profile of polylines (holes too), extruded straight up in an upright frame; else
+        None."""
+        rep = getattr(space, "Representation", None)
+        bodies = [
+            r for r in (rep.Representations if rep is not None else ()) if (r.RepresentationIdentifier or "") == "Body"
+        ]
+        items = list(bodies[0].Items or ()) if len(bodies) == 1 else []
+        if (
+            len(items) != 1
+            or not items[0].is_a("IfcExtrudedAreaSolid")
+            or len(getattr(rep, "ShapeOfProduct", None) or ()) > 1
+        ):
+            return None
+        item, m = items[0], _cs_placement(getattr(space, "ObjectPlacement", None))
+        p, d = item.SweptArea, _cs_unit([float(c) for c in item.ExtrudedDirection.DirectionRatios])
+        curves = [getattr(p, "OuterCurve", None)] + list(getattr(p, "InnerCurves", None) or ())
+        if (
+            not p.is_a("IfcArbitraryClosedProfileDef")
+            or any(c is None or not c.is_a("IfcPolyline") for c in curves)
+            or m is None
+            or d is None
+        ):
+            return None
+        frame = _cs_compose(m, _cs_axes(item.Position))
+        return (item, frame) if abs(d[2] - 1.0) < 1e-9 and abs(frame[2][2] - 1.0) < 1e-6 else None
+
+    def room_profile(self, frame, poly, name=None):
+        """A room's outline (shapely, metres in the world's plan) as an arbitrary closed profile, with its holes as voids, in the plane
+        of the absolute matrix `frame`, as make_space draws it."""
+        back = _cs_invert(frame)
+
+        def curve(ring):
+            return self.closed(
+                [_cs_at(back, (c[0] / self.scale, c[1] / self.scale, frame[3][2]))[:2] for c in ring.coords]
+            )
+
+        if poly.interiors:
+            return self.m.createIfcArbitraryProfileDefWithVoids(
+                "AREA", name, curve(poly.exterior), [curve(r) for r in poly.interiors]
+            )
+        return self.m.createIfcArbitraryClosedProfileDef("AREA", name, curve(poly.exterior))
+
+    @staticmethod
+    def space_values(room, height):
+        """Qto_SpaceBaseQuantities of a room of the topology `height` metres high, as space_quantities gives them, for write_qto."""
+        gross, net = room["polygon"].area, room["net_area"]
+        return {
+            "Height": ("length", height),
+            "GrossPerimeter": ("length", room["polygon"].length),
+            "GrossFloorArea": ("area", gross),
+            "NetFloorArea": ("area", net),
+            "GrossVolume": ("volume", gross * height),
+            "NetVolume": ("volume", net * height),
+        }
+
+    def fit_space(self, space, body, outline, room, topo, resized):
+        """A space fitted to its room: its profile drawn anew when its outline differs (with a note), its boundaries made anew when they
+        differ (rebound), and its quantities when either changed or a wall along it changed its thickness; the space keeps its
+        GlobalId, its height and everything else."""
+        item, frame = body
+        poly = room["polygon"]
+        from shapely.geometry import Polygon
+
+        reshaped = outline.symmetric_difference(Polygon(poly.exterior)).area > 1e-4 or bool(poly.interiors) != bool(
+            getattr(item.SweptArea, "InnerCurves", None)
+        )
+        if reshaped:
+            old = item.SweptArea
+            item.SweptArea = self.room_profile(frame, poly, old.ProfileName)
+            self.drop(old)
+            self.notes.append(
+                "space %s was fitted to the room its walls now enclose: %.2f m² instead of %.2f m²"
+                % (self.element_label(space), poly.area, outline.area)
+            )
+        if self.rebound(space, room, topo, reshaped) or reshaped or resized:
+            self.write_qto(space, "Qto_SpaceBaseQuantities", self.space_values(room, float(item.Depth) * self.scale))
+            self.touch(space)
+
+    @staticmethod
+    def bounds_wall(b):
+        """Whether a space boundary relates its space to a wall, a door or a window, as create_spaces makes them."""
+        e = getattr(b, "RelatedBuildingElement", None) if b.is_a("IfcRelSpaceBoundary") else None
+        return e is not None and (e.is_a("IfcWall") or e.is_a("IfcDoor") or e.is_a("IfcWindow"))
+
+    def unbound(self, b):
+        """Remove a space boundary with its connection geometry, when nothing else uses that."""
+        geometry = getattr(b, "ConnectionGeometry", None)
+        self.m.remove(b)
+        self.drop(geometry)
+
+    def rebound(self, space, room, topo, force=False):
+        """A fitted space's boundaries to walls, doors and windows as create_spaces makes them: to the room's walls (external where the
+        topology finds the wall external) and to the doors and windows in them whose middle stands on the room's edge. Made anew when
+        they differ from the space's (or with force), and then True."""
+        external = {x["wall"] for x in topo["external"]}
+        want = []
+        for wall in (self.m.by_id(i) for i in room["walls"]):
+            want.append((wall, wall.id() in external))
+            for f in self.fillings(wall):
+                mid = self.plan_point(f, float(getattr(f, "OverallWidth", None) or 0.0) / 2.0)
+                if mid is not None and room["polygon"].boundary.distance(_topo_point(mid)) <= topo["tolerance"]:
+                    want.append((f, wall.id() in external))
+        have = [b for b in (getattr(space, "BoundedBy", None) or ()) if self.bounds_wall(b)]
+        if not force and sorted(
+            (b.RelatedBuildingElement.id(), b.InternalOrExternalBoundary == "EXTERNAL") for b in have
+        ) == sorted((e.id(), x) for e, x in want):
+            return False
+        for b in have:
+            self.unbound(b)
+        for e, x in want:
+            self.bound(space, e, x)
+        return True
+
+    @staticmethod
+    def host_of(e):
+        """The wall (or other element) whose opening a door or window fills; None."""
+        o = next((r.RelatingOpeningElement for r in (getattr(e, "FillsVoids", None) or ())), None)
+        return (
+            next((r.RelatingBuildingElement for r in (getattr(o, "VoidsElements", None) or ())), None)
+            if o is not None
+            else None
+        )
+
+    def loosen(self, space, outline, walls, lines, tol, meets, why):
+        """A space the moved walls no longer fit keeps its outline and quantities, with a note: its boundaries to the moved walls whose
+        new axis no longer runs along its edge go, and those to the doors and windows in the moved walls whose middle no longer stands
+        on it."""
+        lost = []
+        for b in (
+            [b for b in (getattr(space, "BoundedBy", None) or ()) if self.bounds_wall(b)] if outline is not None else ()
+        ):
+            e = b.RelatedBuildingElement
+            host = e if e.is_a("IfcWall") else self.host_of(e)
+            if host is None or host.id() not in walls:
+                continue
+            if e.is_a("IfcWall"):
+                gone = not self.runs_along(lines[e.id()][1], outline.boundary.buffer(tol), meets)
+            else:
+                mid = self.plan_point(e, float(getattr(e, "OverallWidth", None) or 0.0) / 2.0)
+                gone = mid is None or outline.boundary.distance(_topo_point(mid)) > tol
+            if gone:
+                lost.append(self.element_label(e))
+                self.unbound(b)
+        self.notes.append(
+            "space %s keeps its outline and quantities as they were, since %s%s; the person decides whether to move the walls so that they enclose it again, or to delete it and make it anew with create_spaces"
+            % (
+                self.element_label(space),
+                why,
+                "; its boundaries to %s went, as they no longer run along it" % ", ".join(lost) if lost else "",
+            )
+        )
+        if lost:
+            self.touch(space)
+
+    def refill(self, f, done):
+        """A door or window that moved along a wall the change set did not move (done: the walls fit_storey followed) bounds the wall's
+        spaces whose edge its middle stands on, as create_opening gives it, and no others."""
+        wall = self.host_of(f)
+        if wall is None or wall.id() in done or not (f.is_a("IfcDoor") or f.is_a("IfcWindow")):
+            return
+        mid = self.plan_point(f, float(getattr(f, "OverallWidth", None) or 0.0) / 2.0)
+        tol = self.wall_thickness(wall) * self.scale / 2.0 + 0.05
+        have = {b.RelatingSpace.id(): b for b in (getattr(f, "ProvidesBoundaries", None) or ())}
+        for b in list(getattr(wall, "ProvidesBoundaries", None) or ()):
+            space = b.RelatingSpace
+            outline = self.space_outline(space) if space is not None and space.is_a("IfcSpace") else None
+            if outline is None:
+                continue
+            on = mid is not None and outline.boundary.distance(_topo_point(mid)) <= tol
+            if on and space.id() not in have:
+                have[space.id()] = self.bound(space, f, b.InternalOrExternalBoundary == "EXTERNAL")
+                self.touch(space)
+            elif not on and space.id() in have:
+                self.unbound(have.pop(space.id()))
+                self.touch(space)
 
     # -- edit_element (recommendation 7 of the Praxi study, 17 of the native IFC study)
     EDITS = {
@@ -2209,7 +3158,8 @@ class _ChangeSet:
         anew from start to end; thickness and height size its body. Its openings keep their place along it when its direction stays the
         same, else their offset from its start, get its new thickness and must stay within it. A new type types it with the layers
         centred as create_wall lays them; a typed wall takes its thickness from its layers. Its joins are undone and made anew at the
-        end (unjoin, join_walls); the spaces it bounds keep their outlines, which the report notes."""
+        end (unjoin, join_walls), its openings are checked against its body once it is joined (check_openings), and the spaces along
+        it are fitted to the rooms the walls now enclose or noted (fit_spaces)."""
         s = self.scale
         f = self.wall_frame(wall)
         start = _cs_xy(op["start"], "start") if op.get("start") is not None else f["start"]
@@ -2262,6 +3212,7 @@ class _ChangeSet:
                 )
             plan.append((o, item, (nx, ny, oz), _cs_placement(opl), self.loose_fillings(o) if moving else []))
         if moving or resizing:
+            self.moving_wall(wall)
             self.unjoin(wall)
         if moving:
             self.place_wall(wall, f, start, u)
@@ -2286,10 +3237,6 @@ class _ChangeSet:
         if typ is not None:
             self.untype(wall)
             self.give_type(wall, typ, "AXIS2", "POSITIVE", f["off"] * s - thickness / 2.0)
-        if (moving or resizing) and getattr(wall, "ProvidesBoundaries", None):
-            self.notes.append(
-                "wall #%d %r bounds spaces whose outlines stay as they were" % (wall.id(), _ifc_text(wall.Name) or "")
-            )
         self.touch(wall)
 
     def place_wall(self, wall, f, start, u):
@@ -2474,7 +3421,8 @@ class _ChangeSet:
         """edit_element on an opening (opening_frame) or the door or window in it: offset (metres from the wall's start, along it), sill
         (above the wall's base), width and height, the opening and its doors and windows together; the opening must stay within the
         wall's body. A door or window placed in the opening follows it (one placed elsewhere is moved as much), and their bodies,
-        OverallWidth and OverallHeight take the new size."""
+        OverallWidth and OverallHeight take the new size; a door or window that moved bounds the spaces whose edge it then stands on
+        (fit_spaces)."""
         f = self.opening_frame(e)
         opening, wall, item, fillings = f["opening"], f["wall"], f["item"], f["fillings"]
         offset, width, sill, height = f["offset"], f["width"], f["sill"], f["height"]
@@ -2508,6 +3456,7 @@ class _ChangeSet:
             before = _cs_placement(opening.ObjectPlacement)
             self.shift(opening, _cs_placement(wall.ObjectPlacement), d)
             self.follow(opening, before, loose)
+            self.slid.update(x.id() for x in fillings)  # the spaces they bound (fit_spaces)
         if resize:
             for b in boxes:
                 self.resize_box(b, self.u(new["width"]), self.u(new["height"]))
@@ -2745,8 +3694,22 @@ class _ChangeSet:
             out.update(kind=None, note=str(exc))
         return out
 
+    @staticmethod
+    def parts_of(e):
+        """The parts an element aggregates, and theirs in turn (a curtain wall's mullions, transoms and panels, a stair's flight and
+        landing, a roof's slabs); none for a spatial element, whose spaces are not parts to delete with it."""
+        if not e.is_a("IfcElement"):
+            return []
+        out = []
+        for rel in getattr(e, "IsDecomposedBy", None) or ():
+            for p in rel.RelatedObjects or ():
+                if p.is_a("IfcElement"):
+                    out += [p] + _ChangeSet.parts_of(p)
+        return out
+
     def op_delete_elements(self, op):
-        """Delete elements; the doors and windows in an element's openings go with it, so nothing is left hanging in the air."""
+        """Delete elements; the doors and windows in an element's openings go with it, and so do the parts of a whole (parts_of), so
+        nothing is left hanging in the air."""
         import ifcopenshell.api.root
 
         if op.get("confirm") is not True:
@@ -2760,13 +3723,22 @@ class _ChangeSet:
                 for f in getattr(opening, "HasFillings", None) or ():
                     if f.RelatedBuildingElement.id() not in ids:
                         fillings.append(f.RelatedBuildingElement)
-            for f in fillings + [e]:
+            parts = [p for p in self.parts_of(e) if p.id() not in ids]
+            ids |= {p.id() for p in parts}
+            for f in fillings + parts + [e]:
                 rec = self.record(f, self.container(f))
                 if f is not e:
                     rec["with"] = e.id()
                 self.deleted.append(rec)
                 self.changed.pop(f.id(), None)
-                ifcopenshell.api.root.remove_product(self.m, product=f)
+                self.unbounded.update(
+                    b.RelatingSpace.id()
+                    for b in (getattr(f, "ProvidesBoundaries", None) or ())
+                    if b.RelatingSpace is not None
+                )
+                ifcopenshell.api.root.remove_product(
+                    self.m, product=f
+                )  # with its space boundaries (IfcOpenShell's remove_boundary)
 
     def op_set_site(self, op):
         """The model's place on earth: the site's WGS 84 position (compound plane angles, every part signed), its height above the sea
@@ -2913,6 +3885,135 @@ class _ChangeSet:
                     setattr(conversion, key, value)
                 self.touch(conversion)
 
+    # -- the model's responsible party (recommendation 8 of the study of the IFC and BCF guidelines)
+    def op_set_responsible_party(self, op):
+        """The organisation that answers for the model, its role, designation and contact (see the class's documentation): one
+        responsible party per model. The project's assignment to an actor of the same organisation, else of the same role, else
+        its only one, is changed in place, so that the actor and the assignment keep their GlobalIds; otherwise a new actor is
+        assigned. An organisation is never renamed, since owner histories and applications share it: another name gets an
+        organisation of its own, and what the old party left unused goes."""
+        import ifcopenshell.guid
+
+        text = lambda key: str(op.get(key) or "").strip()[:255] or None  # noqa: E731
+        name = text("organization")
+        if not name:
+            raise DataspatiumError(
+                "organization is required: the name of the company or authority that answers for the model"
+            )
+        role = str(op.get("role") or "").strip().upper() or None
+        user_role = text("user_role")
+        if role is not None:
+            items = _ifc_enum_items(self.check_class("IfcActorRole"), "Role") or ()
+            if role == "COMMISSIONINGENGINEER" and role not in items and "COMISSIONINGENGINEER" in items:
+                role = "COMISSIONINGENGINEER"  # IFC2X3's spelling
+            if role not in items:
+                raise DataspatiumError("role must be one of %s, or null" % ", ".join(items))
+        if role == "USERDEFINED" and not user_role:
+            raise DataspatiumError("role USERDEFINED needs user_role, the name of the role")
+        if user_role and role != "USERDEFINED":
+            raise DataspatiumError("user_role goes with role USERDEFINED")
+        projects = self.m.by_type("IfcProject")
+        if not projects:
+            raise DataspatiumError("the model has no IfcProject to assign its responsible party to")
+        project = projects[0]
+        rel = self.party_assignment(project, name, role)
+        actor = rel.RelatingActor if rel is not None else None
+        before = actor.TheActor if actor is not None else None
+        old_org = org = self.party_of(before)
+        if org is None or str(org.Name or "").strip().lower() != name.lower():
+            org = self.m.create_entity("IfcOrganization", Name=name)
+        old_role = rel.ActingRole if rel is not None else None
+        acting = None
+        if role is not None:
+            same = old_role is not None and old_role.Role == role and (old_role.UserDefinedRole or None) == user_role
+            acting = old_role if same else self.m.create_entity("IfcActorRole", Role=role, UserDefinedRole=user_role)
+        # The party's role among its organisation's Roles, in place of the one it played before (also on an organisation it left).
+        for o in dict.fromkeys(x for x in (old_org, org) if x is not None):
+            roles = [r for r in (o.Roles or ()) if r != old_role] + (
+                [acting] if o == org and acting is not None else []
+            )
+            o.Roles = tuple(roles) or None
+        # The contact person: a name sets it, "" removes it, and null keeps the one the party has at the same organisation.
+        person = text("contact_person")
+        kept = (
+            before is not None
+            and before.is_a("IfcPersonAndOrganization")
+            and before.TheOrganization == org
+            and before.ThePerson is not None
+        )
+        who = before if kept and op.get("contact_person") is None else org
+        if person:
+            words = person.split()
+            given, family = " ".join(words[:-1]) or None, words[-1]
+            if kept and before.ThePerson.FamilyName == family and (before.ThePerson.GivenName or None) == given:
+                who = before
+            else:
+                who = self.m.create_entity(
+                    "IfcPersonAndOrganization",
+                    ThePerson=self.m.create_entity("IfcPerson", FamilyName=family, GivenName=given),
+                    TheOrganization=org,
+                )
+        if actor is None:
+            actor = self.m.create_entity(
+                "IfcActor",
+                GlobalId=ifcopenshell.guid.new(),
+                OwnerHistory=self.owner,
+                Name=text("designation"),
+                Description=text("contact_role"),
+                TheActor=who,
+            )
+            rel = self.m.create_entity(
+                "IfcRelAssignsToActor",
+                GlobalId=ifcopenshell.guid.new(),
+                OwnerHistory=self.owner,
+                RelatedObjects=[project],
+                RelatingActor=actor,
+                ActingRole=acting,
+            )
+            self.register(actor, ref=False)
+            self.register(rel, ref=False)
+            return
+        actor.Name, actor.Description, actor.TheActor = text("designation"), text("contact_role"), who
+        rel.ActingRole = acting
+        self.touch(actor)
+        self.touch(rel)
+        self.party_unused([before, old_role] if before is not who else [old_role])
+
+    def party_assignment(self, project, name, role):
+        """The project's assignment to an actor (not an occupant) of the organisation named, else of the role, else its only one."""
+        rels = [
+            r
+            for r in self.m.get_inverse(project)
+            if r.is_a("IfcRelAssignsToActor")
+            and r.RelatingActor is not None
+            and not r.RelatingActor.is_a("IfcOccupant")
+        ]
+        named = [
+            r
+            for r in rels
+            if str(getattr(self.party_of(r.RelatingActor.TheActor), "Name", None) or "").strip().lower() == name.lower()
+        ]
+        playing = [r for r in rels if role is not None and r.ActingRole is not None and r.ActingRole.Role == role]
+        return (named or playing or (rels if len(rels) == 1 else [None]))[0]
+
+    @staticmethod
+    def party_of(who):
+        """The organisation of an actor's TheActor: itself, or a person-and-organisation's; None for a person alone."""
+        if who is None:
+            return None
+        if who.is_a("IfcOrganization"):
+            return who
+        return getattr(who, "TheOrganization", None) if who.is_a("IfcPersonAndOrganization") else None
+
+    def party_unused(self, entities):
+        """What a changed party no longer uses, when nothing else does: its person-and-organisation, person, organisation or role."""
+        for e in entities:
+            if e is None or self.m.get_total_inverses(e):
+                continue
+            inner = [e.ThePerson, e.TheOrganization] if e.is_a("IfcPersonAndOrganization") else []
+            self.m.remove(e)
+            self.party_unused(inner)
+
     # -- types with material layers, wall joins and base quantities (recommendations 3, 5 and 6 of the native IFC study)
     TYPE_KINDS = {
         "wall": ("IfcWallType", "NOTDEFINED"),
@@ -2960,7 +4061,7 @@ class _ChangeSet:
             return self.define_element_type(op, kind)
         if kind not in self.TYPE_KINDS:
             raise DataspatiumError(
-                "kind must be wall, slab, roof, covering, column, beam, footing, railing, door or window"
+                "kind must be wall, slab, roof, covering, column, beam, footing, railing, door, window or curtain_wall"
             )
         ifc_class, default = self.TYPE_KINDS[kind]
         name = str(op.get("name") or "").strip()[:255]
@@ -3139,7 +4240,8 @@ class _ChangeSet:
             e.ObjectType = None
 
     # -- more building elements, straight stairs, and door and window types (recommendations 4 and 11 of the native IFC study)
-    # The classes create_element makes; IfcFurniture is IfcFurnishingElement in IFC2X3, and IfcStair is a straight stair.
+    # The classes create_element makes; IfcFurniture is IfcFurnishingElement in IFC2X3, IfcStair is a straight stair and
+    # IfcCurtainWall a glass façade of panels between mullions and transoms.
     ELEMENT_CLASSES = (
         "IfcColumn",
         "IfcBeam",
@@ -3154,6 +4256,7 @@ class _ChangeSet:
         "IfcFurniture",
         "IfcFurnishingElement",
         "IfcStair",
+        "IfcCurtainWall",
     )
     ELEMENT_TYPE_KINDS = {
         "column": ("IfcColumnType", "COLUMN"),
@@ -3162,6 +4265,7 @@ class _ChangeSet:
         "railing": ("IfcRailingType", "NOTDEFINED"),
         "door": ("IfcDoorType", "DOOR"),
         "window": ("IfcWindowType", "WINDOW"),
+        "curtain_wall": ("IfcCurtainWallType", "NOTDEFINED"),
     }
     # The OperationTypes and PartitioningTypes whose geometry IfcOpenShell draws; a window's as (panels, columns, rows).
     DOOR_OPERATIONS = (
@@ -3256,11 +4360,12 @@ class _ChangeSet:
                 e.ObjectType = None
 
     def define_element_type(self, op, kind):
-        """define_type for the kinds without layers: an IfcColumnType, IfcBeamType, IfcFootingType, IfcRailingType, IfcDoorType or
-        IfcWindowType (IfcDoorStyle and IfcWindowStyle in IFC2X3) with a ref, its PredefinedType (by default COLUMN, BEAM,
-        NOTDEFINED, NOTDEFINED, DOOR and WINDOW) checked against the class's list, and the material, when given, as an IfcMaterial of
-        the type that its occurrences take. A door and a window get their geometry (door_geometry, window_geometry). A type of the
-        same class and name in the file is an error that names its GlobalId."""
+        """define_type for the kinds without layers: an IfcColumnType, IfcBeamType, IfcFootingType, IfcRailingType, IfcDoorType,
+        IfcWindowType (IfcDoorStyle and IfcWindowStyle in IFC2X3) or IfcCurtainWallType with a ref, its PredefinedType (by default
+        COLUMN, BEAM, NOTDEFINED, NOTDEFINED, DOOR, WINDOW and NOTDEFINED) checked against the class's list, and the material, when
+        given, as an IfcMaterial of the type that its occurrences take. A door and a window get their geometry (door_geometry,
+        window_geometry), and a curtain wall type its parts' types, which take the material (curtain_types). A type of the same class
+        and name in the file is an error that names its GlobalId."""
         ifc_class, default = self.ELEMENT_TYPE_KINDS[kind]
         old = self.m.schema == "IFC2X3"
         if old and kind in ("door", "window"):
@@ -3293,6 +4398,9 @@ class _ChangeSet:
             self.notes.append(
                 "type %s: %s has no PredefinedType in %s, so %s was left out" % (name, ifc_class, self.m.schema, value)
             )
+        if kind == "curtain_wall":
+            self.register(t)
+            return self.curtain_types(t, op, category)
         material = str(op.get("material") or "").strip()[:255]
         if material:
             if old and category:
@@ -3598,12 +4706,14 @@ class _ChangeSet:
         rotation (element_placement), and contained in the storey, or for a part (part_of) aggregated in its whole and on the whole's
         storey, never both; a covering with a host is, in IFC4 and later, a part of that element (IfcRelAggregates) or contained in
         that space, and only in IFC2X3 gets IfcRelCoversBldgElements or IfcRelCoversSpaces (cover); and a type gets its
-        IfcRelDefinesByType (relate_type). IfcStair goes to create_stair."""
+        IfcRelDefinesByType (relate_type). IfcStair goes to create_stair, IfcCurtainWall to create_curtain_wall."""
         import ifcopenshell.api.aggregate
 
         cls = self.element_class(op.get("ifc_class"))
         if cls == "IfcStair":
             return self.create_stair(op)
+        if cls == "IfcCurtainWall":
+            return self.create_curtain_wall(op)
         if op.get("stair") is not None:
             raise DataspatiumError("stair is for IfcStair; %s takes shape" % cls)
         shape = self.element_shape(op.get("shape"))
@@ -4003,10 +5113,428 @@ class _ChangeSet:
         )
         return self.m.createIfcExtrudedAreaSolid(profile, position, self.direction(0, 0, 1), u(width))
 
+    # -- glass façades: a curtain wall of panels between mullions and transoms on an even grid, and its type with its parts' types
+    CURTAIN_SIZES = (
+        0.05,
+        0.15,
+        0.03,
+    )  # metres: a member's width in the façade's plane and depth across it, and a panel's thickness
+    CURTAIN_SPACING = 1.5  # metres: the most a bay is wide, or a row high, when neither a count nor a spacing is given
+    MAX_BAYS = 100
+    MAX_ROWS = 40
+    MAX_PANELS = 200
+    CURTAIN_WORDS = {
+        "panel": "Panel",
+        "mullion": "Mullion",
+        "transom": "Transom",
+    }  # the parts' names when part_names gives none
+    CURTAIN_MATERIALS = (
+        ("Glass", "glass"),
+        ("Aluminium", "aluminium"),
+    )  # the panels' and the members' when no type gives them
+
+    def curtain_memo(self):
+        """This change set's curtain walls: {"sizes": {type id: (member width, member depth, panel thickness)}, "facts": {curtain wall
+        id: (length, height, depth)}}, in metres."""
+        if getattr(self, "_curtain", None) is None:
+            self._curtain = {"sizes": {}, "facts": {}}
+        return self._curtain
+
+    def curtain_sizes(self, op):
+        """(member width, member depth, panel thickness) in metres of a curtain wall type's step, checked, CURTAIN_SIZES for those not
+        given: a panel stands in the middle of the members' depth, so it is thinner."""
+        w0, d0, t0 = self.CURTAIN_SIZES
+        w = _cs_num(op, "member_width", w0, positive=True)
+        d = _cs_num(op, "member_depth", d0, positive=True)
+        t = _cs_num(op, "panel_thickness", t0, positive=True)
+        if not 0.02 <= w <= 0.5 or not 0.02 <= d <= 1.0:
+            raise DataspatiumError("member_width must be 0.02 to 0.5 m and member_depth 0.02 to 1 m")
+        if not 0.004 <= t < d:
+            raise DataspatiumError("panel_thickness must be at least 0.004 m and less than member_depth (%g m)" % d)
+        return w, d, t
+
+    @staticmethod
+    def type_material(t, cls):
+        """The material of a class (IfcMaterialProfileSet ...) that the type's own IfcRelAssociatesMaterial gives; None without one."""
+        for rel in getattr(t, "HasAssociations", None) or ():
+            if rel.is_a("IfcRelAssociatesMaterial") and rel.RelatingMaterial.is_a(cls):
+                return rel.RelatingMaterial
+        return None
+
+    def curtain_types(self, t, op, category):
+        """A curtain wall type's parts' types, of the type's name: an IfcPlateType CURTAIN_PANEL whose IfcMaterialLayerSet is one layer
+        of the panels' material (panel_material, by default Glass of the category glass) as thick as panel_thickness, and an
+        IfcMemberType MULLION for the mullions and the transoms alike, since IFC's MULLION is any frame member between panels and
+        IfcMemberTypeEnum has no TRANSOM, whose IfcMaterialProfileSet is one rectangle of member_width by member_depth in the frame's
+        material (material and material_category, by default Aluminium of the category aluminium); IFC2X3, without profile sets, gives
+        the member type the material alone. A plate or member type of the name in the file is an error."""
+        name = str(t.Name)
+        for cls in ("IfcPlateType", "IfcMemberType"):
+            twin = next((x for x in self.m.by_type(cls) if str(x.Name or "").strip().lower() == name.lower()), None)
+            if twin is not None:
+                raise DataspatiumError(
+                    "the model has an %s of the same name already (GlobalId %s, id %d), which the curtain wall type's parts would get; choose another name"
+                    % (cls, twin.GlobalId, twin.id())
+                )
+        w, d, thick = self.curtain_sizes(op)
+        old = self.m.schema == "IFC2X3"
+        (glass_name, glass_category), (frame_name, frame_category) = self.CURTAIN_MATERIALS
+        panel_material = str(op.get("panel_material") or "").strip()[:255]
+        material = str(op.get("material") or "").strip()[:255]
+        if old and category:
+            self.notes.append("type %s: IFC2X3 has no material categories, so it was left out" % name)
+        glass = self.named_material(panel_material or glass_name, None if old else glass_category)
+        frame = self.named_material(
+            material or frame_name, None if old else category or (None if material else frame_category)
+        )
+        plate = self.root("IfcPlateType", name)
+        self.predefined(plate, "CURTAIN_PANEL")
+        layer = self.m.create_entity("IfcMaterialLayer", Material=glass, LayerThickness=round(self.u(thick), 9))
+        self.associate(plate, self.m.create_entity("IfcMaterialLayerSet", MaterialLayers=[layer], LayerSetName=name))
+        member = self.root("IfcMemberType", name)
+        self.predefined(member, "MULLION")
+        if old:
+            self.associate(member, frame)
+        else:
+            profile = self.m.create_entity(
+                "IfcRectangleProfileDef",
+                ProfileType="AREA",
+                ProfileName=name,
+                XDim=round(self.u(w), 9),
+                YDim=round(self.u(d), 9),
+            )
+            item = self.m.create_entity("IfcMaterialProfile", Material=frame, Profile=profile)
+            self.associate(member, self.m.create_entity("IfcMaterialProfileSet", Name=name, MaterialProfiles=[item]))
+        for x in (plate, member):
+            self.register(x, ref=False)
+        self.curtain_memo()["sizes"][t.id()] = (w, d, thick)
+
+    def curtain_parts(self, typ):
+        """(plate type, member type, (member width, member depth, panel thickness)) of a curtain wall type: its parts' types of its name
+        (curtain_types), with the sizes this change set gave them or that their layer and profile sets give; None, with a note, when
+        the file has no such pair, and the curtain wall's parts are then made as without a type."""
+        name = str(typ.Name or "")
+        plate = next(
+            (
+                x
+                for x in self.m.by_type("IfcPlateType")
+                if str(x.Name or "") == name and str(x.PredefinedType or "") == "CURTAIN_PANEL"
+            ),
+            None,
+        )
+        member = next(
+            (
+                x
+                for x in self.m.by_type("IfcMemberType")
+                if str(x.Name or "") == name and str(x.PredefinedType or "") == "MULLION"
+            ),
+            None,
+        )
+        if plate is None or member is None:
+            self.note_once(
+                "curtain wall type %s has no IfcPlateType CURTAIN_PANEL and IfcMemberType MULLION of its name, so the parts of its curtain walls are untyped, "
+                "with the default sizes and materials" % _ifc_text(typ.Name)
+            )
+            return None
+        sizes = self.curtain_memo()["sizes"].get(typ.id())
+        if sizes is None:
+            w, d, thick = self.CURTAIN_SIZES
+            layers = self.type_layers(plate)
+            if layers is not None and layers.MaterialLayers:
+                thick = sum(float(x.LayerThickness or 0.0) for x in layers.MaterialLayers) * self.scale
+            profiles = self.type_material(member, "IfcMaterialProfileSet") if self.m.schema != "IFC2X3" else None
+            profile = (
+                next(
+                    (
+                        p.Profile
+                        for p in (profiles.MaterialProfiles or ())
+                        if p.Profile is not None and p.Profile.is_a("IfcRectangleProfileDef")
+                    ),
+                    None,
+                )
+                if profiles is not None
+                else None
+            )
+            if profile is not None:
+                w, d = float(profile.XDim) * self.scale, float(profile.YDim) * self.scale
+            else:
+                self.note_once(
+                    "member type %s gives no rectangle profile, so the members of its curtain walls are %g × %g m"
+                    % (_ifc_text(member.Name), w, d)
+                )
+            sizes = (w, d, thick)
+        return plate, member, sizes
+
+    def curtain_count(self, c, count_key, spacing_key, span, most):
+        """How many bays (or rows) divide `span` metres evenly: curtain's count, else as many as keep each within its spacing (by
+        default CURTAIN_SPACING), 1 to `most`."""
+        count, spacing = c.get(count_key), c.get(spacing_key)
+        if count is not None and spacing is not None:
+            raise DataspatiumError("give curtain.%s or curtain.%s, not both" % (count_key, spacing_key))
+        if count is None:
+            s = _cs_num(c, spacing_key, self.CURTAIN_SPACING, positive=True)
+            count = max(1, int(math.ceil(span / s - 1e-9)))
+            if count > most:
+                raise DataspatiumError(
+                    "curtain.%s %g m divides %g m into %d; at most %d, so give a larger spacing"
+                    % (spacing_key, s, span, count, most)
+                )
+            return count
+        if isinstance(count, float) and count.is_integer():
+            count = int(count)
+        if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= most:
+            raise DataspatiumError("curtain.%s must be a whole number from 1 to %d" % (count_key, most))
+        return count
+
+    def create_curtain_wall(self, op):
+        """create_element's IfcCurtainWall, a glass façade with a ref: along its axis from curtain.start to curtain.end in the storey's
+        plane, curtain.height high from curtain.base above the storey, contained in the storey, with its axis as its 'Axis' (Curve2D)
+        so that the topology reads it as a wall, and no body of its own: it aggregates its parts, each placed relative to it, on an
+        even grid of bays along the axis and rows up (curtain_count). The mullions stand on the bays' lines from the base to the top,
+        the outer ones flush with the ends; the transoms lie between the mullions on the rows' lines, the lowest on the base and the
+        highest under the top; and a panel fills each field between them in the middle of the members' depth (curtain_member,
+        curtain_panel). A type (an IfcCurtainWallType of define_type) gives the parts their types, sizes and materials (curtain_parts,
+        curtain_materials). The parts get no refs and are named by the curtain wall, their kind (part_names, in the person's language)
+        and their place: a mullion by its line from the start, a transom by its bay and its line from the base, a panel by its bay and
+        row. Qto_CurtainWallQuantities follows (qto_curtain_wall), and IsExternal from the topology (write_external)."""
+        import ifcopenshell.guid
+
+        if op.get("shape") is not None or op.get("stair") is not None:
+            raise DataspatiumError("an IfcCurtainWall takes curtain, not shape or stair")
+        if op.get("at") is not None or _cs_num(op, "z", 0.0) != 0 or _cs_num(op, "rotation", 0.0, unit="degrees") != 0:
+            raise DataspatiumError(
+                "a curtain wall runs along its axis as a wall does: give curtain.start, curtain.end and curtain.base, and at, z and rotation null"
+            )
+        if op.get("part_of") not in (None, "") or op.get("host") not in (None, ""):
+            raise DataspatiumError(
+                "a curtain wall is not part_of another element and covers nothing, so part_of and host must be null"
+            )
+        c = op.get("curtain")
+        if not isinstance(c, dict):
+            raise DataspatiumError(
+                "an IfcCurtainWall needs curtain: {start, end, height, base, bays, bay_width, rows, row_height}"
+            )
+        storey = self.storey(op.get("storey"))
+        x1, y1 = _cs_xy(c.get("start"), "curtain.start")
+        x2, y2 = _cs_xy(c.get("end"), "curtain.end")
+        length = math.hypot(x2 - x1, y2 - y1)
+        if length < 0.3:
+            raise DataspatiumError("curtain.start and curtain.end must be at least 0.3 m apart")
+        height = _cs_num(c, "height", 3.0, positive=True)
+        base = _cs_num(c, "base", 0.0)
+        typ = self.element_type(op, "IfcCurtainWall")
+        parts = self.curtain_parts(typ) if typ is not None else None
+        w, d, thick = parts[2] if parts is not None else self.CURTAIN_SIZES
+        n = self.curtain_count(c, "bays", "bay_width", length, self.MAX_BAYS)
+        m = self.curtain_count(c, "rows", "row_height", height, self.MAX_ROWS)
+        if n * m > self.MAX_PANELS:
+            raise DataspatiumError(
+                "%d bays by %d rows are %d panels; at most %d in one curtain wall, so give fewer or make several"
+                % (n, m, n * m, self.MAX_PANELS)
+            )
+        step, rise = (length - w) / n, (height - w) / m  # between the members' centre lines
+        pw, ph = step - w, rise - w  # a panel between the members
+        if pw < 0.05 or ph < 0.05:
+            raise DataspatiumError(
+                "the panels would be %.3g m wide and %.3g m high between members %g m wide; give fewer bays or rows"
+                % (pw, ph, w)
+            )
+        name = str(op.get("name") or "").strip()[:255] or "Curtain wall"
+        cw = self.root("IfcCurtainWall", name)
+        object_type = str(op.get("object_type") or "").strip()[:255]
+        if object_type:
+            cw.ObjectType = object_type
+        self.element_predefined(cw, typ, op.get("predefined_type"))
+        cw.ObjectPlacement = self.placement(
+            storey.ObjectPlacement, self.u(x1), self.u(y1), self.u(base), (x2 - x1) / length, (y2 - y1) / length
+        )
+        axis = self.m.createIfcPolyline([self.point(0, 0), self.point(self.u(length), 0)])
+        cw.Representation = self.m.createIfcProductDefinitionShape(
+            None, None, [self.m.createIfcShapeRepresentation(self.axis_context(), "Axis", "Curve2D", [axis])]
+        )
+        self.contain(cw, storey)
+        self.register(cw, storey)
+        given = op.get("part_names") if isinstance(op.get("part_names"), dict) else {}
+        words = {k: str(given.get(k) or "").strip()[:60] or v for k, v in self.CURTAIN_WORDS.items()}
+        xs = [w / 2.0 + i * step for i in range(n + 1)]
+        zs = [w / 2.0 + j * rise for j in range(m + 1)]
+        members = [
+            self.curtain_member(cw, "%s %s %d" % (name, words["mullion"], i + 1), xs[i], 0.0, True, height, w, d)
+            for i in range(n + 1)
+        ]
+        members += [
+            self.curtain_member(
+                cw, "%s %s %d.%d" % (name, words["transom"], i + 1, j + 1), xs[i] + w / 2.0, zs[j], False, pw, w, d
+            )
+            for j in range(m + 1)
+            for i in range(n)
+        ]
+        panels = [
+            self.curtain_panel(
+                cw,
+                "%s %s %d.%d" % (name, words["panel"], i + 1, j + 1),
+                xs[i] + w / 2.0,
+                zs[j] + w / 2.0,
+                pw,
+                ph,
+                thick,
+            )
+            for j in range(m)
+            for i in range(n)
+        ]
+        # One IfcRelAggregates of new parts placed relative to the whole already: aggregate.assign_object would place each anew.
+        self.m.create_entity(
+            "IfcRelAggregates",
+            GlobalId=ifcopenshell.guid.new(),
+            OwnerHistory=self.owner,
+            RelatingObject=cw,
+            RelatedObjects=members + panels,
+        )
+        for p in members + panels:
+            self.register(p, storey, ref=False)
+        self.curtain_materials(cw, typ, parts, members, panels)
+        self.curtain_memo()["facts"][cw.id()] = (length, height, d)
+
+    def curtain_member(self, cw, name, x, z, upright, length, w, d):
+        """An IfcMember at (x, 0, z) metres in its curtain wall's coordinates: a mullion (upright) with its placement's z up and x
+        along the axis, or a transom with its z along the axis and x up; its body a w by d rectangle centred on its placement, w in
+        the façade's plane and d across it, extruded `length` metres along its z, as IFC4's IfcMemberStandardCase is drawn (the
+        deprecated class itself is never written, IFC102)."""
+        e = self.root("IfcMember", name)
+        axis, ref = ((0, 0, 1), (1, 0, 0)) if upright else ((1, 0, 0), (0, 0, 1))
+        e.ObjectPlacement = self.m.createIfcLocalPlacement(
+            cw.ObjectPlacement,
+            self.m.createIfcAxis2Placement3D(
+                self.point(self.u(x), 0.0, self.u(z)), self.direction(*axis), self.direction(*ref)
+            ),
+        )
+        profile = self.m.createIfcRectangleProfileDef(
+            "AREA", None, self.m.createIfcAxis2Placement2D(self.point(0.0, 0.0), None), self.u(w), self.u(d)
+        )
+        e.Representation = self.shape(
+            self.m.createIfcExtrudedAreaSolid(profile, self.axis3(0, 0, 0), self.direction(0, 0, 1), self.u(length))
+        )
+        return e
+
+    def curtain_panel(self, cw, name, x, z, width, height, thick):
+        """An IfcPlate whose lower corner nearest the curtain wall's start is at (x, z) metres along and up its curtain wall: its
+        placement's z across the façade toward the axis's right side (-y), its x along the axis and its y up, and its body the panel's
+        face, width by height, extruded `thick` metres along that z from y = thick / 2, so that it lies in the middle of the members'
+        depth and its layer set usage (AXIS3) runs through its thickness."""
+        e = self.root("IfcPlate", name)
+        e.ObjectPlacement = self.m.createIfcLocalPlacement(
+            cw.ObjectPlacement,
+            self.m.createIfcAxis2Placement3D(
+                self.point(self.u(x), self.u(thick / 2.0), self.u(z)), self.direction(0, -1, 0), self.direction(1, 0, 0)
+            ),
+        )
+        position = self.m.createIfcAxis2Placement2D(self.point(self.u(width / 2.0), self.u(height / 2.0)), None)
+        profile = self.m.createIfcRectangleProfileDef("AREA", None, position, self.u(width), self.u(height))
+        e.Representation = self.shape(
+            self.m.createIfcExtrudedAreaSolid(profile, self.axis3(0, 0, 0), self.direction(0, 0, 1), self.u(thick))
+        )
+        return e
+
+    def relate_all(self, es, t):
+        """Type many occurrences at once, as relate_type types one: the type's IfcRelDefinesByType (one per type) gets them all."""
+        import ifcopenshell.guid
+
+        rel = next(iter(getattr(t, "Types", None) or getattr(t, "ObjectTypeOf", None) or ()), None)
+        if rel is None:
+            self.m.create_entity(
+                "IfcRelDefinesByType",
+                GlobalId=ifcopenshell.guid.new(),
+                OwnerHistory=self.owner,
+                RelatedObjects=list(es),
+                RelatingType=t,
+            )
+        else:
+            rel.RelatedObjects = list(rel.RelatedObjects or ()) + list(es)
+
+    def curtain_materials(self, cw, typ, parts, members, panels):
+        """The kinds and materials of a curtain wall and its parts. A type types the curtain wall. With its parts' types
+        (curtain_parts) the panels are typed by the plate type and share one IfcMaterialLayerSetUsage of its layers (AXIS3, through
+        their thickness), and the members by the member type with, in IFC4 and later, one IfcMaterialProfileSetUsage of its profiles
+        (CardinalPoint 5: the profile's centre on the member's axis); the kinds are then the types' (OJT001). Without them the panels
+        are IfcPlate CURTAIN_PANEL of Glass and the members IfcMember MULLION of Aluminium (CURTAIN_MATERIALS), one
+        IfcRelAssociatesMaterial each for all of them; IFC2X3 has no PredefinedType on plates and members, which a note says."""
+        import ifcopenshell.guid
+
+        def associate_all(products, material):
+            self.m.create_entity(
+                "IfcRelAssociatesMaterial",
+                GlobalId=ifcopenshell.guid.new(),
+                OwnerHistory=self.owner,
+                RelatedObjects=list(products),
+                RelatingMaterial=material,
+            )
+
+        if typ is not None:
+            self.relate_type(cw, typ)
+        if parts is not None:
+            plate, member, _ = parts
+            self.relate_all(panels, plate)
+            self.relate_all(members, member)
+            layers = self.type_layers(plate)
+            if layers is not None:
+                associate_all(
+                    panels,
+                    self.m.create_entity(
+                        "IfcMaterialLayerSetUsage",
+                        ForLayerSet=layers,
+                        LayerSetDirection="AXIS3",
+                        DirectionSense="POSITIVE",
+                        OffsetFromReferenceLine=0.0,
+                    ),
+                )
+            profiles = self.type_material(member, "IfcMaterialProfileSet") if self.m.schema != "IFC2X3" else None
+            if profiles is not None:
+                associate_all(
+                    members, self.m.create_entity("IfcMaterialProfileSetUsage", ForProfileSet=profiles, CardinalPoint=5)
+                )
+            return
+        old = self.m.schema == "IFC2X3"
+        if old:
+            self.note_once(
+                "IFC2X3 has no PredefinedType on IfcPlate and IfcMember, so the panels (CURTAIN_PANEL) and the mullions and transoms (MULLION) of "
+                "the curtain walls are told by their classes alone; a curtain wall type (define_type curtain_wall) gives them types that say it"
+            )
+        else:
+            for parts_of_kind, value in ((panels, "CURTAIN_PANEL"), (members, "MULLION")):
+                if self.check_enum(parts_of_kind[0], value):
+                    for p in parts_of_kind:
+                        p.PredefinedType = value
+        (glass_name, glass_category), (frame_name, frame_category) = self.CURTAIN_MATERIALS
+        associate_all(panels, self.named_material(glass_name, None if old else glass_category))
+        associate_all(members, self.named_material(frame_name, None if old else frame_category))
+
+    def qto_curtain_wall(self, e):
+        """A curtain wall that create_element made in this change set (curtain_memo): Length along its axis, Height, Width the members'
+        depth, and its side, gross and net alike since it has no openings; none for another."""
+        facts = self.curtain_memo()["facts"].get(e.id())
+        if facts is None:
+            return None
+        length, height, depth = facts
+        return {
+            "Length": ("length", length),
+            "Height": ("length", height),
+            "Width": ("length", depth),
+            "GrossSideArea": ("area", length * height),
+            "NetSideArea": ("area", length * height),
+        }
+
     def finish(self):
-        """After the operations: the joins of the walls the change set created (join_walls), then the base quantities of what it
-        created or changed (base_quantities). A fault in either becomes a note in the report, and the operations stand."""
-        for step, what in ((self.join_walls, "the wall joins"), (self.base_quantities, "the base quantities")):
+        """After the operations: the joins of the walls the change set created (join_walls), the openings of the walls joined anew
+        (check_openings) and the spaces along the walls it moved (fit_spaces), then the base quantities of what it created or changed
+        (base_quantities) and last the space boundaries near it (space_boundaries), after the spaces have been fitted. A fault in any
+        becomes a note in the report, and the operations stand."""
+        for step, what in (
+            (self.join_walls, "the wall joins"),
+            (self.check_openings, "the check of the openings in the joined walls"),
+            (self.fit_spaces, "the spaces along the moved walls"),
+            (self.base_quantities, "the base quantities"),
+            (self.space_boundaries, "the space boundaries"),
+        ):
             try:
                 step()
             except Exception as exc:
@@ -4327,10 +5855,11 @@ class _ChangeSet:
         ("IfcRoof", "Qto_RoofBaseQuantities", "qto_roof"),
         ("IfcDoor", "Qto_DoorBaseQuantities", "qto_filling"),
         ("IfcWindow", "Qto_WindowBaseQuantities", "qto_filling"),
+        ("IfcCurtainWall", "Qto_CurtainWallQuantities", "qto_curtain_wall"),
     )
 
     def base_quantities(self):
-        """The base quantities of the walls, slabs, roofs, doors and windows the change set created or changed, from their
+        """The base quantities of the walls, slabs, roofs, doors, windows and curtain walls the change set created or changed, from their
         parameters without a geometry kernel, in the file's units and with MethodOfMeasurement BaseQuantities (add_qto): a set the
         element has of its own is updated, one it shares is left alone. Each quantity has the name in IfcOpenShell's template for the
         file's schema (IFC4X3 spells the wall's footprint areas GrossFootPrintArea and NetFootPrintArea), and one the template lacks
@@ -4380,6 +5909,10 @@ class _ChangeSet:
         qto = (
             rels[0].RelatingPropertyDefinition if rels else ifcopenshell.api.pset.add_qto(self.m, product=e, name=name)
         )
+        if not getattr(qto, "MethodOfMeasurement", None):
+            qto.MethodOfMeasurement = (
+                "BaseQuantities"  # add_qto sets it only for names that end so, and QTY001 asks it of every Qto_ set
+            )
         ifcopenshell.api.pset.edit_qto(self.m, qto=qto, properties=props)  # ty: ignore[invalid-argument-type]
 
     def qto_wall(self, wall):
@@ -4541,6 +6074,8 @@ class _ChangeSet:
         ("IfcDoor", "Pset_DoorCommon"),
         ("IfcWindow", "Pset_WindowCommon"),
         ("IfcRoof", "Pset_RoofCommon"),
+        ("IfcCurtainWall", "Pset_CurtainWallCommon"),
+        ("IfcCurtainWallType", "Pset_CurtainWallCommon"),
     )
     LENGTH_MEASURES = ("IfcLengthMeasure", "IfcPositiveLengthMeasure", "IfcNonNegativeLengthMeasure")
     ANGLE_MEASURES = ("IfcPlaneAngleMeasure", "IfcPositivePlaneAngleMeasure")
@@ -4969,8 +6504,9 @@ class _ChangeSet:
         """IsExternal at the end of apply. The walls the change set created or changed are external when they run along the outer
         boundary of their storey's topology (_ifc_topology: the union of its rooms, a courtyard's walls too) and internal when they
         bound its rooms otherwise, and the doors and windows in them take their wall's value; on a storey whose walls do not close,
-        or that has walls the topology cannot read, they are left alone, and so is a wall that bounds no room, with a note. The roof
-        slabs and roofs the change set created or changed are external. A value that was in the model already stays (set_external)."""
+        or that has walls the topology cannot read, they are left alone, and so is a wall that bounds no room, with a note. A curtain
+        wall counts as a wall (Pset_CurtainWallCommon; its parts are parts of it). The roof slabs and roofs the change set created or
+        changed are external. A value that was in the model already stays (set_external)."""
         walls, storeys = [], {}
         for i in dict.fromkeys([r["id"] for r in self.created] + list(self.changed)):
             try:
@@ -4979,7 +6515,7 @@ class _ChangeSet:
                 continue  # deleted later in the change set
             if e.is_a("IfcRoof") or (e.is_a("IfcSlab") and self.roof_slab(e)):
                 self.set_external(e, True)
-            elif e.is_a("IfcWall"):
+            elif e.is_a("IfcWall") or e.is_a("IfcCurtainWall"):
                 s = self.container(e)
                 if s is not None and s.is_a("IfcBuildingStorey"):
                     walls.append((e, s.id()))
@@ -5206,6 +6742,17 @@ def _topo_axis(wall, scale):
                     for x, y in pts
                 ]
     return None
+
+
+def _topo_curtain(e, scale):
+    """Whether an element is a curtain wall that the topology reads as a wall: one with an 'Axis' (create_element draws it so). One
+    without, as other programs often write them, is left out rather than counted as a wall the topology cannot read."""
+    if not e.is_a("IfcCurtainWall"):
+        return False
+    try:
+        return bool(_topo_axis(e, scale))
+    except Exception:
+        return False
 
 
 def _topo_thickness(wall, scale):
@@ -5540,7 +7087,8 @@ def _ifc_topology(model, tolerance=None, storeys=None, shapes=False):
          (walls whose centreline could not be read), "tolerance" (m), "north" (map, true_north or model)}
 
     A wall's centreline is its 'Axis' representation through its placement, else the long axis of its body's footprint
-    (ifcopenshell.geom). The ends are snapped within `tolerance` metres (by default half the storey's thickest wall plus 0.05 m).
+    (ifcopenshell.geom); a curtain wall with an 'Axis' (create_element's) counts as a wall, one without is left out (_topo_curtain).
+    The ends are snapped within `tolerance` metres (by default half the storey's thickest wall plus 0.05 m).
     `storeys` (names) limits the storeys read. At most TOPOLOGY_MAX_WALLS walls. With shapes (for create_spaces, never for JSON) the
     rooms carry their polygons and net areas (_topo_plan) and every storey its entity as "_storey".
     """
@@ -5562,7 +7110,7 @@ def _ifc_topology(model, tolerance=None, storeys=None, shapes=False):
                     e
                     for rel in (getattr(s, "ContainsElements", None) or ())
                     for e in (rel.RelatedElements or ())
-                    if e.is_a("IfcWall")
+                    if e.is_a("IfcWall") or _topo_curtain(e, scale)
                 ],
             )
         )
