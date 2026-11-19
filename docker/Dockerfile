@@ -3,7 +3,7 @@
 # the runtime stage holds only the virtual environment and the source, runs as
 # an unprivileged user and has no package manager or compiler.
 
-FROM python:3.13-slim-trixie AS builder
+FROM python:3.15-slim-trixie AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /bin/
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 # git fetches IFC-DB at the commit uv.lock names, until it is on PyPI (ADR 0014). Only this stage has it.
@@ -39,7 +39,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
        fi
 
 
-FROM python:3.13-slim-trixie AS runtime
+FROM python:3.15-slim-trixie AS runtime
 # Apply the distribution's security updates and remove pip: the runtime needs no
 # package manager, and pip's vendored libraries are what image scanners flag
 # between rebuilds of the base image.
