@@ -62,9 +62,10 @@ uv run poe security              # ruff, bandit and pip-audit; CI adds gitleaks,
 The README, the documentation and the web pages exist in English, Swedish,
 Danish, Norwegian (Bokmål and Nynorsk), Finnish and Icelandic: the English
 pages under `docs/en/`, the translations under `docs/<lang>/`. English is the
-source, and a change to a page is made in all seven languages in the same
-commit (`tests/unit/test_docs.py` checks that they keep up). This file stays in
-English. Shared terms follow
+source. For now a change to a page or a page text is made in English and
+Swedish in the same commit (`tests/unit/test_docs.py` and
+`tests/unit/test_i18n.py` check that Swedish keeps up); the other languages may
+lag, and a page text they lack is shown in English. This file stays in English. Shared terms follow
 the glossary that Dataregium and [Dataspatium](https://github.com/marwiss/Dataspatium)
 keep together (`presets/i18n-shared.json` there); keep "viewpoint" and the
 API names untranslated, and send corrections of a translation as an issue or

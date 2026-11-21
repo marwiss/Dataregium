@@ -23,22 +23,37 @@ def test_the_start_page_leads_to_the_documentation_in_the_language_of_the_page(c
     assert "blob/main/docs/sv/architecture.md" in swedish and "blob/main/docs/sv/client-guide.md" in swedish
 
 
-def test_every_language_has_every_key_of_the_english_source() -> None:
+#: The languages kept complete for now (B-81): the others may lag and show English where a key is missing.
+COMPLETE = ("en", "sv")
+
+
+def test_swedish_has_every_key_of_the_english_source() -> None:
     source = i18n.catalogue("en")
     assert source, "the English catalogue is the source"
+    for lang in COMPLETE:
+        missing = sorted(set(source) - set(i18n.catalogue(lang)))
+        assert not missing, f"{lang}: missing {missing}"
+
+
+def test_every_language_keeps_to_the_english_source() -> None:
+    source = i18n.catalogue("en")
     for lang in i18n.LANGUAGES:
         catalogue = i18n.catalogue(lang)
-        missing = sorted(set(source) - set(catalogue))
         extra = sorted(set(catalogue) - set(source))
         empty = sorted(key for key, value in catalogue.items() if not str(value).strip())
-        assert not missing, f"{lang}: missing {missing}"
         assert not extra, f"{lang}: keys not in the English source {extra}"
         assert not empty, f"{lang}: empty values {empty}"
-        for key, value in source.items():
-            placeholders = {part for part in value.split("{")[1:]}
-            for placeholder in placeholders:
-                name = placeholder.split("}")[0]
-                assert "{" + name + "}" in catalogue[key], f"{lang}: {key} lost the parameter {{{name}}}"
+        for key, value in catalogue.items():
+            placeholders = {part.split("}")[0] for part in source[key].split("{")[1:]}
+            for name in placeholders:
+                assert "{" + name + "}" in value, f"{lang}: {key} lost the parameter {{{name}}}"
+
+
+def test_a_key_a_language_lacks_reads_the_english_source(monkeypatch) -> None:
+    danish = dict(i18n.catalogue("da"))
+    danish.pop("opencde.signin")
+    monkeypatch.setitem(i18n._catalogues, "da", danish)
+    assert i18n.translate("da", "opencde.signin") == "Sign in"
 
 
 def test_translate_falls_back_and_fills_parameters() -> None:

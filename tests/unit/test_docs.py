@@ -1,9 +1,9 @@
 # This file was generated with the assistance of an AI coding tool.
 """The documentation stays whole: links resolve, and the translations keep up with English.
 
-English is the source under ``docs/en/``; every other language has the same pages under
-``docs/<lang>/``. A page added or changed in English without its translations fails here, as a
-new key in one language catalogue does in ``test_i18n.py``.
+English is the source under ``docs/en/``. Until the owner says otherwise only Swedish is kept complete
+(B-81): every English page has its Swedish translation with the same shape, as every key has its Swedish
+text in ``test_i18n.py``. The other languages may lag; a page they lack is read in English.
 """
 
 import re
@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "docs"
 ENGLISH = DOCS / "en"
 LANGUAGES = ("sv", "da", "nb", "nn", "fi", "is")
+#: The translations kept complete for now (B-81).
+COMPLETE = ("sv",)
 
 FENCED = re.compile(r"^[ \t]*```.*?^[ \t]*```[ \t]*$", re.DOTALL | re.MULTILINE)
 INLINE_CODE = re.compile(r"`[^`\n]*`")
@@ -69,7 +71,7 @@ def test_relative_links_point_at_something(path: Path) -> None:
     assert not broken, f"{path.relative_to(ROOT)} links to what does not exist: {broken}"
 
 
-@pytest.mark.parametrize("lang", LANGUAGES)
+@pytest.mark.parametrize("lang", COMPLETE)
 @pytest.mark.parametrize("page", english_pages())
 def test_every_page_has_its_translation_and_keeps_its_shape(lang: str, page: str) -> None:
     translation = DOCS / lang / page
