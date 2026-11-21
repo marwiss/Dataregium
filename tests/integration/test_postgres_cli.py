@@ -21,7 +21,6 @@ import pytest
 from pydantic import SecretStr
 from typer.testing import CliRunner
 
-from opencde import audit
 from opencde import backup as backups
 from opencde import seed as seeding
 from opencde.accounts.roles import Role
@@ -139,7 +138,7 @@ async def test_on_postgresql_a_backup_restores_the_same_rows(
     assert {"conversions", "validations", "teams", "team_members", "web_sessions", "bcf_events"} <= set(before)
 
     manifest = await backups.export(None, storage, tmp_path / "backup", postgres=pg)
-    assert (manifest.store_dialect, manifest.store_migration, manifest.nodes) == ("postgres", 5, 0)
+    assert (manifest.store_dialect, manifest.store_migration, manifest.nodes) == ("postgres", 6, 0)
     assert manifest.rows == sum(len(rows) for rows in before.values())
 
     await tables.wipe(pg)
@@ -234,9 +233,11 @@ async def test_on_postgresql_a_graphs_backup_with_what_has_no_place_is_refused(
 ) -> None:
     storage = LocalStorage(tmp_path / "data")
     await seeded(storage, graph=graph)
-    await audit.record(graph, "web.sign_in", ip="127.0.0.1")
+    # Every label a backup carries has a table since the logs moved (0006_logs), so what has no place is a
+    # relationship no table holds.
+    await graph.run("MATCH (u:User {username: $username}), (p:Project) CREATE (u)-[:FOLLOWS]->(p)", username="admin")
     await backups.export(graph, storage, tmp_path / "backup")
-    with pytest.raises(backups.BackupError, match=r"AuditEvent: no table in PostgreSQL holds it \(1\)"):
+    with pytest.raises(backups.BackupError, match=r"FOLLOWS from User to Project: a relationship with no place \(2\)"):
         await backups.restore(None, LocalStorage(tmp_path / "moved"), tmp_path / "backup", postgres=pg)
     assert await tables.is_empty(pg), "nothing written"
 
@@ -285,7 +286,7 @@ def test_on_postgresql_the_command_line_runs_with_no_graph(
     run("ifc-db", "list")
     doctor = run("doctor")
     assert "OK      Graph database: not used" in doctor
-    assert "OK      Schema of the server's own data: 5 of 5 migrations applied, the last 0005_jobs" in doctor
+    assert "OK      Schema of the server's own data: 6 of 6 migrations applied, the last 0006_logs" in doctor
 
     backed = run("backup", str(tmp_path / "backups"))
     (folder,) = (tmp_path / "backups").iterdir()
