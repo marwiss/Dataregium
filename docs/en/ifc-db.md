@@ -8,8 +8,9 @@ the issues and documents.
 Turn it on with `OPENCDE_IFC_DB_ENABLED=true` and install the `ifc-db`
 extra (`uv sync --extra ifc-db`). The Docker image includes the extra by
 default (`ARG OPENCDE_EXTRAS` in the Dockerfile), which more than doubles its
-size (about 680 MB, or 1.1 GB with buildingSMART's rules, against 300 MB); build with `--build-arg OPENCDE_EXTRAS=`
-for a slimmer image without IfcOpenShell when the module stays off.
+size (about 680 MB, or 1.1 GB with buildingSMART's rules, against 300 MB); build with
+`--build-arg OPENCDE_EXTRAS="--extra postgres"` for a slimmer image without IfcOpenShell when the module stays
+off.
 
 Its settings are named `OPENCDE_IFC_DB_*`. Until November 2026 the module was
 named IFC-graph and then IFC-LPG: its settings `OPENCDE_IFCGRAPH_*` and then

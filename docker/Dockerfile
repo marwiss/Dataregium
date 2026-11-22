@@ -10,10 +10,11 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
-# Optional extras to install. The default includes the IFC-DB module (IfcOpenShell),
-# which OPENCDE_IFC_DB_ENABLED switches on at runtime; build with
-# `--build-arg OPENCDE_EXTRAS=` for a slimmer image without it.
-ARG OPENCDE_EXTRAS="--extra ifc-db"
+# Optional extras to install. The default includes asyncpg for the server's own data in
+# PostgreSQL (OPENCDE_STORE_URL, ADR 0029) and the IFC-DB module (IfcOpenShell), which
+# OPENCDE_IFC_DB_ENABLED switches on at runtime; build with
+# `--build-arg OPENCDE_EXTRAS="--extra postgres"` for a slimmer image without IfcOpenShell.
+ARG OPENCDE_EXTRAS="--extra postgres --extra ifc-db"
 
 # Dependencies first, so source changes do not invalidate this layer.
 COPY pyproject.toml uv.lock .python-version ./

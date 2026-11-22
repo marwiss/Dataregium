@@ -29,9 +29,9 @@ def test_the_graph_side_is_always_installed_and_the_workers_come_with_the_extra(
     ], "the rooms need shapely 2, which IfcOpenShell brings without a floor"
     for old in ("ifc-lpg", "ifcgraph"):
         assert project["optional-dependencies"][old] == ["opencde-server[ifc-db]"], "builds that name it keep working"
-    assert '"--extra ifc-db"' in (ROOT / "docker" / "Dockerfile").read_text(encoding="utf-8"), (
-        "the image has the workers"
-    )
+    assert 'ARG OPENCDE_EXTRAS="--extra postgres --extra ifc-db"' in (ROOT / "docker" / "Dockerfile").read_text(
+        encoding="utf-8"
+    ), "the image has the workers, and asyncpg for the server's own data in PostgreSQL (ADR 0029)"
 
 
 def test_the_server_process_needs_no_ifcopenshell() -> None:
