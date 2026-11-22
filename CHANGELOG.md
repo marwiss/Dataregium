@@ -10,6 +10,16 @@ the commit history.
 
 ## Unreleased
 
+- IFC-DB is locked at bfb1c49 (was 34d7d45). Its workers tell a missing IfcOpenShell from one whose libraries do
+  not load, as under a low `OPENCDE_IFC_DB_MEMORY_MB`: the conversion and `opencde ifc-db export` then name the
+  ImportError where they said "IfcOpenShell is not installed", and `--verify` stops with it where it showed a
+  check that needs IfcOpenShell as unknown; a merge's workers say when they run out of memory under their limit.
+  The server's own workers now start in IFC-DB's worker environment (OpenBLAS on one thread, glibc's malloc on two
+  arenas, unless set), as the library's workers do, so that fewer threads reserve address space under the limit.
+  Deleting a project goes past a file it cannot remove, as on Windows while a conversion maps a version: it no
+  longer answers 500 without its `project.delete` audit event, its other files go, and the held one stays and is
+  named in the log. A model's geometry files go one by one in the same way, also in `opencde ifc-db prune`, which
+  stopped at such a file.
 - The BIM functions of tier 2 run on the versions' IFC files without IFC-DB's graph (F59):
   `OPENCDE_BIM_ENABLED=true`, which `opencde init --tier bim-gis` writes and tier 1 refuses, turns on the check
   of each upload and the precheck with the refusal of uploads with errors, the diff, the clash check, the rooms,

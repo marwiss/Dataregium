@@ -59,11 +59,17 @@ def _conversions(graph: Graph, postgres: Postgres | None) -> ConversionStore:
 
 
 def delete_geometry(storage: LocalStorage, model_id: str) -> int:
-    """Delete a model's geometry records and the glTF files built from them. Returns how many files went."""
+    """Delete a model's geometry records and the glTF files built from them. Returns how many files went. A file
+    that cannot be removed, as one a download holds open on Windows, stays and is named in the log, and the model's
+    other files still go."""
     gone = 0
     for key in list(storage.iter_keys("geometry")):
         if key.startswith(f"geometry/{model_id}."):
-            storage.delete(key)
+            try:
+                storage.delete(key)
+            except OSError as exc:
+                log.warning("geometry_file_left", model_id=model_id, storage_key=key, error_type=type(exc).__name__)
+                continue
             gone += 1
     return gone
 

@@ -17,9 +17,12 @@ from opencde.accounts.roles import Role
 from opencde.graph.graph import Graph
 from opencde.ids import is_uuid, new_id, normalize_guid
 from opencde.ifcgraph.maintenance import delete_geometry
+from opencde.logging import get_logger
 from opencde.storage import LocalStorage
 from opencde.store.accounts.users import PUBLIC_FIELDS, AccountError, User, _user
 from opencde.timeutil import now_iso
+
+log = get_logger(__name__)
 
 MAX_NAME = 200
 MAX_LIST_ITEMS = 200
@@ -259,8 +262,12 @@ class ProjectRepository:
             with contextlib.suppress(OSError):
                 delete_geometry(storage, model_id)
         for key in keys:
-            with contextlib.suppress(ValueError):  # a key the storage refuses was never one it wrote
+            try:
                 storage.delete(key)
+            except (ValueError, OSError) as exc:
+                # A key the storage refuses was never one it wrote, and a file a worker holds open (Windows) stays.
+                # The project is gone by now, so the others still go, and the log names what stays.
+                log.warning("project_file_left", project_id=project_id, storage_key=key, error_type=type(exc).__name__)
         return deleted
 
     async def storage_keys(self, project_id: str) -> list[str]:

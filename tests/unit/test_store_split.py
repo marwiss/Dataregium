@@ -20,9 +20,10 @@ from opencde.graph.schema import EXPIRING_LABELS, UNIQUE
 from opencde.ids import new_id
 from opencde.ifcgraph import merging
 from opencde.ifcgraph import service as service_module
-from opencde.ifcgraph.maintenance import delete_project, prune_models
+from opencde.ifcgraph.maintenance import delete_geometry, delete_project, prune_models
 from opencde.ifcgraph.service import IfcGraphService
 from opencde.storage import LocalStorage, make_key
+from opencde.store.accounts.postgres import PostgresProjectRepository
 from opencde.store.accounts.projects import ProjectRepository
 from tests.conftest import test_settings as make_settings
 
@@ -425,3 +426,77 @@ def test_nothing_that_expires_lives_on_the_ifc_graph() -> None:
     """The expiry cleaner runs on the store alone; the library's nodes carry no ``expires_at``, and a prepared model
     leaves the IFC graph through its ``Merge`` job, which is the store's (``merging.resume``)."""
     assert not set(EXPIRING_LABELS) & LIBRARY_LABELS
+
+
+def _answering(value: Any) -> Any:
+    async def answer(*_: Any) -> Any:
+        return value
+
+    return answer
+
+
+class _Log:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, Any]]] = []
+
+    def warning(self, event: str, **fields: Any) -> None:
+        self.events.append((event, fields))
+
+
+def _holding(storage: LocalStorage, held: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``held`` cannot be removed, as when another process holds it open on Windows (WinError 32)."""
+    removing = storage.delete
+
+    def delete(key: str) -> None:
+        if key == held:
+            raise PermissionError(13, "The process cannot access the file because it is being used by another process")
+        removing(key)
+
+    monkeypatch.setattr(storage, "delete", delete)
+
+
+@pytest.mark.parametrize("repository", [ProjectRepository, PostgresProjectRepository])
+async def test_a_file_held_open_stays_and_the_projects_other_files_go(
+    repository: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On Windows a worker's memory map keeps its file from being removed (WinError 32), as IFC-DB's lossless
+    conversion maps the version file (since its 0ab3d4b): the project goes, with every other file, and the held one
+    stays, named in the log."""
+    storage = LocalStorage(tmp_path)
+    held, other = make_key("documents", new_id(), "ifc"), make_key("documents", new_id(), "ifc")
+    for key in (held, other):
+        storage.write_bytes(key, b"ISO-10303-21;")
+    projects = repository(None)
+    monkeypatch.setattr(projects, "storage_keys", _answering([held, other]))
+    monkeypatch.setattr(projects, "model_ids", _answering([]))
+    monkeypatch.setattr(projects, "delete", _answering(True))
+    log = _Log()
+    monkeypatch.setattr(f"{repository.__module__}.log", log)
+    _holding(storage, held, monkeypatch)
+    assert await projects.delete_with_files("project-1", storage)
+    assert storage.exists(held) and not storage.exists(other)
+    assert log.events == [
+        ("project_file_left", {"project_id": "project-1", "storage_key": held, "error_type": "PermissionError"})
+    ]
+
+
+def test_a_geometry_file_held_open_stays_and_the_models_other_files_go(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A download holds one of a model's glTF files open (Windows): the model's records and its other files still
+    go, though they come after it, and the log names the one that stays."""
+    storage = LocalStorage(tmp_path)
+    model = new_id()
+    held, records = make_key("geometry", model, "g1a2b3c4"), make_key("geometry", model, "jsonl")
+    another = make_key("geometry", new_id(), "jsonl")
+    for key in (held, records, another):
+        storage.write_bytes(key, b"{}")
+    log = _Log()
+    monkeypatch.setattr("opencde.ifcgraph.maintenance.log", log)
+    _holding(storage, held, monkeypatch)
+    assert delete_geometry(storage, model) == 1
+    assert storage.exists(held) and not storage.exists(records), "the records come after it and go all the same"
+    assert storage.exists(another), "another model's files stay"
+    assert log.events == [
+        ("geometry_file_left", {"model_id": model, "storage_key": held, "error_type": "PermissionError"})
+    ]

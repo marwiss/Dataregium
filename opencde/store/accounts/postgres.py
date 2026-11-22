@@ -20,6 +20,7 @@ from opencde.accounts.roles import Role
 from opencde.auth.passwords import hash_password, verify_password
 from opencde.ids import hash_secret, is_uuid, new_id, new_secret, normalize_guid
 from opencde.ifcgraph.maintenance import delete_geometry
+from opencde.logging import get_logger
 from opencde.storage import LocalStorage
 from opencde.store.accounts.projects import (
     AI_POLICIES,
@@ -48,6 +49,8 @@ if TYPE_CHECKING:
     from opencde.postgres.database import Postgres, Tx
     from opencde.settings import Settings
     from opencde.store.protocols import ProjectStore, TeamStore, UserStore, WebSessionStore
+
+log = get_logger(__name__)
 
 
 def _project_name(name: str) -> str:
@@ -338,8 +341,12 @@ class PostgresProjectRepository:
             with contextlib.suppress(OSError):
                 delete_geometry(storage, model_id)
         for key in keys:
-            with contextlib.suppress(ValueError):  # a key the storage refuses was never one it wrote
+            try:
                 storage.delete(key)
+            except (ValueError, OSError) as exc:
+                # A key the storage refuses was never one it wrote, and a file a worker holds open (Windows) stays.
+                # The project is gone by now, so the others still go, and the log names what stays.
+                log.warning("project_file_left", project_id=project_id, storage_key=key, error_type=type(exc).__name__)
         return deleted
 
     async def storage_keys(self, project_id: str) -> list[str]:
