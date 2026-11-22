@@ -39,6 +39,10 @@ the commit history.
 - The check of what no GlobalId reaches (tier 3) leaves out Dataspatium's guard of the STEP ids, a loose
   `IfcDocumentReference` named `StepIdGuard`, and the server's proposal to remove what nothing reaches leaves it in
   the file.
+- The local engine runs on the computer itself too (F78 a): `opencde init --local --no-container` writes a `.env`
+  whose `COMPOSE_FILE` names `compose.local-databases.yaml`, which runs PostgreSQL and the graph, published on the
+  computer's loopback alone, and no API container, beside `uv run opencde serve`. `opencde init --local` names the
+  databases on the loopback in either way, and inside Compose the stack's own addresses replace them.
 - The local engine starts in its container (F77 a): `compose.local.yaml` sets `OPENCDE_LOCAL_IN_CONTAINER=true`,
   so that `opencde serve` listens on the container's own interfaces, which Compose publishes on the computer's
   loopback alone; outside a container the server refuses the setting and keeps to the loopback, and

@@ -77,9 +77,28 @@ def test_the_local_engine_gets_random_passwords_and_named_origins(tmp_path: Path
     assert env["COMPOSE_FILE"] == "docker/compose.yaml:docker/compose.local.yaml"
     assert env["OPENCDE_MCP_ENABLED"] == "true", "AI programs on the computer reach the models (ADR 0028)"
     assert env["OPENCDE_TIER"] == "experimental" and env["COMPOSE_PROFILES"] == "graph", "the models in the graph"
-    assert env["OPENCDE_STORE_URL"] == "postgresql://opencde@store:5432/opencde"
+    assert env["OPENCDE_STORE_URL"] == "postgresql://opencde@127.0.0.1:5442/opencde", "Compose gives its own inside"
+    assert env["OPENCDE_GRAPH_URI"] == "bolt://127.0.0.1:7697"
     assert len(env["OPENCDE_STORE_PASSWORD"]) >= 24 and env["OPENCDE_STORE_PASSWORD"] != env["OPENCDE_GRAPH_PASSWORD"]
     assert "Dataspatium" in done.output
+
+
+def test_the_local_engine_runs_on_the_computer_with_its_databases_in_compose(tmp_path: Path) -> None:
+    """F78 a: without a container the engine reaches its databases on the loopback, where the overlay publishes
+    them, and the API's container stays off."""
+    from opencde.settings import Settings
+
+    local = tmp_path / "local.env"
+    done = CliRunner().invoke(app, ["init", "--local", "--no-container", "--path", str(local)])
+    assert done.exit_code == 0, done.output
+    env = _env(local)
+    assert env["COMPOSE_FILE"] == "docker/compose.yaml:docker/compose.local-databases.yaml"
+    assert (env["OPENCDE_LOCAL_POSTGRES_PORT"], env["OPENCDE_LOCAL_BOLT_PORT"]) == ("5442", "7697")
+    assert env["OPENCDE_STORE_URL"] == "postgresql://opencde@127.0.0.1:5442/opencde"
+    assert env["OPENCDE_ENVIRONMENT"] == "local" and "uv run opencde serve" in done.output
+    assert Settings(_env_file=local).is_local  # type: ignore[call-arg]
+    refused = CliRunner().invoke(app, ["init", "--dev", "--no-container", "--path", str(tmp_path / "d.env")])
+    assert refused.exit_code != 0 and "--local" in refused.output
 
 
 def test_without_a_terminal_it_says_what_to_give(tmp_path: Path) -> None:

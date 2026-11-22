@@ -252,6 +252,14 @@ def init(
             "PostgreSQL). bim-gis, unless the guide's answers ask for the graph; --local is experimental."
         ),
     ] = None,
+    no_container: Annotated[
+        bool,
+        typer.Option(
+            "--no-container",
+            help="With --local: the engine runs on this computer, and Compose runs only its databases, published "
+            "on the loopback (F78 a).",
+        ),
+    ] = False,
     force: Annotated[bool, typer.Option(help="Overwrite an existing .env.")] = False,
     path: Annotated[Path, typer.Option(help="Where to write the file.")] = Path(".env"),
 ) -> None:
@@ -259,10 +267,12 @@ def init(
     next."""
     if path.exists() and not force:
         raise _fail(f"{path} exists; use --force to overwrite")
+    if no_container and not local:
+        raise _fail("--no-container is for the local engine: give --local too")
     if local:
         if tier not in (None, Tier.EXPERIMENTAL):
             raise _fail("--local is tier 3 (experimental): the local engine keeps the models in its graph")
-        _write_local_env(path)
+        _write_local_env(path, container=not no_container)
         return
     extra: list[str] = []
     guided = not dev and not public_url
@@ -320,18 +330,20 @@ def init(
     typer.echo("        next: docker compose up -d --build" if dev else "        next: see docs/en/deploy/vps-caddy.md")
 
 
-def _write_local_env(path: Path) -> None:
-    """The local engine's .env (ADR 0023): loopback only, random passwords, the origins Dataspatium comes from."""
+def _write_local_env(path: Path, *, container: bool = True) -> None:
+    """The local engine's .env (ADR 0023): loopback only, random passwords, the origins Dataspatium comes from. The
+    databases' addresses are the computer's loopback, for the engine run on the computer itself (F78 a); inside
+    Compose the stack's own addresses replace them, so that the same file serves the engine in its container."""
     lines = [
         "# Written by `opencde init --local`: the local engine on this computer. Keep this file private.",
         "OPENCDE_ENVIRONMENT=local",
         "OPENCDE_PUBLIC_URL=http://127.0.0.1:8000",
         "OPENCDE_TIER=experimental",  # the models in the graph, beside PostgreSQL (F58 a)
         f"OPENCDE_SECRET_KEY={secrets.token_urlsafe(48)}",
-        "OPENCDE_STORE_URL=postgresql://opencde@store:5432/opencde",
+        "OPENCDE_STORE_URL=postgresql://opencde@127.0.0.1:5442/opencde",
         f"OPENCDE_STORE_PASSWORD={secrets.token_urlsafe(24)}",
         "OPENCDE_GRAPH_DIALECT=neo4j",
-        "OPENCDE_GRAPH_URI=bolt://graph:7687",
+        "OPENCDE_GRAPH_URI=bolt://127.0.0.1:7697",
         "OPENCDE_GRAPH_USER=neo4j",
         f"OPENCDE_GRAPH_PASSWORD={secrets.token_urlsafe(24)}",
         "OPENCDE_LOG_LEVEL=INFO",
@@ -348,12 +360,23 @@ def _write_local_env(path: Path) -> None:
         "NEO4J_PAGECACHE=512m",
         "OPENCDE_LOCAL_PORT=8000",
         "COMPOSE_PATH_SEPARATOR=:",
-        "COMPOSE_FILE=docker/compose.yaml:docker/compose.local.yaml",
+        "COMPOSE_FILE=docker/compose.yaml:docker/compose.local.yaml"
+        if container
+        else "COMPOSE_FILE=docker/compose.yaml:docker/compose.local-databases.yaml",
+        *(() if container else ("OPENCDE_LOCAL_POSTGRES_PORT=5442", "OPENCDE_LOCAL_BOLT_PORT=7697")),
         "COMPOSE_PROFILES=graph",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     typer.secho(f"OK      wrote {path}", fg=typer.colors.GREEN)
-    typer.echo("        next: docker compose up -d, then add http://127.0.0.1:8000 as a source in Dataspatium")
+    if container:
+        typer.echo(
+            "        next: docker compose up -d --build, then add http://127.0.0.1:8000 as a source in Dataspatium"
+        )
+        return
+    typer.echo(
+        "        next: docker compose up -d (the databases), then uv run opencde serve, and add http://127.0.0.1:8000 "
+        "as a source in Dataspatium"
+    )
 
 
 @app.command()

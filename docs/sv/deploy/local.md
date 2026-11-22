@@ -135,9 +135,15 @@ filen skriver är `null` (Dataspatium öppnad från en fil), `http://127.0.0.1:8
 appen körs från ett http-ursprung.
 
 ```sh
+Motorn körs i sin container eller direkt på datorn, med sina databaser i Compose
+i båda fallen. I sin container:
+
+```sh
 uv run opencde init --local   # .env: OPENCDE_ENVIRONMENT=local, random passwords, the origins Dataspatium comes from
-docker compose up -d          # the API on http://127.0.0.1:8000 only; the databases are never published
+docker compose up -d --build  # the API on http://127.0.0.1:8000 only; the databases are never published
 ```
+
+`--build` bygger imagen ur den här utcheckningen.
 
 I sin container lyssnar motorn på containerns egna gränssnitt, eftersom
 containerns loopback inte är datorns; `compose.local.yaml` publicerar porten
@@ -148,6 +154,22 @@ motorns port på alla gränssnitt, som `docker run -p 8000:8000` gör: då når
 nätet en motor som är gjord för en person, och kontrollen av `Host` stoppar en
 webbläsare som en sida har lurat, inte ett program i nätet som skriver sitt eget
 `Host`.
+
+Direkt på datorn, utan container för motorn:
+
+```sh
+uv sync --extra postgres --extra ifc-db
+uv run opencde init --local --no-container   # COMPOSE_FILE names compose.local-databases.yaml
+docker compose up -d                         # PostgreSQL and Neo4j only, on 127.0.0.1:5442 and 127.0.0.1:7697
+uv run opencde serve                         # the engine on http://127.0.0.1:8000, the loopback only
+```
+
+`compose.local-databases.yaml` publicerar databaserna bara på datorns loopback
+och startar ingen API-container; program på samma dator når databaserna, med
+lösenorden i `.env`. Båda sättens `.env` anger databaserna på loopback, och inne i
+Compose ersätts de av stackens egna adresser. Motorn på datorn har sina filer i
+`data/` bredvid utcheckningen (`OPENCDE_DATA_DIR`), motorn i sin container i sin
+volym, så håll dig till ett sätt för en installation.
 
 ## Podman
 

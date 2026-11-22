@@ -136,9 +136,15 @@ file writes are `null` (Dataspatium opened from a file), `http://127.0.0.1:8080`
 app runs from an http origin.
 
 ```sh
+The engine runs in its container or on the computer itself, with its databases
+in Compose either way. In its container:
+
+```sh
 uv run opencde init --local   # .env: OPENCDE_ENVIRONMENT=local, random passwords, the origins Dataspatium comes from
-docker compose up -d          # the API on http://127.0.0.1:8000 only; the databases are never published
+docker compose up -d --build  # the API on http://127.0.0.1:8000 only; the databases are never published
 ```
+
+`--build` builds the image from this checkout.
 
 In its container the engine listens on the container's own interfaces, since
 the container's loopback is not the computer's; `compose.local.yaml` publishes
@@ -149,6 +155,23 @@ listens. Never publish the engine's port on every interface, as
 `docker run -p 8000:8000` does: the network would then reach an engine made for
 one person, and the `Host` check stops a browser that a page has fooled, not a
 program on the network that writes its own `Host`.
+
+On the computer itself, without a container for the engine:
+
+```sh
+uv sync --extra postgres --extra ifc-db
+uv run opencde init --local --no-container   # COMPOSE_FILE names compose.local-databases.yaml
+docker compose up -d                         # PostgreSQL and Neo4j only, on 127.0.0.1:5442 and 127.0.0.1:7697
+uv run opencde serve                         # the engine on http://127.0.0.1:8000, the loopback only
+```
+
+`compose.local-databases.yaml` publishes the databases on the computer's
+loopback alone and starts no API container; programs on the same computer reach
+the databases, with the passwords in `.env`. The `.env` of either way names the
+databases on the loopback, and inside Compose the stack's own addresses replace
+them. The engine on the computer keeps its files in `data/` beside the checkout
+(`OPENCDE_DATA_DIR`), the engine in its container in its volume, so keep to one
+way for one installation.
 
 ## Podman
 

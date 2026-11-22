@@ -1,0 +1,18 @@
+# The local engine on the computer itself, without a container (F78 a): Compose runs only its databases,
+# PostgreSQL and, in tier 3, the graph, published on the computer's loopback for `uv run opencde serve`
+# beside them, and the API's container stays off. Programs on the same computer reach the databases, with
+# the passwords `opencde init --local --no-container` wrote. Combine with compose.yaml:
+#   COMPOSE_FILE=docker/compose.yaml:docker/compose.local-databases.yaml
+
+services:
+  store:
+    ports:
+      - "127.0.0.1:${OPENCDE_LOCAL_POSTGRES_PORT:-5442}:5432"
+
+  graph:
+    profiles: ["graph"]  # as in compose.yaml: the port only comes with the graph
+    ports:
+      - "127.0.0.1:${OPENCDE_LOCAL_BOLT_PORT:-7697}:7687"
+
+  api:
+    profiles: ["api"]  # the engine runs on the computer: uv run opencde serve

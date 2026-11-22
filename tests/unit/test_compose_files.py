@@ -75,6 +75,32 @@ def test_the_local_engine_publishes_the_api_on_the_loopback_only(tmp_path: Path)
     assert "ports" not in services["graph"] and "ports" not in services["store"], "the databases are never published"
 
 
+def test_the_engine_in_its_container_gets_the_stacks_own_database_addresses(tmp_path: Path) -> None:
+    """F78 a: .env names the databases on the loopback, for the engine on the computer; inside Compose the stack's
+    own addresses replace them."""
+    loopback = (
+        "OPENCDE_STORE_URL=postgresql://opencde@127.0.0.1:5442/opencde\nOPENCDE_GRAPH_URI=bolt://127.0.0.1:7697\n"
+    )
+    services = _config(tmp_path, "compose.local.yaml", extra_env=GRAPH + loopback)
+    assert services["api"]["environment"]["OPENCDE_STORE_URL"] == STORE
+    assert services["api"]["environment"]["OPENCDE_GRAPH_URI"] == "bolt://graph:7687"
+
+
+def test_without_a_container_the_engine_finds_its_databases_on_the_loopback(tmp_path: Path) -> None:
+    """F78 a: compose.local-databases.yaml runs PostgreSQL and the graph, published on the loopback only, and no
+    API container, since the engine runs on the computer itself."""
+    services = _config(tmp_path, "compose.local-databases.yaml", extra_env=GRAPH)
+    assert "api" not in services and {"store", "graph"} <= set(services)
+    (store,) = services["store"]["ports"]
+    (bolt,) = services["graph"]["ports"]
+    assert (store["host_ip"], store["published"], bolt["host_ip"], bolt["published"]) == (
+        "127.0.0.1",
+        "5442",
+        "127.0.0.1",
+        "7697",
+    )
+
+
 def test_the_working_copy_joins_the_private_network_unpublished(tmp_path: Path) -> None:
     services = _config(tmp_path, "compose.local.yaml", "compose.workcopy.yaml")
     assert "ports" not in services["workcopy"] and services["workcopy"]["image"].startswith("docker.io/memgraph/")

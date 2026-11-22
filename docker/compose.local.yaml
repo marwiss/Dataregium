@@ -4,6 +4,7 @@
 # the loopback, allows only the origins .env names, and needs the random passwords `opencde init
 # --local` wrote. Combine with compose.yaml:
 #   COMPOSE_FILE=docker/compose.yaml:docker/compose.local.yaml
+# Without a container for the engine, compose.local-databases.yaml runs only the databases (F78 a).
 
 services:
   api:
