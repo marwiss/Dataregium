@@ -608,6 +608,12 @@ namnger ärendet, hur många instanser det tar bort och var prövningen finns; `
 konverterad modell, och `409` när inget i den är utom räckhåll. Kapabilitetsdokumentet listar åtgärderna i
 `ifc_changes.ops` och adressen som `ifc_changes.unreachable_url`.
 
+En version som servern skriver ur ett ändringsset behåller STEP-id:na som Dataspatium gör: när ändringen tar bort
+filens högsta instans får den nya versionen en lös `IfcDocumentReference` med namnet `StepIdGuard` på nästa id,
+vars `Identification` (`ItemReference` i IFC2X3) är det högsta id som basen hade eller dess vakter håller, så att
+ingen skrivare ger ett borttaget id igen. En vakt som redan finns i filen står kvar, aldrig flyttad eller ändrad,
+och av flera bara den högsta.
+
 Ett ändringsset som gjorts med Dataspatiums skrivverktyg bär också deras operationer som `ops`, med `ops_form`
 `dataspatium-tools/1`, så att nya element, raderingar och samband kommer med i förslaget. Varje operation anger sitt
 verktyg som `tool` och har verktygets argument bredvid sig, längder i meter: `create_storeys_and_grid`, `define_type`,

@@ -177,6 +177,50 @@ def test_an_instance_nothing_refers_to_is_deleted_and_one_still_referred_to_is_n
     assert model.by_id(196).is_a("IfcCartesianPoint")
 
 
+def guards(model: Any) -> list[tuple[int, str]]:
+    """The STEP id guards of a model: their own id and the id they hold."""
+    return [(e.id(), e[1]) for e in model.by_type("IfcDocumentReference") if e[2] == "StepIdGuard"]
+
+
+def test_a_deleted_highest_id_is_held_by_a_guard_that_the_next_change_keeps(tmp_path: Path) -> None:
+    """F70 d (LD-61): when a change deletes the file's highest instance, the version written carries the app's guard
+    at the next id, in IFC2X3's three attributes, so that what the next change makes is numbered above the deleted
+    instance; the guard stays as it is."""
+    import ifcopenshell
+
+    head, tail = MODEL.read_bytes().rsplit(b"ENDSEC;", 1)
+    base = tmp_path / "loose.ifc"
+    base.write_bytes(head + b"#9001=IFCCARTESIANPOINT((9.,9.,9.));\r\n" + b"ENDSEC;" + tail)
+    first = tmp_path / "first.ifc"
+    assert apply_all(base, [{"step_id": 9001, "op": "delete"}], first)["touched"] == [9001]
+    assert guards(ifcopenshell.open(str(first))) == [(9002, "9001")]
+    assert b"#9002=IFCDOCUMENTREFERENCE($,'9001','StepIdGuard');" in first.read_bytes()
+    second = tmp_path / "second.ifc"
+    assert apply_all(first, [], second, ops=[NEW_WALL])["ops"]["failed"] is None
+    before = {e.id() for e in ifcopenshell.open(str(first))}
+    model = ifcopenshell.open(str(second))
+    assert guards(model) == [(9002, "9001")], "never moved or edited"
+    made = {e.id() for e in model} - before
+    assert made and min(made) > 9002, "the wall's instances are numbered above the guard"
+
+
+def test_the_guard_has_the_apps_form_in_ifc4_and_only_the_highest_stays(tmp_path: Path) -> None:
+    import ifcopenshell
+
+    model = ifcopenshell.file(schema="IFC4")
+    for x in range(3):
+        model.createIfcCartesianPoint((float(x), 0.0, 0.0))
+    model.create_entity("IfcDocumentReference", None, "1", "StepIdGuard", id=10)  # an older, lower guard
+    model.create_entity("IfcDocumentReference", None, "20", "StepIdGuard", id=21)  # the app's, holding 20
+    base = tmp_path / "ifc4.ifc"
+    model.write(str(base))
+    out = tmp_path / "out.ifc"
+    apply_all(base, [{"step_id": 3, "op": "delete"}], out)
+    written = ifcopenshell.open(str(out))
+    assert guards(written) == [(21, "20")], "of several guards the highest stays, and it is enough"
+    assert b"#21=IFCDOCUMENTREFERENCE($,'20','StepIdGuard',$,$);" in out.read_bytes()
+
+
 # -- Dataspatium's write tools in a change set (``ops``), before its changes --------------------------------------
 
 OTHER_WALL = "3eT96F_cnDsOufCEsotwtp"  # YVT-B, #373

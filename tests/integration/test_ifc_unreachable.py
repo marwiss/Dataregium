@@ -87,13 +87,14 @@ def test_the_server_proposes_removing_what_no_global_id_reaches(ifc_client: tupl
     assert new["version_index"] == 2
     download = client.get(new["links"]["document_version_download"]["url"], headers=editor.headers)
     assert download.status_code == 200 and b"#9001=" not in download.content
+    assert b"=IFCDOCUMENTREFERENCE($,'9001','StepIdGuard');" in download.content, "the app's guard holds the id"
     second = graph_check(client, editor, document_id, 2)
     assert not [issue for issue in second["issues"] if issue["kind"] == "reachability"], "nothing is out of reach"
     old = client.get(version["links"]["document_version_download"]["url"], headers=editor.headers)
     assert b"#9001=" in old.content, "the version it came from keeps the instance"
 
     nothing = client.post(url, json={"document_id": document_id, "version_index": 2}, headers=editor.headers)
-    assert nothing.status_code == 409, "every instance of version 2 is reached"
+    assert nothing.status_code == 409, "every instance of version 2 is reached, and the guard is loose by design"
     missing = client.post(url, json={"document_id": document_id, "version_index": 9}, headers=editor.headers)
     assert missing.status_code == 404
     outsider = login_as(client, world, "outsider")

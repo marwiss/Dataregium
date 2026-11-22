@@ -604,6 +604,12 @@ answer names the topic, how many instances it deletes and where the trial is; `4
 converted model, and `409` when nothing in it is out of reach. The capabilities document lists the operations
 in `ifc_changes.ops` and the address as `ifc_changes.unreachable_url`.
 
+A version the server writes from a change set keeps the STEP ids as Dataspatium does: when the change deletes the
+file's highest instance, the new version carries a loose `IfcDocumentReference` named `StepIdGuard` at the next
+id, whose `Identification` (`ItemReference` in IFC2X3) is the highest id the base had or its guards hold, so
+that no writer gives a deleted id again. A guard already in the file stays, never moved or edited, and of
+several only the highest.
+
 A change set made with Dataspatium's write tools also carries their operations as `ops`, with `ops_form`
 `dataspatium-tools/1`, so that new elements, deletions and relationships reach the proposal. Each operation names
 its tool as `tool` and holds the tool's arguments beside it, lengths in metres: `create_storeys_and_grid`,
