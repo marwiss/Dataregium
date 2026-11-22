@@ -14,7 +14,7 @@ from tests.integration.helpers import Session
 from tests.integration.test_documents_api import save_metadata, start_upload, upload_file
 from tests.integration.test_web_signin import web_sign_in
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.both_stores]
 
 
 @pytest.fixture

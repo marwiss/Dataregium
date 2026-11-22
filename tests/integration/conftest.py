@@ -14,19 +14,26 @@ Two ways to reach the database from a test:
   All awaits run in the test's own event loop, which the async driver needs.
 * ``client``: the application in a ``TestClient`` for API tests (sync). The
   app owns its own driver; the database is wiped with the sync driver first.
+
+A module or test marked ``both_stores`` runs twice: with the server's own data
+in the graph, and in PostgreSQL with IFC-DB off and no graph at all at the
+graph's address (F69 b), which shows that the APIs of tiers 1 and 2 need none.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from neo4j import GraphDatabase
+from pydantic import SecretStr
 from testcontainers.community.postgres import PostgresContainer
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.wait_strategies import LogMessageWaitStrategy
@@ -105,23 +112,60 @@ def graph_target(request: pytest.FixtureRequest) -> Iterator[GraphTarget]:
             yield GraphTarget(GraphDialect.MEMGRAPH, f"bolt://{container.get_container_host_ip()}:{port}", "", "")
 
 
+#: Where the graph would be for a test whose server keeps nothing in one: a port nothing listens on, so that any
+#: statement sent there fails instead of finding the session's Neo4j.
+NO_GRAPH = "bolt://127.0.0.1:9"
+
+
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    if "store_kind" in metafunc.fixturenames and metafunc.definition.get_closest_marker("both_stores"):
+        metafunc.parametrize("store_kind", ["graph", "postgres"], indirect=True)
+
+
 @pytest.fixture
-def settings(graph_target: GraphTarget, tmp_path: Path) -> Settings:
+def store_kind(request: pytest.FixtureRequest) -> str:
+    """Where the server's own data is: ``graph`` unless a ``both_stores`` test asks for ``postgres`` as well."""
+    return getattr(request, "param", "graph")
+
+
+@pytest.fixture
+def settings(graph_target: GraphTarget, tmp_path: Path, store_kind: str, request: pytest.FixtureRequest) -> Settings:
+    common = {
+        "graph_connect_timeout_seconds": 10.0,
+        "cleanup_interval_seconds": 3600,
+        "upload_part_bytes": 1024,  # small parts so multi-part uploads are exercised with small files
+    }
+    if store_kind == "postgres":
+        if graph_target.dialect is not GraphDialect.NEO4J:  # the server asks no graph: once is enough
+            pytest.skip("the PostgreSQL variant runs once, beside Neo4j")
+        target: PostgresTarget = request.getfixturevalue("postgres_target")
+        return test_settings(
+            tmp_path,
+            graph_dialect=GraphDialect.NEO4J,
+            graph_uri=NO_GRAPH,
+            store_url=target.url,
+            store_password=SecretStr(target.password),
+            ifcgraph_enabled=False,
+            **common,
+        )
     return test_settings(
         tmp_path,
         graph_dialect=graph_target.dialect,
         graph_uri=graph_target.uri,
         graph_user=graph_target.user,
         graph_password=graph_target.password,
-        graph_connect_timeout_seconds=10.0,
-        cleanup_interval_seconds=3600,
-        upload_part_bytes=1024,  # small parts so multi-part uploads are exercised with small files
+        **common,
     )
 
 
 @pytest.fixture
-def clean_database(graph_target: GraphTarget, settings: Settings) -> None:
-    """Empty the database with the sync driver (safe from any event loop)."""
+def clean_database(graph_target: GraphTarget, settings: Settings, request: pytest.FixtureRequest) -> None:
+    """Empty the database with the sync driver (safe from any event loop), or PostgreSQL's tables when the server's
+    own data is there."""
+    if settings.store_url is not None:
+        target: PostgresTarget = request.getfixturevalue("postgres_target")
+        asyncio.run(_close(emptied_postgres(target)))
+        return
     with GraphDatabase.driver(graph_target.uri, auth=(graph_target.user, graph_target.password)) as driver:
         while True:
             records, _, _ = driver.execute_query(
@@ -134,6 +178,8 @@ def clean_database(graph_target: GraphTarget, settings: Settings) -> None:
 @pytest.fixture
 async def graph(settings: Settings, clean_database: None) -> AsyncIterator[Graph]:
     """A connected Graph with an empty database and the schema applied, for async tests."""
+    if settings.store_url is not None:
+        pytest.fail("a test of both stores asks for the graph, which the server without one never has")
     graph = make_graph(settings)
     await apply_schema(graph)
     await wipe(graph)
@@ -169,6 +215,11 @@ async def emptied_postgres(target: PostgresTarget) -> Postgres:
     await migrate(postgres)
     await postgres.execute(EMPTY_POSTGRES)
     return postgres
+
+
+async def _close(opening: Any) -> None:
+    postgres = await opening
+    await postgres.close()
 
 
 @pytest.fixture

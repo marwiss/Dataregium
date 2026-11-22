@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from fastapi.testclient import TestClient
 
 from opencde.accounts.roles import Role
-from opencde.bootstrap import make_graph, make_store
+from opencde.bootstrap import make_graph, make_store, store_session
 from opencde.graph.schema import apply_schema
 from opencde.settings import Settings
 from opencde.store.accounts.projects import ProjectRepository
@@ -76,6 +76,9 @@ async def populate(users: UserStore, projects: ProjectStore, clients: ClientStor
 
 
 async def _build(settings: Settings) -> World:
+    if settings.store_url is not None:  # PostgreSQL holds the server's own data (ADR 0029), and no graph is touched
+        async with store_session(settings, wait_seconds=10.0) as store:
+            return await populate(store.users, store.projects, store.clients)
     graph = make_store(settings) or make_graph(settings)  # the server's own data (ADR 0027)
     try:
         await apply_schema(graph)

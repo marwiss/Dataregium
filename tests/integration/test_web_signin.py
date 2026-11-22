@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from opencde.settings import Settings
 from tests.integration.conftest_accounts import World, build_world
 
-pytestmark = [pytest.mark.integration, pytest.mark.security]
+pytestmark = [pytest.mark.integration, pytest.mark.security, pytest.mark.both_stores]
 
 FORM_TOKEN = re.compile(r'name="form_token" value="([^"]+)"')
 SIGNOUT_TOKEN = re.compile(r'name="signout_token" value="([^"]+)"')

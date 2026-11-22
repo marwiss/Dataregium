@@ -14,7 +14,7 @@ from tests.integration.conftest_accounts import World, build_world, login_as
 from tests.integration.test_bcf_links_documents import make_topic
 from tests.unit.test_ifc_changes import change_set
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.both_stores]
 
 
 @pytest.fixture

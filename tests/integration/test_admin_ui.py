@@ -18,7 +18,7 @@ from tests.integration.test_web_signin import form_token, web_sign_in
 
 INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)")  # the pages load files from their own origin, nothing inline
 
-pytestmark = [pytest.mark.integration, pytest.mark.security]
+pytestmark = [pytest.mark.integration, pytest.mark.security, pytest.mark.both_stores]
 
 SECRET = re.compile(r'id="secret-value">([^<]+)<')
 USER_LINK = re.compile(r'href="/admin/users/([0-9a-f-]{36})"')

@@ -13,7 +13,7 @@ from opencde_client.testing import HeadlessBrowser, headless_authorize
 from tests.conftest import FIXTURES_DIR
 from tests.ui.conftest import LiveServer
 
-pytestmark = pytest.mark.e2e
+pytestmark = [pytest.mark.e2e, pytest.mark.both_stores]  # the story on the graph and on PostgreSQL alone (F69 b)
 
 PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"

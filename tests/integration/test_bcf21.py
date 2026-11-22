@@ -21,7 +21,7 @@ from tests.conformance.schemas import validate
 from tests.integration.conftest_accounts import REDIRECT, World, build_world, login_as
 from tests.integration.helpers import FORM_TOKEN, Session, basic_auth
 
-pytestmark = [pytest.mark.integration, pytest.mark.conformance]
+pytestmark = [pytest.mark.integration, pytest.mark.conformance, pytest.mark.both_stores]
 
 SCHEMAS = "bcf-api-2.1/Schemas_draft-03"
 PNG = bytes.fromhex(

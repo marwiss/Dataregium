@@ -17,6 +17,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from opencde.main import create_app
+from opencde.settings import Settings
 from tests.conftest import test_settings
 from tests.integration import conftest as integration
 from tests.integration.conftest import GraphTarget
@@ -28,6 +29,9 @@ pytestmark = pytest.mark.ui
 graph_target = integration.graph_target
 settings = integration.settings
 clean_database = integration.clean_database
+store_kind = integration.store_kind
+postgres_target = integration.postgres_target
+pytest_generate_tests = integration.pytest_generate_tests  # both_stores
 
 
 @dataclass(frozen=True)
@@ -44,18 +48,27 @@ def _free_port() -> int:
 
 
 @contextmanager
-def running_server(graph_target: GraphTarget, tmp_path: Path, port: int | None = None) -> Iterator[LiveServer]:
+def running_server(
+    graph_target: GraphTarget, tmp_path: Path, port: int | None = None, *, base: Settings | None = None
+) -> Iterator[LiveServer]:
+    """The server in a thread of its own on a free port. ``base`` is the integration tests' settings, with the store
+    they chose (``both_stores``: the graph, or PostgreSQL without one); without it the graph holds it all."""
     port = port or _free_port()
-    live_settings = test_settings(
-        tmp_path,
-        graph_dialect=graph_target.dialect,
-        graph_uri=graph_target.uri,
-        graph_user=graph_target.user,
-        graph_password=graph_target.password,
-        graph_connect_timeout_seconds=10.0,
-        cleanup_interval_seconds=3600,
-        public_url=f"http://127.0.0.1:{port}",
-        upload_part_bytes=4096,  # several parts even for the small fixture model
+    # several parts even for the small fixture model
+    here = {"public_url": f"http://127.0.0.1:{port}", "upload_part_bytes": 4096}
+    live_settings = (
+        base.model_copy(update=here)
+        if base is not None
+        else test_settings(
+            tmp_path,
+            graph_dialect=graph_target.dialect,
+            graph_uri=graph_target.uri,
+            graph_user=graph_target.user,
+            graph_password=graph_target.password,
+            graph_connect_timeout_seconds=10.0,
+            cleanup_interval_seconds=3600,
+            **here,
+        )
     )
     world = build_world(live_settings)
     app = create_app(live_settings, startup_wait_seconds=30)
@@ -81,6 +94,8 @@ def running_server(graph_target: GraphTarget, tmp_path: Path, port: int | None =
 
 
 @pytest.fixture
-def live_server(graph_target: GraphTarget, clean_database: None, tmp_path: Path) -> Iterator[LiveServer]:
-    with running_server(graph_target, tmp_path) as server:
+def live_server(
+    graph_target: GraphTarget, settings: Settings, clean_database: None, tmp_path: Path
+) -> Iterator[LiveServer]:
+    with running_server(graph_target, tmp_path, base=settings) as server:
         yield server

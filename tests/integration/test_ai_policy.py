@@ -14,7 +14,7 @@ from tests.integration.conftest_accounts import World, build_world, login_as, lo
 from tests.integration.test_admin_ui import notice_of, post
 from tests.integration.test_web_signin import web_sign_in
 
-pytestmark = [pytest.mark.integration, pytest.mark.conformance, pytest.mark.security]
+pytestmark = [pytest.mark.integration, pytest.mark.conformance, pytest.mark.security, pytest.mark.both_stores]
 
 
 @pytest.fixture

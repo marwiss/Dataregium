@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from opencde.settings import Settings
 from tests.integration.conftest_accounts import World, build_world, login_as, login_with_scope
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.both_stores]
 
 
 @pytest.fixture

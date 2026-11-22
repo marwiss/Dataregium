@@ -13,3 +13,6 @@ graph_target = ui.graph_target
 settings = ui.settings
 clean_database = ui.clean_database
 live_server = ui.live_server
+store_kind = ui.store_kind
+postgres_target = ui.postgres_target
+pytest_generate_tests = ui.pytest_generate_tests  # both_stores: the story on PostgreSQL alone too

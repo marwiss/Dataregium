@@ -23,6 +23,7 @@ def world(settings: Settings, clean_database: None) -> World:
     return build_world(settings)
 
 
+@pytest.mark.both_stores
 def test_public_client_flow_with_pkce(client: TestClient, world: World) -> None:
     code, query, verifier = authorize(
         client,
@@ -46,6 +47,7 @@ def test_public_client_flow_with_pkce(client: TestClient, world: World) -> None:
     assert client.get("/bcf/3.0/current-user", headers=session.headers).json()["id"] == "editor"
 
 
+@pytest.mark.both_stores
 def test_confidential_client_flow_with_basic_auth_and_scopes(client: TestClient, world: World) -> None:
     session = sign_in(
         client,
@@ -60,6 +62,7 @@ def test_confidential_client_flow_with_basic_auth_and_scopes(client: TestClient,
     assert client.get("/foundation/1.0/current-user", headers=session.headers).status_code == 200
 
 
+@pytest.mark.both_stores
 def test_token_response_is_never_cached_and_has_spec_fields(client: TestClient, world: World) -> None:
     code, _, verifier = authorize(
         client,
@@ -84,6 +87,7 @@ def test_token_response_is_never_cached_and_has_spec_fields(client: TestClient, 
     assert body["token_type"] == "bearer" and body["expires_in"] == 3600
 
 
+@pytest.mark.both_stores
 def test_refresh_rotates_and_reuse_revokes_the_family(client: TestClient, world: World) -> None:
     session = sign_in(
         client,
@@ -130,6 +134,7 @@ def test_refresh_rotates_and_reuse_revokes_the_family(client: TestClient, world:
     ), "reuse of a spent refresh token revokes the whole family"
 
 
+@pytest.mark.both_stores
 def test_code_is_single_use_and_replay_revokes_tokens(client: TestClient, world: World) -> None:
     code, _, verifier = authorize(
         client,
@@ -153,6 +158,7 @@ def test_code_is_single_use_and_replay_revokes_tokens(client: TestClient, world:
     assert client.get("/foundation/1.0/current-user", headers=session.headers).status_code == 401
 
 
+@pytest.mark.both_stores
 def test_revocation(client: TestClient, world: World) -> None:
     session = sign_in(
         client,
@@ -171,6 +177,7 @@ def test_revocation(client: TestClient, world: World) -> None:
     assert client.post("/foundation/oauth2/revoke", data={"token": "x", "client_id": "nope"}).status_code == 401
 
 
+@pytest.mark.both_stores
 def test_deny_redirects_with_access_denied(client: TestClient, world: World) -> None:
     code, query, _ = authorize(
         client, client_id=world.public_client_id, redirect_uri=world.redirect, username="", password="", decision="deny"
@@ -178,6 +185,7 @@ def test_deny_redirects_with_access_denied(client: TestClient, world: World) -> 
     assert code is None and query["error"] == ["access_denied"] and query["state"] == ["state-123"]
 
 
+@pytest.mark.both_stores
 def test_wrong_password_shows_the_form_again_without_redirect(client: TestClient, world: World) -> None:
     code, query, _ = authorize(
         client,
@@ -308,6 +316,7 @@ def test_dynamic_registration_when_enabled(graph_target, tmp_path, clean_databas
             assert rejected.status_code == 400, rejected.text
 
 
+@pytest.mark.both_stores
 def test_registration_is_404_when_disabled(client: TestClient, world: World) -> None:
     response = client.post("/foundation/oauth2/reg", json={"client_name": "x", "redirect_url": "https://a.test/cb"})
     assert response.status_code == 404

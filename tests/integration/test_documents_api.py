@@ -20,7 +20,7 @@ from tests.integration.conftest_accounts import World, build_world, login_as
 from tests.integration.helpers import Session
 from tests.integration.test_web_signin import form_token, web_sign_in
 
-pytestmark = [pytest.mark.integration, pytest.mark.conformance]
+pytestmark = [pytest.mark.integration, pytest.mark.conformance, pytest.mark.both_stores]
 
 CALLBACK = "http://127.0.0.1:9/callback?app=1"
 WALLS = b"ISO-10303-21;\n" + b"#1=IFCWALL('1Xezbq735AdBO_4DerG66G',$,$,$,$,$,$,$,$);\n" * 60 + b"END-ISO-10303-21;\n"

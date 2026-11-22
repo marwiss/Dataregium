@@ -11,7 +11,7 @@ from tests.conformance.schemas import validate
 from tests.integration.conftest_accounts import World, build_world
 from tests.integration.helpers import Session, sign_in
 
-pytestmark = [pytest.mark.integration, pytest.mark.conformance]
+pytestmark = [pytest.mark.integration, pytest.mark.conformance, pytest.mark.both_stores]
 
 
 @pytest.fixture

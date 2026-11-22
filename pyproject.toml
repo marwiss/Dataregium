@@ -171,6 +171,7 @@ asyncio_default_fixture_loop_scope = "function"
 addopts = "-ra --strict-markers"
 markers = [
     "integration: needs a graph database or PostgreSQL (testcontainers starts one)",
+    "both_stores: an API test run twice, with the server's own data in the graph and in PostgreSQL with no graph",
     "conformance: validates responses against the buildingSMART schemas",
     "security: penetration-style tests",
     "ui: browser tests with Playwright",

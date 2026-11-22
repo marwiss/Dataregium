@@ -12,7 +12,7 @@ from tests.integration.conftest_accounts import PASSWORD, REDIRECT, World, build
 from tests.integration.helpers import sign_in
 from tests.integration.test_documents_api import CALLBACK, upload_file
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.both_stores]
 
 
 @pytest.fixture
@@ -56,11 +56,14 @@ def test_an_approved_confidential_client_uploads_without_the_page(client: TestCl
     assert started.status_code == 200, started.text
     session_id = started.json()["upload_ui_url"].rsplit("/", 1)[-1]
     assert session_id, "the spec's answer is given all the same"
-    # The session is ready for the instructions: the page is not needed.
-    sessions = client.app.state.graph  # type: ignore[attr-defined]
-    row = client.portal.call(
-        sessions.one, "MATCH (s:UploadSession {state: 'metadata'}) RETURN s.id AS id, s.project_id AS project"
-    )
+    # The session is ready for the instructions: the page is not needed. It is read where the server keeps it.
+    postgres = client.app.state.postgres  # type: ignore[attr-defined]
+    if postgres is not None:
+        found = "SELECT id, project_id AS project FROM upload_sessions WHERE state = $1"
+        row = client.portal.call(postgres.one, found, "metadata")
+    else:
+        found = "MATCH (s:UploadSession {state: 'metadata'}) RETURN s.id AS id, s.project_id AS project"
+        row = client.portal.call(client.app.state.graph.one, found)  # type: ignore[attr-defined]
     assert row is not None and row["project"] == world.project_id
     instructions = f"/documents/1.0/upload-sessions/{row['id']}/instructions"
     plan = client.post(

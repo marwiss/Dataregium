@@ -11,7 +11,7 @@ from opencde.store.oauth2.tokens import Principal
 from opencde.timeutil import later_iso
 from tests.integration.conftest_accounts import World, build_world, login_as, login_with_scope
 
-pytestmark = [pytest.mark.integration, pytest.mark.security]
+pytestmark = [pytest.mark.integration, pytest.mark.security, pytest.mark.both_stores]
 
 USER_FIELDS = {
     "id",
@@ -92,6 +92,7 @@ def test_administrators_read_the_server_through_the_api(client: TestClient, worl
     assert "OPENCDE_GRAPH_PASSWORD" not in str(settings)
     health = client.get("/admin/api/health", headers=admin.headers).json()
     assert health["checks"] and all({"name", "ok", "detail"} <= set(item) for item in health["checks"])
+    assert health["ok"], [item for item in health["checks"] if not item["ok"]]
 
 
 def test_the_api_refuses_everyone_but_administrators_with_the_scope(client: TestClient, world: World) -> None:
