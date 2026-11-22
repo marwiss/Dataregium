@@ -7,7 +7,7 @@ dokumenten.
 
 Slå på den med `OPENCDE_IFC_DB_ENABLED=true` och installera extrapaketet
 `ifc-db` (`uv sync --extra ifc-db`). Modulen hör till nivå 3
-(`OPENCDE_TIER=experimental`, eller ingen nivå satt): en server i en lägre nivå
+(`OPENCDE_TIER=experimental`): en server i en lägre nivå, som en utan inställningen,
 vägrar starta med den på och namnger inställningen. Dess graf, Neo4j eller
 Memgraph, håller modellerna, med PostgreSQL bredvid för serverns egna data som
 standard ([nedan](#serverns-egna-data-skilda-från-ifc-grafen)); docker compose

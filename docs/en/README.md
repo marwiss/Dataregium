@@ -216,8 +216,8 @@ nothing is open until it has been configured.
   3.14), `uv sync --extra postgres --extra ifc-db`, PostgreSQL at
   `OPENCDE_STORE_URL`, and in tier 3 Neo4j 5.26 or Memgraph 3.14 at
   `OPENCDE_GRAPH_URI`.
-- **The main settings**: `OPENCDE_TIER` chooses the tier (`documents`, `bim-gis` or
-  `experimental`, the default); `OPENCDE_APIS` chooses the APIs within it (all three
+- **The main settings**: `OPENCDE_TIER` chooses the tier (`documents`, `bim-gis`, the
+  default, or `experimental`); `OPENCDE_APIS` chooses the APIs within it (all three
   by default, `["documents"]` in tier 1 and in 1.0.0); `OPENCDE_STORE_URL` names the
   PostgreSQL that holds the server's own data, which tiers 1 and 2 require;
   `OPENCDE_BIM_ENABLED=true` turns on the BIM functions on the files, in tier 2, and
@@ -305,7 +305,8 @@ above it: the server refuses to start when `OPENCDE_APIS`, `OPENCDE_MCP_ENABLED`
 `OPENCDE_BIM_ENABLED` or `OPENCDE_IFC_DB_ENABLED` asks for more than the tier
 offers, and names the setting, and what needs IFC-DB, such as the working copy,
 stays off without it. Tiers 1 and 2 keep the server's own data in PostgreSQL
-alone. Unset, the tier is Experimental and nothing is held back. The
+alone. Unset, the tier is BIM + GIS, as `opencde init` writes, so a server with
+IFC-DB or with its own data in a graph sets `OPENCDE_TIER=experimental`. The
 capabilities document gives the tier as `tier`, and `opencde doctor` and the
 administration's overview show it.
 

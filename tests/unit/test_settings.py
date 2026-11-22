@@ -8,9 +8,16 @@ from pydantic import ValidationError
 from opencde.settings import GraphDialect, Settings, Tier
 
 
-def _settings(**values: object) -> Settings:
+def _unset(**values: object) -> Settings:
+    """Settings as the environment gives them, the tier too."""
     values.setdefault("data_dir", Path(tempfile.mkdtemp()) / "data")  # a generated key lands there, not in the tree
     return Settings(_env_file=None, **values)  # type: ignore[call-arg]
+
+
+def _settings(**values: object) -> Settings:
+    """Settings of a server of tier 3 unless the values name a tier, as most of these keep the data in a graph."""
+    values.setdefault("tier", "experimental")
+    return _unset(**values)
 
 
 PROD = {"public_url": "https://cde.example.com", "graph_password": "secret-enough", "secret_key": "k" * 40}
@@ -33,9 +40,9 @@ def test_production_requires_graph_password_and_secret_key() -> None:
 
 def test_a_tier_holds_back_what_is_above_it_and_tier_1_offers_the_documents_api() -> None:
     """OB-46 b: a function can be off within the tier, never on above it, and tiers 1 and 2 keep the server's own
-    data in PostgreSQL alone (F58 a); unset, nothing is held back."""
+    data in PostgreSQL alone (F58 a); unset, the tier is bim-gis (F75 b)."""
     postgres = {"environment": "development", "store_url": "postgresql://cde@db/cde"}
-    assert _settings(environment="development").tier is Tier.EXPERIMENTAL
+    assert _unset(**postgres).tier is Tier.BIM_GIS, "as opencde init writes by default"
     documents = _settings(**postgres, tier="documents")
     assert documents.apis == ["documents"] and documents.offers("foundation") and not documents.offers("bcf-3.0")
     assert _settings(**postgres, tier="bim-gis").apis == ["bcf-3.0", "bcf-2.1", "documents"]
@@ -53,6 +60,19 @@ def test_a_tier_holds_back_what_is_above_it_and_tier_1_offers_the_documents_api(
     bim = _settings(**postgres, tier="bim-gis", bim_enabled=True)
     assert bim.bim_on and not bim.uses_graph, "the BIM functions of tier 2 on the files, without a graph (F59)"
     assert _settings(environment="development", ifcgraph_enabled=True).bim_on, "IFC-DB brings them along"
+
+
+def test_a_server_that_names_no_tier_is_of_tier_2_and_is_told_how_to_keep_the_graph() -> None:
+    """F75 b: a server from before the tiers, with IFC-DB or with its own data in a graph, does not start until
+    OPENCDE_TIER=experimental is set, and the refusal says so."""
+    for values, words in (
+        ({"environment": "development"}, "or OPENCDE_TIER=experimental to keep it in the graph"),
+        ({"environment": "development", "store_url": "postgresql://cde@db/cde", "ifcgraph_enabled": True}, "tier 3"),
+    ):
+        with pytest.raises(ValidationError, match="the default when it is unset") as refused:
+            _unset(**values)
+        assert words in str(refused.value)
+    assert _unset(environment="development", tier="experimental").tier is Tier.EXPERIMENTAL
 
 
 def test_production_with_postgresql_needs_its_password_and_a_graph_password_only_with_a_graph() -> None:

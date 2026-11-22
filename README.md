@@ -220,7 +220,7 @@ använder, och inget är öppet förrän det har konfigurerats.
   `OPENCDE_STORE_URL`, och i nivå 3 Neo4j 5.26 eller Memgraph 3.14 på
   `OPENCDE_GRAPH_URI`.
 - **De viktigaste inställningarna**: `OPENCDE_TIER` väljer nivån (`documents`,
-  `bim-gis` eller `experimental`, som är standard); `OPENCDE_APIS` väljer API:erna
+  `bim-gis`, som är standard, eller `experimental`); `OPENCDE_APIS` väljer API:erna
   inom den (alla tre som standard, `["documents"]` i nivå 1 och i 1.0.0);
   `OPENCDE_STORE_URL`, som nivå 1 och 2 kräver, anger den PostgreSQL som håller
   serverns egna data; `OPENCDE_BIM_ENABLED=true` slår på BIM-funktionerna på filerna,
@@ -307,8 +307,9 @@ aldrig påslagen över den: servern vägrar starta när `OPENCDE_APIS`,
 `OPENCDE_MCP_ENABLED`, `OPENCDE_BIM_ENABLED` eller `OPENCDE_IFC_DB_ENABLED` begär
 mer än nivån erbjuder, och namnger inställningen, och det som kräver IFC-DB, som
 arbetskopian, förblir avstängt utan den. Nivå 1 och 2 håller
-serverns egna data enbart i PostgreSQL. Är nivån inte satt är den Experimentell,
-och inget hålls tillbaka. Kapabilitetsdokumentet anger nivån som `tier`, och
+serverns egna data enbart i PostgreSQL. Är nivån inte satt är den BIM och GIS,
+som `opencde init` skriver, så en server med IFC-DB eller med sina egna data i en
+graf sätter `OPENCDE_TIER=experimental`. Kapabilitetsdokumentet anger nivån som `tier`, och
 `opencde doctor` och administrationens översikt visar den.
 
 ### Version 1 (med Dataspatium 1)

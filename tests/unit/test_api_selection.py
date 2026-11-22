@@ -96,5 +96,5 @@ def test_the_setting_is_read_from_the_environment(tmp_path: Path, monkeypatch: p
     from opencde.settings import Settings
 
     monkeypatch.setenv("OPENCDE_APIS", '["bcf-2.1"]')
-    settings = Settings(_env_file=None, environment="test", data_dir=tmp_path / "data")  # type: ignore[call-arg]
+    settings = Settings(_env_file=None, environment="test", tier="experimental", data_dir=tmp_path / "data")  # type: ignore[call-arg]
     assert settings.apis == ["bcf-2.1"]

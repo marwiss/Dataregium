@@ -13,7 +13,7 @@ from opencde.admin.api import _settings_payload
 from opencde.cli import app
 from opencde.settings import Settings, env_name
 
-BASE = {"environment": "test", "public_url": "http://testserver", "secret_key": "k" * 40}
+BASE = {"environment": "test", "tier": "experimental", "public_url": "http://testserver", "secret_key": "k" * 40}
 
 
 def settings(tmp_path: Path, env_file: Path | None = None, **values: object) -> Settings:
@@ -90,6 +90,7 @@ def test_doctor_names_the_settings_that_still_have_their_old_names(
 ) -> None:
     for name, value in {
         "ENVIRONMENT": "development",
+        "TIER": "experimental",  # its own data in the graph (F75 b)
         "PUBLIC_URL": "http://127.0.0.1:9",
         "GRAPH_URI": "bolt://127.0.0.1:9",
         "GRAPH_PASSWORD": "not-the-password-of-anything",

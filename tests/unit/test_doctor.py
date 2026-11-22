@@ -85,6 +85,7 @@ def test_the_command_reports_every_check_and_fails_without_a_database(
 ) -> None:
     for name, value in {
         "ENVIRONMENT": "development",
+        "TIER": "experimental",  # its own data in the graph (F75 b)
         "PUBLIC_URL": "http://127.0.0.1:9",
         "GRAPH_URI": "bolt://127.0.0.1:9",
         "GRAPH_PASSWORD": "not-the-password-of-anything",

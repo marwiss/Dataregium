@@ -7,7 +7,7 @@ the issues and documents.
 
 Turn it on with `OPENCDE_IFC_DB_ENABLED=true` and install the `ifc-db`
 extra (`uv sync --extra ifc-db`). The module is tier 3
-(`OPENCDE_TIER=experimental`, or the tier unset): a server of a lower tier
+(`OPENCDE_TIER=experimental`): a server of a lower tier, as one without the setting,
 refuses to start with it on and names the setting. Its graph, Neo4j or
 Memgraph, holds the models, with PostgreSQL beside it for the server's own
 data by default ([below](#the-servers-own-data-apart-from-the-ifc-graph));

@@ -70,7 +70,9 @@ servern vägrar starta, och namnger inställningen, när API:erna, MCP-ändpunkt
 BIM-funktionerna eller IFC-DB begär mer än nivån erbjuder. I nivå 1 är
 `OPENCDE_APIS` `["documents"]` om den inte är satt. Nivå 1 och 2 håller serverns
 egna data bara i PostgreSQL och behöver därför `OPENCDE_STORE_URL`. Utan
-`OPENCDE_TIER` är nivån experimentell: inget hålls tillbaka, som före nivåerna.
+`OPENCDE_TIER` är nivån bim-gis, som `opencde init` skriver, så en server med
+IFC-DB eller med sina egna data i en graf, som före nivåerna, sätter
+`OPENCDE_TIER=experimental`; den vägrar starta till dess och säger det.
 `GET /.well-known/dataregium` anger nivån i `tier`, och `opencde doctor` och
 administrationens översikt visar den.
 

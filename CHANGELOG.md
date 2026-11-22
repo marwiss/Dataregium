@@ -28,7 +28,9 @@ the commit history.
   tier but never on above it: the server refuses to start, naming the setting, when `OPENCDE_APIS`,
   `OPENCDE_MCP_ENABLED`, `OPENCDE_BIM_ENABLED` or `OPENCDE_IFC_DB_ENABLED` asks for more than the tier offers.
   Tiers 1 and 2 keep the server's own data in PostgreSQL alone and need `OPENCDE_STORE_URL`. Unset, the tier is
-  `experimental` and nothing is held back, as before. `GET /.well-known/dataregium` gives `tier` at its top level,
+  `bim-gis`, as `opencde init` writes by default: a server with IFC-DB on or with its own data in a graph, as
+  before the tiers, refuses to start until `OPENCDE_TIER=experimental` is set, and the refusal says so.
+  `GET /.well-known/dataregium` gives `tier` at its top level,
   and `opencde doctor` and the administration's overview show it.
 - A version the server writes from a change set keeps the STEP ids as Dataspatium does since its b408004: when
   the change deletes the file's highest instance, a loose `IfcDocumentReference` named `StepIdGuard` at the next

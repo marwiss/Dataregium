@@ -182,11 +182,12 @@ class Settings(BaseSettings):
 
     # --- deployment -------------------------------------------------------
     tier: Tier = Field(
-        Tier.EXPERIMENTAL,
+        Tier.BIM_GIS,
         description="The tier the server offers (OB-46 b): documents (1: the Foundation and Documents APIs), "
         "bim-gis (2: BCF 3.0 and 2.1 too, and the MCP endpoint) or experimental (3: IFC-DB's graph too). A function "
         "can be off within the tier, never on above it, and tiers 1 and 2 keep the server's own data in PostgreSQL "
-        "alone (F58 a). `opencde init --tier` writes it; unset, nothing is held back.",
+        "alone (F58 a). `opencde init --tier` writes it; unset, it is bim-gis, as `init` writes by default (F75 b), "
+        "so that a server with IFC-DB or with its own data in a graph names experimental.",
     )
     environment: Literal["development", "test", "production", "local"] = Field(
         "production",
@@ -556,6 +557,8 @@ class Settings(BaseSettings):
         if self.tier is Tier.EXPERIMENTAL:
             return self
         name = f"OPENCDE_TIER={self.tier.value}"
+        if "tier" not in self.model_fields_set:  # the default (F75 b), for a server from before the tiers
+            name += ", the default when it is unset (OPENCDE_TIER=experimental offers it all)"
         if self.tier is Tier.DOCUMENTS:
             if "apis" not in self.model_fields_set:
                 object.__setattr__(self, "apis", ["documents"])
@@ -569,7 +572,10 @@ class Settings(BaseSettings):
         if self.ifcgraph_enabled:
             raise ValueError(f"OPENCDE_IFC_DB_ENABLED is tier 3 (experimental), beyond {name}")
         if self.store_url is None:
-            raise ValueError(f"{name} keeps the server's own data in PostgreSQL alone: set OPENCDE_STORE_URL (F58 a)")
+            raise ValueError(
+                f"{name} keeps the server's own data in PostgreSQL alone: set OPENCDE_STORE_URL (F58 a), or "
+                "OPENCDE_TIER=experimental to keep it in the graph"
+            )
         return self
 
     @field_validator("workcopy_graph_uri")

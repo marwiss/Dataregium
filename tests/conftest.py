@@ -29,6 +29,7 @@ def test_settings(tmp_path: Path | None = None, **overrides: object) -> Settings
     """Settings for tests: no .env file, readable logs, generous limits where tests need them."""
     values: dict[str, object] = {
         "environment": "test",
+        "tier": "experimental",  # the tests' servers keep their own data in a graph unless told otherwise (F75 b)
         "public_url": "http://testserver",
         "secret_key": "test-secret-key-that-is-long-enough-for-signing",
         "graph_uri": "bolt://127.0.0.1:9",  # discard port: connection refused immediately

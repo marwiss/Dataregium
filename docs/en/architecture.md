@@ -71,7 +71,9 @@ to start, and names the setting, when the APIs, the MCP endpoint, the BIM
 functions or IFC-DB ask for more than the tier offers. In tier 1 `OPENCDE_APIS`
 is `["documents"]` unless it is set. Tiers 1 and 2 keep the server's own data in
 PostgreSQL alone, so they need `OPENCDE_STORE_URL`. Without `OPENCDE_TIER` the
-tier is experimental: nothing is held back, as before the tiers.
+tier is bim-gis, as `opencde init` writes, so a server with IFC-DB or with its own
+data in a graph, as before the tiers, sets `OPENCDE_TIER=experimental`; it refuses
+to start until then, and says so.
 `GET /.well-known/dataregium` names the tier in `tier`, and `opencde doctor` and
 the administration's overview show it.
 

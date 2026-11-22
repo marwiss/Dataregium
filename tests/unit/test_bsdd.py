@@ -627,7 +627,7 @@ async def test_ids_documents_the_worker_could_not_read_are_left_out_this_once(
 
 def test_bsdd_is_asked_over_https_in_production_and_only_at_an_http_address(tmp_path: Path) -> None:
     def settings(**values: Any) -> Settings:
-        return Settings(_env_file=None, data_dir=tmp_path / "data", **values)  # type: ignore[call-arg]
+        return Settings(_env_file=None, data_dir=tmp_path / "data", **{"tier": "experimental", **values})  # type: ignore[call-arg]
 
     production = {"public_url": "https://cde.example.com", "graph_password": "secret-enough", "secret_key": "k" * 40}
     with pytest.raises(ValidationError, match="OPENCDE_BSDD_API_URL"):
