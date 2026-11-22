@@ -1,5 +1,7 @@
 # This file was generated with the assistance of an AI coding tool.
-"""The whole stack in Docker: what people stored outlives the containers (the verification scenario, step 5).
+"""The whole stack in Docker: what people stored outlives the containers (the verification scenario, step 5), in
+tier 3 as ``opencde init --tier experimental`` sets it up: the server's own data in PostgreSQL, IFC-DB's model in
+Neo4j and the files on their volume.
 
 The image is built from the last commit, in a copy of its own, so that a ``.env`` in the working tree stays out
 of it. The Compose project and the ports are its own too. It takes minutes, so it belongs to the nightly job;
@@ -37,9 +39,13 @@ PASSWORD = "restart-test-password"  # a throwaway stack on the loopback address
 REDIRECT = "http://127.0.0.1/callback"
 CALLBACK = "http://127.0.0.1:9/callback"
 ENV = f"""\
+COMPOSE_PROFILES=graph
+OPENCDE_TIER=experimental
+OPENCDE_STORE_PASSWORD={PASSWORD}
 OPENCDE_GRAPH_PASSWORD={PASSWORD}
 OPENCDE_IFC_DB_ENABLED=true
 OPENCDE_DEV_PORT={PORT}
+OPENCDE_DEV_POSTGRES_PORT=5611
 OPENCDE_DEV_NEO4J_HTTP_PORT=7611
 OPENCDE_DEV_NEO4J_BOLT_PORT=7711
 """
@@ -81,8 +87,14 @@ def _signed_in(client_id: str) -> OpenCdeClient:
 
 
 def _count(compose: Compose, query: str) -> int:
+    """A count in IFC-DB's graph."""
     shell = ("exec", "-T", "graph", "cypher-shell", "-u", "neo4j", "-p", PASSWORD, "--format", "plain", query)
     return int(compose(*shell).split()[-1])
+
+
+def _rows(compose: Compose, query: str) -> int:
+    """A count in PostgreSQL, which holds the server's own data; the container's own socket needs no password."""
+    return int(compose("exec", "-T", "store", "psql", "-U", "opencde", "-d", "opencde", "-tAc", query).strip())
 
 
 def test_what_people_stored_outlives_the_containers(compose: Compose) -> None:
@@ -109,8 +121,8 @@ def test_what_people_stored_outlives_the_containers(compose: Compose) -> None:
         tokens = before.tokens
 
         deadline = time.monotonic() + 180
-        done = "MATCH (c:Conversion {file_name: 'restart.ifc', state: 'done'}) RETURN count(c) AS models"
-        while _count(compose, done) != 1:
+        done = "SELECT count(*) FROM conversions WHERE file_name = 'restart.ifc' AND state = 'done'"
+        while _rows(compose, done) != 1:
             assert time.monotonic() < deadline, "the IFC import did not finish in time"
             time.sleep(2)
     entities = _count(compose, "MATCH (e:Entity) RETURN count(e) AS entities")
@@ -128,5 +140,5 @@ def test_what_people_stored_outlives_the_containers(compose: Compose) -> None:
         comments = after.bcf.comments(project_id, topic["guid"])
         assert [comment["comment"] for comment in comments] == ["So is this."]
         assert after.documents.download(version) == model, "the file itself is on its own volume"
-    assert _count(compose, done) == 1
+    assert _rows(compose, done) == 1
     assert _count(compose, "MATCH (e:Entity) RETURN count(e) AS entities") == entities
