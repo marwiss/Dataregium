@@ -272,7 +272,8 @@ The flows involve the user's browser; see [flows/documents.md](flows/documents.m
 Your client needs a callback URL the browser can reach (a loopback listener
 for desktop apps). The server never calls that URL itself.
 
-With the IFC-DB module on (tier 3), an IFC file uploaded as a version is
+With the BIM functions on (`OPENCDE_BIM_ENABLED` in tier 2, or the IFC-DB
+module in tier 3), an IFC file uploaded as a version is
 checked against the IFC schema and, where the server has them, buildingSMART's
 ifc-gherkin-rules. Its metadata then carries `ifc_validation_status` and,
 once checked, the other `ifc_validation_*` entries; `ifc_validation_report` is

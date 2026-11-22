@@ -21,6 +21,14 @@ in the Dockerfile); `ifc-db` more than doubles its size (about 680 MB, or
 `--build-arg OPENCDE_EXTRAS="--extra postgres"` for a slimmer image without
 IfcOpenShell when the module stays off.
 
+Without the graph, in tier 2, `OPENCDE_BIM_ENABLED=true` (which `opencde init`
+writes for `bim-gis`) runs the checks of uploads and the precheck, the diff,
+the clash check, the rooms, bSDD and the change sets' trial and approval on the
+versions' files, with the same workers and the same reports as below. What only
+the graph answers stays off there and says so: the named queries, the geometry,
+the merge of a building, what no GlobalId reaches and the GTIN copied onto
+viewpoints; an approval then compares the keys the clients wrote.
+
 Its settings are named `OPENCDE_IFC_DB_*`. Until November 2026 the module was
 named IFC-graph and then IFC-LPG: its settings `OPENCDE_IFCGRAPH_*` and then
 `OPENCDE_IFC_LPG_*`, its command `opencde ifcgraph` and then `opencde ifc-lpg`,

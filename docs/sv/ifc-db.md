@@ -20,6 +20,15 @@ mer än dubblar dess storlek (ungefär 680 MB, eller 1,1 GB med buildingSMARTs
 regler, mot 300 MB). Bygg med `--build-arg OPENCDE_EXTRAS="--extra postgres"`
 för en slankare avbildning utan IfcOpenShell när modulen förblir avstängd.
 
+Utan grafen, i nivå 2, kör `OPENCDE_BIM_ENABLED=true` (som `opencde init`
+skriver för `bim-gis`) kontrollerna av uppladdningar och förhandskontrollen,
+diffen, krocktestet, rummen, bSDD och ändringssetens prövning och godkännande
+på versionernas filer, med samma arbetsprocesser och samma rapporter som nedan.
+Det som bara grafen svarar på är avstängt där och säger det: de namngivna
+frågorna, geometrin, sammanfogningen av en byggnad, det som inget GlobalId når
+och GTIN som kopieras till viewpoints; ett godkännande jämför då nycklarna som
+klienterna skrev.
+
 Dess inställningar heter `OPENCDE_IFC_DB_*`. Fram till november 2026 hette
 modulen IFC-graph och sedan IFC-LPG: inställningarna `OPENCDE_IFCGRAPH_*` och
 sedan `OPENCDE_IFC_LPG_*`, kommandot `opencde ifcgraph` och sedan

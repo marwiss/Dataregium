@@ -223,7 +223,8 @@ använder, och inget är öppet förrän det har konfigurerats.
   `bim-gis` eller `experimental`, som är standard); `OPENCDE_APIS` väljer API:erna
   inom den (alla tre som standard, `["documents"]` i nivå 1 och i 1.0.0);
   `OPENCDE_STORE_URL`, som nivå 1 och 2 kräver, anger den PostgreSQL som håller
-  serverns egna data; `OPENCDE_IFC_DB_ENABLED=true` slår på grafen, i nivå 3, och
+  serverns egna data; `OPENCDE_BIM_ENABLED=true` slår på BIM-funktionerna på filerna,
+  i nivå 2, och `OPENCDE_IFC_DB_ENABLED=true` grafen, i nivå 3, och
   allt i 2- och 3-serien som rör modeller; `OPENCDE_ENVIRONMENT` är
   `development`, `production` eller `local` (den lokala motorn, `opencde init --local`).
 - **Ändpunkter**: `/.well-known/dataregium` (version, nivå och påslagna tillägg),
@@ -297,13 +298,15 @@ En server erbjuder en av tre nivåer, som `OPENCDE_TIER` väljer, och var och en
 allt som nivån före den har: **Dokument** (`documents`) Foundation API och
 Documents API, **BIM och GIS** (`bim-gis`) också BCF API 3.0 och 2.1 och
 MCP-ändpunkten, och **Experimentell** (`experimental`) också IFC-DB:s graf i Neo4j
-eller Memgraph. IFC-DB-modulen (`OPENCDE_IFC_DB_ENABLED`) hör till nivå 3, och med
-den kontrollerna, frågorna, jämförelserna, krocktesten, prövningarna av
-ändringsset, sammanfogningarna och geometrin nedan. En funktion kan vara avstängd
-inom sin nivå men aldrig påslagen över den: servern vägrar starta när
-`OPENCDE_APIS`, `OPENCDE_MCP_ENABLED` eller `OPENCDE_IFC_DB_ENABLED` begär mer
-än nivån erbjuder, och namnger inställningen, och det som kräver IFC-DB, som
-arbetskopian och krocktestet, förblir avstängt utan den. Nivå 1 och 2 håller
+eller Memgraph. I nivå 2 körs BIM-funktionerna på versionernas IFC-filer med
+`OPENCDE_BIM_ENABLED`: kontrollerna, jämförelserna, krocktesten, rummen och
+prövningarna av ändringsset nedan. IFC-DB-modulen (`OPENCDE_IFC_DB_ENABLED`) hör
+till nivå 3 och ger dem också, med det som bara grafen svarar på: frågorna,
+sammanfogningarna och geometrin. En funktion kan vara avstängd inom sin nivå men
+aldrig påslagen över den: servern vägrar starta när `OPENCDE_APIS`,
+`OPENCDE_MCP_ENABLED`, `OPENCDE_BIM_ENABLED` eller `OPENCDE_IFC_DB_ENABLED` begär
+mer än nivån erbjuder, och namnger inställningen, och det som kräver IFC-DB, som
+arbetskopian, förblir avstängt utan den. Nivå 1 och 2 håller
 serverns egna data enbart i PostgreSQL. Är nivån inte satt är den Experimentell,
 och inget hålls tillbaka. Kapabilitetsdokumentet anger nivån som `tier`, och
 `opencde doctor` och administrationens översikt visar den.

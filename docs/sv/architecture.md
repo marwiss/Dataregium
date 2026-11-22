@@ -62,15 +62,15 @@ sig.
 | Nivå | `OPENCDE_TIER` | Vad den lägger till |
 |---|---|---|
 | 1, Dokument | `documents` | Foundation API och Documents API |
-| 2, BIM och GIS | `bim-gis` | BCF API 3.0 och 2.1 och MCP-ändpunkten |
-| 3, Experimentell | `experimental` | IFC-DB:s graf (`OPENCDE_IFC_DB_ENABLED`, Neo4j eller Memgraph), och serverns egna data i en graf |
+| 2, BIM och GIS | `bim-gis` | BCF API 3.0 och 2.1, MCP-ändpunkten och BIM-funktionerna på IFC-filerna (`OPENCDE_BIM_ENABLED`): kontrollerna, diffen, krocktestet, rummen och ändringssetens prövning |
+| 3, Experimentell | `experimental` | IFC-DB:s graf (`OPENCDE_IFC_DB_ENABLED`, Neo4j eller Memgraph), som ger BIM-funktionerna också och lägger till de namngivna frågorna, geometrin och sammanfogningen, och serverns egna data i en graf |
 
 En funktion kan vara avstängd inom nivån men aldrig påslagen ovanför den:
-servern vägrar starta, och namnger inställningen, när API:erna, MCP-ändpunkten
-eller IFC-DB begär mer än nivån erbjuder. I nivå 1 är `OPENCDE_APIS`
-`["documents"]` om den inte är satt. Nivå 1 och 2 håller serverns egna data bara
-i PostgreSQL och behöver därför `OPENCDE_STORE_URL`. Utan `OPENCDE_TIER` är
-nivån experimentell: inget hålls tillbaka, som före nivåerna.
+servern vägrar starta, och namnger inställningen, när API:erna, MCP-ändpunkten,
+BIM-funktionerna eller IFC-DB begär mer än nivån erbjuder. I nivå 1 är
+`OPENCDE_APIS` `["documents"]` om den inte är satt. Nivå 1 och 2 håller serverns
+egna data bara i PostgreSQL och behöver därför `OPENCDE_STORE_URL`. Utan
+`OPENCDE_TIER` är nivån experimentell: inget hålls tillbaka, som före nivåerna.
 `GET /.well-known/dataregium` anger nivån i `tier`, och `opencde doctor` och
 administrationens översikt visar den.
 

@@ -220,8 +220,9 @@ nothing is open until it has been configured.
   `experimental`, the default); `OPENCDE_APIS` chooses the APIs within it (all three
   by default, `["documents"]` in tier 1 and in 1.0.0); `OPENCDE_STORE_URL` names the
   PostgreSQL that holds the server's own data, which tiers 1 and 2 require;
-  `OPENCDE_IFC_DB_ENABLED=true` turns on the graph, in tier 3, and everything in the
-  2 and 3 series that concerns models; `OPENCDE_ENVIRONMENT` is `development`,
+  `OPENCDE_BIM_ENABLED=true` turns on the BIM functions on the files, in tier 2, and
+  `OPENCDE_IFC_DB_ENABLED=true` the graph, in tier 3, with everything in the 2 and 3
+  series that concerns models; `OPENCDE_ENVIRONMENT` is `development`,
   `production` or `local` (the local engine, `opencde init --local`).
 - **Endpoints**: `/.well-known/dataregium` (the version, the tier and the extensions
   that are on), `/foundation/versions`, `/openapi.json` and `/docs`, `/healthz`
@@ -295,12 +296,14 @@ A server offers one of three tiers, which `OPENCDE_TIER` chooses, and each has
 everything the one before it has: **Documents** (`documents`) the Foundation API
 and the Documents API, **BIM + GIS** (`bim-gis`) also BCF API 3.0 and 2.1 and the
 MCP endpoint, and **Experimental** (`experimental`) also IFC-DB's graph in Neo4j or
-Memgraph. IFC-DB (`OPENCDE_IFC_DB_ENABLED`) belongs to tier 3, and with it the
-checks, queries, comparisons, clash checks, trials of change sets, merges and
-geometry below. A function can be off within its tier but never on above it: the
-server refuses to start when `OPENCDE_APIS`, `OPENCDE_MCP_ENABLED` or
-`OPENCDE_IFC_DB_ENABLED` asks for more than the tier offers, and names the
-setting, and what needs IFC-DB, such as the working copy and the clash check,
+Memgraph. In tier 2 the BIM functions run on the versions' IFC files with
+`OPENCDE_BIM_ENABLED`: the checks, the comparisons, the clash checks, the rooms
+and the trials of change sets below. IFC-DB (`OPENCDE_IFC_DB_ENABLED`) belongs
+to tier 3 and brings them too, with what only the graph answers: the queries,
+the merges and the geometry. A function can be off within its tier but never on
+above it: the server refuses to start when `OPENCDE_APIS`, `OPENCDE_MCP_ENABLED`,
+`OPENCDE_BIM_ENABLED` or `OPENCDE_IFC_DB_ENABLED` asks for more than the tier
+offers, and names the setting, and what needs IFC-DB, such as the working copy,
 stays off without it. Tiers 1 and 2 keep the server's own data in PostgreSQL
 alone. Unset, the tier is Experimental and nothing is held back. The
 capabilities document gives the tier as `tier`, and `opencde doctor` and the

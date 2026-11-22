@@ -10,15 +10,24 @@ the commit history.
 
 ## Unreleased
 
+- The BIM functions of tier 2 run on the versions' IFC files without IFC-DB's graph (F59):
+  `OPENCDE_BIM_ENABLED=true`, which `opencde init --tier bim-gis` writes and tier 1 refuses, turns on the check
+  of each upload and the precheck with the refusal of uploads with errors, the diff, the clash check, the rooms,
+  bSDD, the change sets' trial and approval, and the query of what changed since a version, each in a worker
+  process with IfcOpenShell as before; the capabilities announce them, and the MCP tools that try change sets and
+  check clashes come with them. Without a graph an upload is converted into nothing, an approval compares the
+  keys the clients wrote, and what only the graph answers (the named queries, the geometry, the merge of a
+  building, what no GlobalId reaches) stays off and says so. IFC-DB brings the BIM functions too, as before, and
+  `opencde doctor` says when IfcOpenShell is missing for them.
 - The tier says what a server offers: `OPENCDE_TIER` is `documents` (tier 1, Documents: the Foundation and Documents
   APIs, with `OPENCDE_APIS` then `["documents"]` by default), `bim-gis` (tier 2, BIM + GIS: BCF API 3.0 and 2.1 too,
   and the MCP endpoint) or `experimental` (tier 3, Experimental: IFC-DB's graph too, `OPENCDE_IFC_DB_ENABLED` with
   Neo4j or Memgraph, and the choice of keeping the server's own data in a graph). A function can be off within the
   tier but never on above it: the server refuses to start, naming the setting, when `OPENCDE_APIS`,
-  `OPENCDE_MCP_ENABLED` or `OPENCDE_IFC_DB_ENABLED` asks for more than the tier offers. Tiers 1 and 2 keep the
-  server's own data in PostgreSQL alone and need `OPENCDE_STORE_URL`. Unset, the tier is `experimental` and nothing is held back,
-  as before. `GET /.well-known/dataregium` gives `tier` at its top level, and `opencde doctor` and the
-  administration's overview show it.
+  `OPENCDE_MCP_ENABLED`, `OPENCDE_BIM_ENABLED` or `OPENCDE_IFC_DB_ENABLED` asks for more than the tier offers.
+  Tiers 1 and 2 keep the server's own data in PostgreSQL alone and need `OPENCDE_STORE_URL`. Unset, the tier is
+  `experimental` and nothing is held back, as before. `GET /.well-known/dataregium` gives `tier` at its top level,
+  and `opencde doctor` and the administration's overview show it.
 - Compose keeps the server's own data in PostgreSQL by default (ADR 0029): `docker/compose.yaml` starts the service
   `store` (`docker.io/library/postgres:17.6-alpine`, user and database `opencde`, the password
   `OPENCDE_STORE_PASSWORD`, which Compose requires), published nowhere but on `127.0.0.1:5442` by `compose.dev.yaml`

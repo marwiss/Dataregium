@@ -27,9 +27,10 @@ använder en graf.
 
 Nivån är det servern erbjuder. Nivå 1, Dokument (`--tier documents`), erbjuder
 Foundation API och Documents API; nivå 2, BIM och GIS (`bim-gis`, som `init`
-skriver om inget annat sägs), lägger till BCF API 3.0 och 2.1 och
-MCP-ändpunkten. Båda håller serverns egna data i PostgreSQL och använder ingen
-graf. Nivå 3, Experimentell (`--tier experimental`, eller ett ja på guidens
+skriver om inget annat sägs), lägger till BCF API 3.0 och 2.1, MCP-ändpunkten
+och BIM-funktionerna på IFC-filerna, som `init` slår på med
+`OPENCDE_BIM_ENABLED=true`. Båda håller serverns egna data i PostgreSQL och
+använder ingen graf. Nivå 3, Experimentell (`--tier experimental`, eller ett ja på guidens
 fråga om IFC-modeller i en graf), lägger till IFC-DB:s graf: `init` skriver då
 också grafens inställningar, `OPENCDE_IFC_DB_ENABLED=true` och
 `COMPOSE_PROFILES=graph`, som startar Neo4j bredvid PostgreSQL. En funktion kan

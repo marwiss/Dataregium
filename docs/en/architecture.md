@@ -63,15 +63,15 @@ it.
 | Tier | `OPENCDE_TIER` | What it adds |
 |---|---|---|
 | 1, Documents | `documents` | The Foundation and Documents APIs |
-| 2, BIM + GIS | `bim-gis` | BCF API 3.0 and 2.1 and the MCP endpoint |
-| 3, Experimental | `experimental` | IFC-DB's graph (`OPENCDE_IFC_DB_ENABLED`, Neo4j or Memgraph), and the server's own data in a graph |
+| 2, BIM + GIS | `bim-gis` | BCF API 3.0 and 2.1, the MCP endpoint, and the BIM functions on the IFC files (`OPENCDE_BIM_ENABLED`): the checks, the diff, the clash check, the rooms and the change sets' trial |
+| 3, Experimental | `experimental` | IFC-DB's graph (`OPENCDE_IFC_DB_ENABLED`, Neo4j or Memgraph), which brings the BIM functions too and adds the named queries, the geometry and the merge, and the server's own data in a graph |
 
 A function can be off within the tier but never on above it: the server refuses
-to start, and names the setting, when the APIs, the MCP endpoint or IFC-DB ask
-for more than the tier offers. In tier 1 `OPENCDE_APIS` is `["documents"]`
-unless it is set. Tiers 1 and 2 keep the server's own data in PostgreSQL alone,
-so they need `OPENCDE_STORE_URL`. Without `OPENCDE_TIER` the tier is
-experimental: nothing is held back, as before the tiers.
+to start, and names the setting, when the APIs, the MCP endpoint, the BIM
+functions or IFC-DB ask for more than the tier offers. In tier 1 `OPENCDE_APIS`
+is `["documents"]` unless it is set. Tiers 1 and 2 keep the server's own data in
+PostgreSQL alone, so they need `OPENCDE_STORE_URL`. Without `OPENCDE_TIER` the
+tier is experimental: nothing is held back, as before the tiers.
 `GET /.well-known/dataregium` names the tier in `tier`, and `opencde doctor` and
 the administration's overview show it.
 

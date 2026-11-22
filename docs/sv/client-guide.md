@@ -279,7 +279,8 @@ Din klient behöver en callback-URL som webbläsaren kan nå (en
 loopback-lyssnare för skrivbordsappar). Servern anropar aldrig den URL:en
 själv.
 
-När IFC-DB-modulen är på (nivå 3) kontrolleras en IFC-fil som laddas upp som
+När BIM-funktionerna är på (`OPENCDE_BIM_ENABLED` i nivå 2, eller IFC-DB-modulen
+i nivå 3) kontrolleras en IFC-fil som laddas upp som
 version mot IFC-schemat och, där servern har dem, buildingSMARTs
 ifc-gherkin-rules. Dess metadata har då `ifc_validation_status` och, när den är
 kontrollerad, de andra `ifc_validation_*`-posterna; `ifc_validation_report` är

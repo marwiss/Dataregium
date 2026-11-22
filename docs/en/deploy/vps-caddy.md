@@ -26,8 +26,10 @@ the graph's (`OPENCDE_GRAPH_PASSWORD`) only when it uses a graph.
 
 The tier is what the server offers. Tier 1, Documents (`--tier documents`),
 offers the Foundation and Documents APIs; tier 2, BIM + GIS (`bim-gis`, which
-`init` writes unless told otherwise), adds BCF API 3.0 and 2.1 and the MCP
-endpoint. Both keep the server's own data in PostgreSQL and use no graph.
+`init` writes unless told otherwise), adds BCF API 3.0 and 2.1, the MCP
+endpoint and the BIM functions on the IFC files, which `init` turns on with
+`OPENCDE_BIM_ENABLED=true`. Both keep the server's own data in PostgreSQL and
+use no graph.
 Tier 3, Experimental (`--tier experimental`, or a yes to the guide's question
 about IFC models in a graph), adds IFC-DB's graph: `init` then also writes the
 graph's settings, `OPENCDE_IFC_DB_ENABLED=true` and `COMPOSE_PROFILES=graph`,
