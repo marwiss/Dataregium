@@ -198,6 +198,7 @@ def server_query_tool() -> Tool:
         arguments=arguments,
         run=run,
         needs_ifcgraph=True,
+        needs_graph=True,  # the named queries run in IFC-DB's graph
     )
 
 

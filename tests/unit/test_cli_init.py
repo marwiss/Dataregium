@@ -49,6 +49,7 @@ def test_postgresql_holds_the_servers_own_data_and_the_graph_comes_with_tier_3(t
     assert not [name for name in env if name.startswith(("OPENCDE_GRAPH_", "NEO4J_", "COMPOSE_PROFILES"))]
     settings = Settings(_env_file=development)  # type: ignore[call-arg]
     assert settings.tier is Tier.BIM_GIS and not settings.uses_graph
+    assert env["OPENCDE_BIM_ENABLED"] == "true" and settings.bim_on, "the BIM functions on the files (F59)"
     production = tmp_path / "production.env"
     command = ["init", "--public-url", "https://cde.example.org", "--tier", "experimental", "--path", str(production)]
     assert CliRunner().invoke(app, command).exit_code == 0

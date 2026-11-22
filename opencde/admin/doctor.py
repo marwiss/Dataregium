@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
 import socket
 import struct
@@ -177,6 +178,9 @@ async def run_checks(
     checks = [Check("version", True, value=__version__), Check("environment", True, value=settings.environment)]
     checks.append(Check("tier", True, value=settings.tier.value))
     checks.append(Check("apis", True, value=", ".join(settings.apis)))
+    if settings.bim_on:  # the BIM functions run IfcOpenShell in their workers (F59)
+        ready = importlib.util.find_spec("ifcopenshell") is not None
+        checks.append(Check("bim", ready, "bim_ready" if ready else "bim_without_extra"))
     https = settings.public_url.startswith("https://")
     fine = https or settings.environment != "production"
     checks.append(

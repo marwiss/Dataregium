@@ -147,7 +147,7 @@ async def ask_query(
         raise HTTPException(400, str(exc)) from None
     if state != "done":
         raise HTTPException(409, f"The IFC graph of this version is {state}, not done")
-    target = service.graph
+    target = service.models
     if service.workcopy is not None and await service.in_workcopy(model_id):
         target = service.workcopy
     try:
@@ -168,9 +168,10 @@ async def changed_since(
     """What changed in the document after version ``since`` up to this one: one row per change of every version's
     change set, as it names it, and one row with ``whole_file`` true for a version uploaded as a whole file, at most
     :data:`MAX_ROWS` of them. Answered from the versions, so it needs no graph. 404 when the user may not see the
-    version, 400 when ``since`` is not an earlier version."""
-    if not settings.ifcgraph_enabled:
-        raise HTTPException(404, "The IFC-DB module is off on this server")
+    version, 400 when ``since`` is not an earlier version; it comes with the BIM functions, which try the change
+    sets (tier 2)."""
+    if not settings.bim_on:
+        raise HTTPException(404, "The BIM functions are off on this server")
     if not is_uuid(document_id):
         raise HTTPException(404, "Document version not found")
     if await documents.version(user_id=user_id, document_id=document_id, version_index=version_index) is None:

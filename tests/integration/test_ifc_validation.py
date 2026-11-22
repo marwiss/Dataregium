@@ -17,18 +17,19 @@ from opencde.bootstrap import make_storage
 from opencde.documents.assembly import store_stream
 from opencde.ids import new_id
 from opencde.main import create_app
+from opencde.settings import Settings
 from opencde.storage import make_key
 from opencde.timeutil import later_iso, now_iso
 from tests.conformance.schemas import validate_documents
 from tests.conftest import FIXTURES_DIR
 from tests.conftest import test_settings as make_settings  # aliased so pytest does not collect it as a test
-from tests.integration.conftest import GraphTarget
+from tests.integration.conftest import GraphTarget, bim_settings
 from tests.integration.conftest_accounts import World, build_world, login_as
 from tests.integration.helpers import Session
 from tests.integration.test_documents_api import save_metadata, start_upload, upload_file
 from tests.integration.test_web_signin import web_sign_in
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.both_stores]
 pytest.importorskip("ifcopenshell", reason="the ifc-db extra is not installed")
 
 MODEL = FIXTURES_DIR / "three_walls_gtin.ifc"
@@ -54,8 +55,8 @@ def settings_for(graph_target: GraphTarget, tmp_path: Any, **extra: Any) -> Any:
 
 
 @pytest.fixture
-def ifc_client(graph_target: GraphTarget, clean_database: None, tmp_path: Any) -> Iterator[tuple[TestClient, World]]:
-    settings = settings_for(graph_target, tmp_path)
+def ifc_client(settings: Settings, clean_database: None, tmp_path: Any) -> Iterator[tuple[TestClient, World]]:
+    settings = bim_settings(settings)
     world = build_world(settings)
     with TestClient(create_app(settings, startup_wait_seconds=30)) as client:
         yield client, world
@@ -90,8 +91,10 @@ def checked(client: TestClient, session: Session, version: dict[str, Any]) -> di
 
 def settled(client: TestClient, session: Session, url: str) -> dict[str, Any]:
     """The validation report once the graph check has joined it, which happens when the conversion is done, or as it
-    is after a minute: the report does not change after that, so two reads of it compare equal."""
-    deadline = time.monotonic() + 60
+    is after a minute: the report does not change after that, so two reads of it compare equal. Without a graph
+    (tier 2) there is no graph check to wait for."""
+    service = getattr(client.app.state, "ifcgraph", None)
+    deadline = time.monotonic() + (60 if service is not None and service.graph is not None else 0)
     while True:
         body = client.get(url, headers=session.headers).json()
         if any(check["name"] == "graph" for check in body["checks"]) or time.monotonic() > deadline:
@@ -140,9 +143,13 @@ def test_an_upload_is_checked_and_the_report_names_its_elements(ifc_client: tupl
     assert download.json() == body
 
 
-def test_the_report_warns_of_what_no_global_id_reaches(ifc_client: tuple[TestClient, World]) -> None:
+def test_the_report_warns_of_what_no_global_id_reaches(
+    ifc_client: tuple[TestClient, World], settings: Settings
+) -> None:
     """IFC-DB F13 a and OB-10.1: an instance that nothing with a GlobalId reaches is a warning of the converted model;
     the upload is kept, and the rest of the report is as the checks of the file made it."""
+    if settings.store_url is not None:
+        pytest.skip("what no GlobalId reaches is asked of IFC-DB's graph, which tier 2 does without")
     client, world = ifc_client
     editor = login_as(client, world, "editor")
     web_sign_in(client, world, "editor")
@@ -199,8 +206,8 @@ def test_an_upload_is_checked_against_the_projects_ids_documents(ifc_client: tup
 
 
 @pytest.mark.skipif(not GHERKIN_ENV, reason="OPENCDE_TEST_GHERKIN_ENV names no environment for ifc-gherkin-rules")
-def test_the_gherkin_rules_add_their_findings(graph_target: GraphTarget, clean_database: None, tmp_path: Any) -> None:
-    settings = settings_for(graph_target, tmp_path, ifcgraph_gherkin_env=GHERKIN_ENV)
+def test_the_gherkin_rules_add_their_findings(settings: Settings, clean_database: None, tmp_path: Any) -> None:
+    settings = bim_settings(settings, ifcgraph_gherkin_env=GHERKIN_ENV)
     world = build_world(settings)
     head, tail = MODEL.read_bytes().rsplit(b"ENDSEC;", 1)
     orphan = head + b"#99999=IFCCARTESIANPOINT((1.,2.,3.));\n" + b"ENDSEC;" + tail  # a point nothing refers to
@@ -228,12 +235,10 @@ def test_the_gherkin_rules_add_their_findings(graph_target: GraphTarget, clean_d
 
 
 @pytest.mark.skipif(not GHERKIN_ENV, reason="OPENCDE_TEST_GHERKIN_ENV names no environment for ifc-gherkin-rules")
-def test_a_rules_finding_names_the_element_it_is_in(
-    graph_target: GraphTarget, clean_database: None, tmp_path: Any
-) -> None:
+def test_a_rules_finding_names_the_element_it_is_in(settings: Settings, clean_database: None, tmp_path: Any) -> None:
     from tests.unit.test_ifcgraph_elements import broken
 
-    settings = settings_for(graph_target, tmp_path, ifcgraph_gherkin_env=GHERKIN_ENV)
+    settings = bim_settings(settings, ifcgraph_gherkin_env=GHERKIN_ENV)
     world = build_world(settings)
     with TestClient(create_app(settings, startup_wait_seconds=30)) as client:
         editor = login_as(client, world, "editor")
@@ -262,8 +267,10 @@ def test_a_text_file_is_not_checked(ifc_client: tuple[TestClient, World]) -> Non
 
 
 def test_a_check_a_stopped_server_left_behind_starts_over(
-    graph_target: GraphTarget, clean_database: None, tmp_path: Any
+    graph_target: GraphTarget, settings: Settings, clean_database: None, tmp_path: Any
 ) -> None:
+    if settings.store_url is not None:
+        pytest.skip("the checks a stopped server left are written into the graph by hand here")
     settings = settings_for(graph_target, tmp_path)
     world = build_world(settings)
     key = make_key("documents", new_id())

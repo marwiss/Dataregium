@@ -13,21 +13,22 @@ from fastapi.testclient import TestClient
 
 from opencde.documents.changes import SCHEMA_PATH, SNIPPET_TYPE
 from opencde.main import create_app
-from tests.integration.conftest import GraphTarget
+from opencde.settings import Settings
+from tests.integration.conftest import bim_settings
 from tests.integration.conftest_accounts import World, build_world, login_as
 from tests.integration.helpers import Session
 from tests.integration.test_bcf_links_documents import make_topic
 from tests.integration.test_documents_api import save_metadata, start_upload, upload_file
-from tests.integration.test_ifc_validation import MODEL, WALLS, checked, settings_for, upload
+from tests.integration.test_ifc_validation import MODEL, WALLS, checked, upload
 from tests.integration.test_web_signin import web_sign_in
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.both_stores]
 pytest.importorskip("ifcopenshell", reason="the ifc-db extra is not installed")
 
 
 @pytest.fixture
-def ifc_client(graph_target: GraphTarget, clean_database: None, tmp_path: Any) -> Iterator[tuple[TestClient, World]]:
-    settings = settings_for(graph_target, tmp_path)
+def ifc_client(settings: Settings, clean_database: None, tmp_path: Any) -> Iterator[tuple[TestClient, World]]:
+    settings = bim_settings(settings)
     world = build_world(settings)
     with TestClient(create_app(settings, startup_wait_seconds=30)) as client:
         yield client, world
@@ -303,7 +304,9 @@ def test_the_server_merges_a_change_set_that_collides_with_nothing(ifc_client: t
     assert whole.status_code == 412 and whole.json()["conflicts"] == ["*"]
 
 
-def test_two_paths_to_one_shared_instance_collide(ifc_client: tuple[TestClient, World]) -> None:
+def test_two_paths_to_one_shared_instance_collide(ifc_client: tuple[TestClient, World], settings: Settings) -> None:
+    if settings.store_url is not None:  # the canonical paths are found in IFC-DB's graph (tier 3)
+        pytest.skip("without a graph an approval compares the keys the clients wrote")
     """The instances are compared, not the keys the clients wrote: two walls share their owner history, and a change
     to it through one wall collides with a change to it through the other."""
     client, world = ifc_client

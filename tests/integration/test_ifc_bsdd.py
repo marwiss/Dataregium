@@ -14,9 +14,10 @@ from fastapi.testclient import TestClient
 
 from opencde.ifcgraph.bsdd import BsddClient
 from opencde.main import create_app
-from tests.integration.conftest import GraphTarget
+from opencde.settings import Settings
+from tests.integration.conftest import GraphTarget, bim_settings
 from tests.integration.conftest_accounts import build_world, login_as
-from tests.integration.test_ifc_validation import checked, settings_for, upload
+from tests.integration.test_ifc_validation import checked, upload
 from tests.integration.test_web_signin import web_sign_in
 from tests.unit.test_bsdd_refs import (  # skips this module without IfcOpenShell
     BSDD_IDS,
@@ -26,7 +27,7 @@ from tests.unit.test_bsdd_refs import (  # skips this module without IfcOpenShel
     model_with_references,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.both_stores]
 
 IFC = "https://identifier.buildingsmart.org/uri/buildingsmart/ifc/4.3"
 WALL = f"{IFC}/class/IfcWall"
@@ -52,11 +53,11 @@ def bsdd_gone(request: httpx.Request) -> httpx.Response:
 
 
 def uploaded_with_bsdd(
-    graph_target: GraphTarget, tmp_path: Path, answers: Callable[[httpx.Request], httpx.Response]
+    settings: Settings, tmp_path: Path, answers: Callable[[httpx.Request], httpx.Response]
 ) -> tuple[dict[str, Any], dict[str, Any], Any]:
     """An IFC 4.3 file with bSDD references uploaded with the check on, bSDD answering as ``answers`` does; the
     version, the file's ids and the report, once the file is checked."""
-    settings = settings_for(graph_target, tmp_path, bsdd_enabled=True, bsdd_api_url="https://bsdd.test")
+    settings = bim_settings(settings, bsdd_enabled=True, bsdd_api_url="https://bsdd.test")
     world = build_world(settings)
     file = tmp_path / "refs.ifc"
     ids = model_with_references(file)
@@ -119,11 +120,11 @@ def bsdd_knowing_fire_rating(request: httpx.Request) -> httpx.Response:
 
 
 def test_the_properties_and_the_projects_ids_documents_are_checked_against_bsdd(
-    graph_target: GraphTarget, clean_database: None, tmp_path: Path
+    settings: Settings, clean_database: None, tmp_path: Path
 ) -> None:
     """A property's Specification that bSDD does not know warns with the property; a URI of the project's IDS
     document that it does not know warns with the document and its specification, in the report of the file."""
-    settings = settings_for(graph_target, tmp_path, bsdd_enabled=True, bsdd_api_url="https://bsdd.test")
+    settings = bim_settings(settings, bsdd_enabled=True, bsdd_api_url="https://bsdd.test")
     world = build_world(settings)
     file = tmp_path / "props.ifc"
     ids = model_with_property_uris(file)

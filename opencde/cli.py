@@ -288,6 +288,8 @@ def init(
         lines.append(f"OPENCDE_DOMAIN={url.removeprefix('https://')}")
     if chosen is Tier.EXPERIMENTAL:
         lines += _graph_lines(dev=dev)
+    elif chosen is Tier.BIM_GIS:  # the BIM functions on the files, which IFC-DB brings in tier 3 (F59)
+        lines.append("OPENCDE_BIM_ENABLED=true")
     # A value asked for replaces the line that says otherwise.
     names = {line.split("=", 1)[0] for line in extra}
     lines = [line for line in lines if line.split("=", 1)[0] not in names] + extra

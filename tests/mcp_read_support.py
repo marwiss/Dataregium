@@ -203,6 +203,11 @@ class FakeService:
         self.scheduled: list[dict[str, Any]] = []
         self.read: list[dict[str, Any]] = []
 
+    @property
+    def models(self) -> IfcGraph:
+        """IFC-DB's graph, as the service hands it to what only the graph answers."""
+        return self.graph
+
     async def in_workcopy(self, model_id: str) -> bool:
         return self.held
 

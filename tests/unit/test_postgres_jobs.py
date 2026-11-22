@@ -375,6 +375,46 @@ def test_the_ifc_db_service_keeps_its_jobs_where_the_store_is(tmp_path: Any) -> 
     assert isinstance(on_graph.merges, MergeRepository) and isinstance(on_graph.conversions, ConversionRepository)
 
 
+async def test_the_service_without_a_graph_converts_nothing_and_answers_what_the_graph_would_not(
+    tmp_path: Any,
+) -> None:
+    """Tier 2 (F59): the BIM functions on the files with no IFC-DB graph. An upload is no conversion, the keys of an
+    approval are the ones the clients wrote, no GTIN is looked up, and what only the graph answers says so."""
+    from opencde.ifcgraph.service import IfcGraphService
+    from opencde.storage import LocalStorage
+    from tests.conftest import test_settings as make_settings
+
+    settings = make_settings(tmp_path, store_url=URL, bim_enabled=True, ifcgraph_validate_uploads=False)
+    postgres = Postgres(URL, "", connect_timeout_seconds=1.0)
+    service = IfcGraphService(None, LocalStorage(tmp_path), settings, store=object(), postgres=postgres)  # ty: ignore[invalid-argument-type]
+    assert service.graph is None and isinstance(service.conversions, PostgresConversionRepository)
+    made = await service.schedule(project_id="p", storage_key="documents/x", file_name="model.ifc", version_id="v")
+    assert made is None and not service._tasks, "nothing to convert into a graph"
+    assert await service.canonical_keys(document_id="d", version_index=1, changes=[]) is None
+    assert await service.link_viewpoint(project_id="p", viewpoint_guid="g") == 0
+    with pytest.raises(RuntimeError, match="no models in a graph"):
+        await service.unreached("m")
+    with pytest.raises(ValueError, match="store of the server's own data"):
+        IfcGraphService(None, LocalStorage(tmp_path), settings)
+
+
+def test_the_mcp_tools_come_with_the_bim_functions_and_the_named_queries_with_the_graph(tmp_path: Any) -> None:
+    from opencde.mcp.routes import TOOLS
+    from tests.conftest import test_settings as make_settings
+
+    offered = {
+        name: {tool.name for tool in TOOLS if tool.offered(make_settings(tmp_path / name, **values))}
+        for name, values in (
+            ("off", {}),
+            ("bim", {"store_url": URL, "bim_enabled": True}),
+            ("graph", {"ifcgraph_enabled": True}),
+        )
+    }
+    assert offered["off"] == {"list_models", "get_publication"}
+    assert {"open_changeset", "propose_changes", "start_clash_check", "list_proposals"} <= offered["bim"]
+    assert "server_query" not in offered["bim"] and offered["graph"] == offered["bim"] | {"server_query"}
+
+
 def test_the_documents_api_and_the_mcp_endpoint_find_the_jobs_where_the_store_is(tmp_path: Any) -> None:
     from opencde.mcp.change_sets import _drafts
     from opencde.mcp.registry import ToolContext

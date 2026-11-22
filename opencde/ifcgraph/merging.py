@@ -72,7 +72,7 @@ def limits_of(service: IfcGraphService) -> Limits:
 async def report(service: IfcGraphService, request: dict[str, Any]) -> dict[str, Any]:
     """What the merge would do, without making anything; :class:`MergeError` when it cannot be made at all."""
     return await merge_report(
-        service.graph,
+        service.models,
         request["base"]["model_id"],
         request["other"]["model_id"],
         request["building"],
@@ -122,7 +122,7 @@ async def run(service: IfcGraphService, merge_id: str) -> None:
             return
         try:
             merged = await merge_building(
-                service.graph,
+                service.models,
                 request["base"]["model_id"],
                 request["other"]["model_id"],
                 request["building"],
@@ -161,7 +161,7 @@ async def _prepare(service: IfcGraphService, merge_id: str, request: dict[str, A
     issues B did not have."""
     try:
         prepared = await prepare_other(
-            service.graph,
+            service.models,
             request["other"]["model_id"],
             model_id,
             base_id=request["base"]["model_id"],
@@ -198,7 +198,7 @@ async def prepared(
 
 async def _drop(service: IfcGraphService, model_id: str) -> None:
     """C out of the graph: its file is the version now, and the version gets a model of its own when converted."""
-    await drop_partial(service.graph, model_id)
+    await drop_partial(service.models, model_id)
 
 
 async def _as_version(

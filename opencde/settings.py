@@ -376,6 +376,12 @@ class Settings(BaseSettings):
     )
 
     # --- optional modules -------------------------------------------------
+    bim_enabled: bool = Field(
+        False,
+        description="The BIM functions of tier 2 on the versions' IFC files, without IFC-DB's graph (F59): the "
+        "check of each upload and the precheck, the diff, the clash check, the rooms, and the change sets' trial "
+        "and approval, each in a worker process with IfcOpenShell (needs the ifc-db extra). IFC-DB brings them too.",
+    )
     # The IFC-DB module: read as OPENCDE_IFC_DB_*, and still as OPENCDE_IFC_LPG_* and OPENCDE_IFCGRAPH_* (see `_ifc`).
     ifcgraph_enabled: bool = Field(
         False,
@@ -429,7 +435,7 @@ class Settings(BaseSettings):
         False,
         validation_alias=_ifc("clash_enabled"),
         description="Offer the clash check between two IFC document versions, run with IfcClash in a worker process "
-        "(needs the ifc-db extra and the IFC-DB module).",
+        "(needs the ifc-db extra and the BIM functions: OPENCDE_BIM_ENABLED or IFC-DB).",
     )
     ifcgraph_clash_max_clashes: int = Field(
         10_000,
@@ -467,7 +473,7 @@ class Settings(BaseSettings):
         False,
         description="Find the rooms of each storey of every IFC upload, precheck and trial of a change set from its "
         "walls, as Dataspatium does, and keep them as the report's section `rooms`, which never stops an upload or an "
-        "approval (needs the ifc-db extra and the IFC-DB module).",
+        "approval (needs the ifc-db extra and the BIM functions: OPENCDE_BIM_ENABLED or IFC-DB).",
     )
 
     # --- logging ----------------------------------------------------------
@@ -558,6 +564,8 @@ class Settings(BaseSettings):
                 raise ValueError(f"OPENCDE_APIS names {', '.join(above)}, which tier 2 (bim-gis) offers, beyond {name}")
             if self.mcp_enabled:
                 raise ValueError(f"OPENCDE_MCP_ENABLED is tier 2 (bim-gis), beyond {name}")
+            if self.bim_enabled:
+                raise ValueError(f"OPENCDE_BIM_ENABLED is tier 2 (bim-gis), beyond {name}")
         if self.ifcgraph_enabled:
             raise ValueError(f"OPENCDE_IFC_DB_ENABLED is tier 3 (experimental), beyond {name}")
         if self.store_url is None:
@@ -683,6 +691,12 @@ class Settings(BaseSettings):
         if self.graph_database:
             return self.graph_database
         return {GraphDialect.NEO4J: "neo4j", GraphDialect.MEMGRAPH: "memgraph"}[self.graph_dialect]
+
+    @property
+    def bim_on(self) -> bool:
+        """Whether the BIM functions on the IFC files run: in tier 2 with OPENCDE_BIM_ENABLED, and with IFC-DB, which
+        brings them along with its graph."""
+        return self.bim_enabled or self.ifcgraph_enabled
 
     @property
     def uses_graph(self) -> bool:

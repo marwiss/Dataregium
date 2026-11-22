@@ -70,7 +70,7 @@ async def _service(
     ifcgraph: IfcGraphService | None, settings: Any, users: Any, user_id: str, project_id: str, *, to_start: bool
 ) -> tuple[IfcGraphService, str]:
     """The service and the project id, for a member of the project on a server that checks uploads."""
-    if ifcgraph is None or not settings.ifcgraph_enabled or not settings.ifcgraph_validate_uploads:
+    if ifcgraph is None or not settings.ifcgraph_validate_uploads:
         raise HTTPException(404, "Checking IFC files is off on this server")
     if not is_uuid(project_id):
         raise HTTPException(404, "Project not found")

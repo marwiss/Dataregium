@@ -185,7 +185,7 @@ def _unreached_issue(node: dict[str, Any]) -> dict[str, Any]:
 class IfcGraphService:
     def __init__(
         self,
-        graph: Graph,
+        graph: Graph | None,
         storage: LocalStorage,
         settings: Settings,
         *,
@@ -194,8 +194,13 @@ class IfcGraphService:
         postgres: Postgres | None = None,
     ) -> None:
         self.workcopy = workcopy  # the second graph that holds the head model of every document (ADR 0024)
-        self.graph = graph  # IFC-DB's models: the library's calls alone run here (ADR 0027)
-        self.store = store or graph  # the server's own records, apart from the IFC graph (F24 a): every statement
+        # IFC-DB's models: the library's calls alone run here (ADR 0027). None without IFC-DB, where the BIM functions
+        # run on the versions' files alone (tier 2, F59) and nothing is converted into a graph.
+        self.graph = graph
+        own = store if store is not None else graph
+        if own is None:
+            raise ValueError("the service needs the store of the server's own data when it has no graph")
+        self.store = own  # the server's own records, apart from the IFC graph (F24 a): every statement
         self.postgres = postgres  # the areas of the server's own data that have followed to PostgreSQL (ADR 0029)
         self.conversions: ConversionStore = conversion_store(self.store, postgres)
         self.validations: ValidationStore = validation_store(self.store, postgres)
@@ -215,6 +220,13 @@ class IfcGraphService:
         self._lock = asyncio.Semaphore(1)
 
     # -- scheduling ------------------------------------------------------------------------------
+
+    @property
+    def models(self) -> Graph:
+        """IFC-DB's graph of the models, for what only it can answer (tier 3)."""
+        if self.graph is None:
+            raise RuntimeError("this server keeps no models in a graph: IFC-DB is off (tier 3)")
+        return self.graph
 
     @staticmethod
     def wants(file_name: str) -> bool:
@@ -246,6 +258,8 @@ class IfcGraphService:
                 await self._queue_validation(version_id, storage_key, file_name)
             else:
                 await self._record_validation(version_id, storage_key, file_name, checked)
+        if self.graph is None:  # the BIM functions on the file alone (tier 2): no model in a graph
+            return None
         model_id = new_id()
         await self.conversions.create(
             project_id=project_id,
@@ -271,16 +285,19 @@ class IfcGraphService:
         running in another process, so it is given up only when twice the time limit has passed since it started.
         """
         await self.tidy_workcopy()
-        await merging.resume(self)
         given_up = later_iso(-2 * self.settings.ifcgraph_timeout_seconds)
-        await self.conversions.spatial_interrupted(given_up=given_up)
-        rows = await self.conversions.interrupted(given_up=given_up)
+        rows: list[dict[str, Any]] = []
+        # The conversions and the merges are the graph's (tier 3); without it they wait for IFC-DB to come back.
+        if self.graph is not None:
+            await merging.resume(self)
+            await self.conversions.spatial_interrupted(given_up=given_up)
+            rows = await self.conversions.interrupted(given_up=given_up)
         waiting_here = {task.get_name() for task in self._tasks}
         for row in rows:
             if f"ifcgraph-{row['id']}" in waiting_here:
                 continue
             if row["state"] == STATE_RUNNING:
-                await drop_partial(self.graph, row["id"], keep_model=True)
+                await drop_partial(self.models, row["id"], keep_model=True)
                 await self._set_state(row["id"], STATE_QUEUED)
             log.info("ifcgraph_resumed", model_id=row["id"])
             self._start(row["id"], row["storage_key"], row["file_name"])
@@ -333,12 +350,12 @@ class IfcGraphService:
                     source = await asyncio.to_thread(self._prepare_input, storage_key, file_name, workdir)
                     records = workdir / "records.jsonl"
                     header = await self._convert(source, records)
-                    counts = await import_records(self.graph, model_id, records)
+                    counts = await import_records(self.models, model_id, records)
                     if self.workcopy is not None:
                         await self._copy_to_workcopy(model_id, header, records)
                 except Exception as exc:
                     log.warning("ifcgraph_failed", model_id=model_id, error=f"{type(exc).__name__}: {exc}"[:500])
-                    await drop_partial(self.graph, model_id, keep_model=True)
+                    await drop_partial(self.models, model_id, keep_model=True)
                     await self._set_state(model_id, STATE_FAILED, error=f"{type(exc).__name__}: {exc}"[:500])
                     return
                 facts = {name: counts.get(name, header.get(name)) for name in FACTS}
@@ -384,11 +401,11 @@ class IfcGraphService:
         ]
         try:
             await self._in_a_process(command, "the geometry")
-            counts = await import_spatial(self.graph, model_id, records)
+            counts = await import_spatial(self.models, model_id, records)
             failed = await asyncio.to_thread(geometry_issues, records)
-            passed = await model_facts(self.graph, model_id) or {}
+            passed = await model_facts(self.models, model_id) or {}
             await self.conversions.set_fields(model_id, **{name: passed.get(name) for name in SPATIAL_FACTS})
-            await rebuild_point_indexes(SchemaGraph(self.graph), library_dialect(self.graph))
+            await rebuild_point_indexes(SchemaGraph(self.models), library_dialect(self.models))
             key = make_key("geometry", model_id, "jsonl")
             await asyncio.to_thread(self.storage.copy_in, records, key)
             await self.conversions.set_fields(model_id, geometry_key=key)
@@ -414,7 +431,7 @@ class IfcGraphService:
         nothing), and the products whose shape could not be built. A failure here is logged and leaves the report as
         the checks of the file made it."""
         try:
-            unreached = await unreachable(self.graph, model_id)
+            unreached = await unreachable(self.models, model_id)
             issues = [_unreached_issue(node) for node in unreached] + list(geometry)
             await self.conversions.set_fields(
                 model_id,
@@ -441,7 +458,7 @@ class IfcGraphService:
     async def unreached(self, model_id: str) -> list[dict[str, Any]]:
         """The instances of a converted model that no GlobalId reaches, forward or backward, as ``{"step",
         "ifc_class"}`` (IFC-DB F13 a)."""
-        return await unreachable(self.graph, model_id)
+        return await unreachable(self.models, model_id)
 
     async def geometry(
         self, *, model_id: str, lod: str = "full", classes: tuple[str, ...] = (), storey: str | None = None
@@ -940,7 +957,9 @@ class IfcGraphService:
         """Each change's attribute as one string, the instance named by its canonical path in the model of the version
         the change was made on: `<guid>/<path>.<attribute>`, or `#<step>.<attribute>` for an instance no GlobalId
         reaches. A change whose path does not lead to a node there keeps the key its client wrote. None when that
-        version has no finished model in the graph (pruned, or never converted)."""
+        version has no finished model in the graph (pruned, or never converted), or there is no graph (tier 2)."""
+        if self.graph is None:
+            return None
         found = await self.conversions.latest_of_version(document_id=document_id, version_index=version_index)
         if found is None:
             return None
@@ -958,11 +977,11 @@ class IfcGraphService:
                 if change.get("step_id") is not None:
                     step = int(change["step_id"])
                 else:
-                    found = await resolve(self.graph, model_id, str(change.get("guid")), str(change.get("path") or ""))
+                    found = await resolve(self.models, model_id, str(change.get("guid")), str(change.get("path") or ""))
                     step = int(found["step"])
                 if step not in named:
                     try:
-                        canonical = await canonical_path(self.graph, model_id, step)
+                        canonical = await canonical_path(self.models, model_id, step)
                         named[step] = f"{canonical['global_id']}/{canonical['path']}"
                     except PathError:
                         named[step] = f"#{step}"  # in a block, or reached by no GlobalId: its STEP id names it
@@ -1358,9 +1377,9 @@ class IfcGraphService:
         with tempfile.TemporaryDirectory(prefix="ifcgraph-") as tmp:
             records = Path(tmp) / "records.jsonl"
             try:
-                instances = await export_records(self.graph, model_id, records)
+                instances = await export_records(self.models, model_id, records)
             except NotExportable as exc:
-                facts = await self.conversions.get(model_id) or await model_facts(self.graph, model_id) or {}
+                facts = await self.conversions.get(model_id) or await model_facts(self.models, model_id) or {}
                 if (facts.get("state") == STATE_DONE or facts.get("whole")) and not facts.get("lossless"):
                     raise NotExportable(
                         f"{exc}: it was converted with OPENCDE_IFC_DB_LOSSLESS=false or before 3.0.0, and can be "
@@ -1413,7 +1432,10 @@ class IfcGraphService:
     # -- the GTIN of BCF components -----------------------------------------------------------------
 
     async def link_viewpoint(self, *, project_id: str, viewpoint_guid: str) -> int:
-        """The GTIN onto one viewpoint's components from the project's finished models (at viewpoint POST)."""
+        """The GTIN onto one viewpoint's components from the project's finished models (at viewpoint POST); none
+        without a graph, where no model is converted (tier 2)."""
+        if self.graph is None:
+            return 0
         found = 0
         for model_id in await self.conversions.done_model_ids(project_id):
             found += await self._copy_gtin(model_id, project_id, viewpoint_guid=viewpoint_guid)
@@ -1436,7 +1458,7 @@ class IfcGraphService:
         found = 0
         for start in range(0, len(guids), MAX_GLOBAL_IDS):
             values = await property_values(
-                ReadingGraph(self.graph),
+                ReadingGraph(self.models),
                 model_id,
                 pset=self.settings.ifcgraph_gtin_property_set,
                 property=self.settings.ifcgraph_gtin_property,

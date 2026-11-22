@@ -98,7 +98,7 @@ def capabilities(settings: Settings) -> dict[str, Any]:
                     "modes": ["intersection", "clearance"],
                     "max_clashes": settings.ifcgraph_clash_max_clashes,
                 }
-                if settings.ifcgraph_enabled and settings.ifcgraph_clash_enabled and settings.offers("documents")
+                if settings.bim_on and settings.ifcgraph_clash_enabled and settings.offers("documents")
                 else {"enabled": False}
             ),
             "project_administration": {
@@ -130,7 +130,7 @@ def capabilities(settings: Settings) -> dict[str, Any]:
                     "url": "/documents/1.0/documents/{document_id}/versions/{version_index}/ifc-diff/{other_index}",
                     "max_entries": DIFF_MAX_ENTRIES,
                 }
-                if settings.ifcgraph_enabled and settings.offers("documents")
+                if settings.bim_on and settings.offers("documents")
                 else {"enabled": False}
             ),
             "ifc_geometry": (
@@ -150,12 +150,12 @@ def capabilities(settings: Settings) -> dict[str, Any]:
                     "bsdd": settings.bsdd_enabled,
                     "rooms": settings.rooms_enabled,
                 }
-                if settings.ifcgraph_enabled and settings.ifcgraph_validate_uploads and settings.offers("documents")
+                if settings.bim_on and settings.ifcgraph_validate_uploads and settings.offers("documents")
                 else {"enabled": False}
             ),
             "ifc_precheck": (
                 {"enabled": True, "url": "/documents/1.0/projects/{project_id}/ifc-precheck"}
-                if settings.ifcgraph_enabled and settings.ifcgraph_validate_uploads and settings.offers("documents")
+                if settings.bim_on and settings.ifcgraph_validate_uploads and settings.offers("documents")
                 else {"enabled": False}
             ),
             "ifc_changes": (
@@ -164,7 +164,7 @@ def capabilities(settings: Settings) -> dict[str, Any]:
                     "schema": SCHEMA_PATH,
                     "snippet_type": SNIPPET_TYPE,
                     "max_changes": MAX_CHANGES,
-                    "tried": settings.ifcgraph_enabled,
+                    "tried": settings.bim_on,
                     "proposal_url": "/bcf/3.0/projects/{project_id}/topics/{topic_guid}/ifc-proposal",
                     "approve_url": "/bcf/3.0/projects/{project_id}/topics/{topic_guid}/ifc-proposal/approve",
                     "ifc_proposals_url": "/documents/1.0/documents/{document_id}/ifc-proposals",

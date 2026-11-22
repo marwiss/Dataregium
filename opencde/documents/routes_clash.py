@@ -167,7 +167,7 @@ def _report(request: Request, row: dict[str, Any]) -> IfcClashReport:
 
 def clash_service(ifcgraph: IfcGraphService | None, settings: Any) -> IfcGraphService:
     """The service, on a server with the check turned on; 404 otherwise. The routes and the MCP tools both ask it."""
-    if ifcgraph is None or not settings.ifcgraph_enabled or not settings.ifcgraph_clash_enabled:
+    if ifcgraph is None or not settings.ifcgraph_clash_enabled:
         raise HTTPException(404, "The clash check is off on this server")
     return ifcgraph
 
@@ -355,7 +355,7 @@ async def clash_topics(
 
     Needs the `bcf` scope and the `createTopic` action. Nothing is made unless asked for here.
     """
-    if ifcgraph is None or not settings.ifcgraph_enabled or not settings.ifcgraph_clash_enabled:
+    if ifcgraph is None or not settings.ifcgraph_clash_enabled:
         raise HTTPException(404, "The clash check is off on this server")
     ctx.require(ctx.can("createTopic", entity="project"), "createTopic")
     if not is_uuid(clash_id):

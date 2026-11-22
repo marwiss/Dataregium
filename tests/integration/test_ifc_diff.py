@@ -10,20 +10,21 @@ import pytest
 from fastapi.testclient import TestClient
 
 from opencde.main import create_app
-from tests.integration.conftest import GraphTarget
+from opencde.settings import Settings
+from tests.integration.conftest import bim_settings
 from tests.integration.conftest_accounts import World, build_world, login_as
 from tests.integration.test_documents_api import save_metadata, start_upload, upload_file
-from tests.integration.test_ifc_validation import MODEL, WALLS, settings_for, upload
+from tests.integration.test_ifc_validation import MODEL, WALLS, upload
 from tests.integration.test_web_signin import web_sign_in
 from tests.unit.test_ifc_diff import edited_copy
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.both_stores]
 pytest.importorskip("ifcopenshell", reason="the ifc-db extra is not installed")
 
 
 @pytest.fixture
-def ifc_client(graph_target: GraphTarget, clean_database: None, tmp_path: Any) -> Iterator[tuple[TestClient, World]]:
-    settings = settings_for(graph_target, tmp_path, ifcgraph_validate_uploads=False)
+def ifc_client(settings: Settings, clean_database: None, tmp_path: Any) -> Iterator[tuple[TestClient, World]]:
+    settings = bim_settings(settings, ifcgraph_validate_uploads=False)
     world = build_world(settings)
     with TestClient(create_app(settings, startup_wait_seconds=30)) as client:
         yield client, world

@@ -13,14 +13,15 @@ from fastapi.testclient import TestClient
 
 from opencde.ifcgraph.ops import run
 from opencde.main import create_app
-from tests.integration.conftest import GraphTarget
+from opencde.settings import Settings
+from tests.integration.conftest import bim_settings
 from tests.integration.conftest_accounts import build_world, login_as
 from tests.integration.test_ifc_precheck import wait_for
-from tests.integration.test_ifc_validation import checked, settings_for, upload
+from tests.integration.test_ifc_validation import checked, upload
 from tests.integration.test_web_signin import web_sign_in
 from tests.unit.test_ifc_ops import DOOR, FOUR_WALLS, STOREYS, new_model  # skips this module without IfcOpenShell
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.both_stores]
 pytest.importorskip("shapely", reason="the ifc-db extra is not installed")
 
 
@@ -39,9 +40,9 @@ def lower_storey(report: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_an_upload_and_a_precheck_report_the_rooms_beside_their_issues(
-    graph_target: GraphTarget, clean_database: None, tmp_path: Path
+    settings: Settings, clean_database: None, tmp_path: Path
 ) -> None:
-    settings = settings_for(graph_target, tmp_path, rooms_enabled=True)
+    settings = bim_settings(settings, rooms_enabled=True)
     world = build_world(settings)
     file = tmp_path / "box.ifc"
     walls = closed_model(file)
@@ -74,10 +75,8 @@ def test_an_upload_and_a_precheck_report_the_rooms_beside_their_issues(
         assert report["error_count"] == 0 and lower_storey(report) == storey
 
 
-def test_without_the_setting_the_report_has_no_rooms(
-    graph_target: GraphTarget, clean_database: None, tmp_path: Path
-) -> None:
-    settings = settings_for(graph_target, tmp_path)
+def test_without_the_setting_the_report_has_no_rooms(settings: Settings, clean_database: None, tmp_path: Path) -> None:
+    settings = bim_settings(settings)
     world = build_world(settings)
     file = tmp_path / "box.ifc"
     closed_model(file)

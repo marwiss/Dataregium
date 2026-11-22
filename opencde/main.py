@@ -140,16 +140,16 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
         # the IFC graph's connection is made, as the choosers take it, but never connected.
         app.state.uses_graph = uses_graph(settings)
         app.state.storage = make_storage(settings)
-        app.state.ifcgraph = (
+        app.state.ifcgraph = (  # the BIM functions, on the files alone without IFC-DB (tier 2, F59)
             IfcGraphService(
-                app.state.graph,
+                app.state.graph if settings.ifcgraph_enabled else None,
                 app.state.storage,
                 settings,
                 workcopy=app.state.workcopy,
                 store=app.state.store,
                 postgres=app.state.postgres,
             )
-            if settings.ifcgraph_enabled
+            if settings.bim_on
             else None
         )
 

@@ -10,14 +10,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from opencde.main import create_app
+from opencde.settings import Settings
 from tests.conftest import FIXTURES_DIR
-from tests.integration.conftest import GraphTarget
+from tests.integration.conftest import bim_settings
 from tests.integration.conftest_accounts import build_world, login_as
 from tests.integration.helpers import Session
-from tests.integration.test_ifc_validation import settings_for, upload
+from tests.integration.test_ifc_validation import upload
 from tests.integration.test_web_signin import web_sign_in
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.both_stores]
 pytest.importorskip("ifcclash", reason="the ifc-db extra is not installed")
 
 
@@ -48,9 +49,9 @@ def wait_for(client: TestClient, session: Session, url: str) -> dict[str, Any]:
 
 
 def test_a_member_compares_two_versions_and_makes_topics_of_the_clashes(
-    graph_target: GraphTarget, clean_database: None, tmp_path: Any
+    settings: Settings, clean_database: None, tmp_path: Any
 ) -> None:
-    settings = settings_for(graph_target, tmp_path, ifcgraph_clash_enabled=True, ifcgraph_validate_uploads=False)
+    settings = bim_settings(settings, ifcgraph_clash_enabled=True, ifcgraph_validate_uploads=False)
     world = build_world(settings)
     with TestClient(create_app(settings, startup_wait_seconds=30)) as client:
         editor = login_as(client, world, "editor")
@@ -108,9 +109,9 @@ def test_a_member_compares_two_versions_and_makes_topics_of_the_clashes(
 
 
 def test_a_version_that_is_not_an_ifc_file_fails_the_check(
-    graph_target: GraphTarget, clean_database: None, tmp_path: Any
+    settings: Settings, clean_database: None, tmp_path: Any
 ) -> None:
-    settings = settings_for(graph_target, tmp_path, ifcgraph_clash_enabled=True, ifcgraph_validate_uploads=False)
+    settings = bim_settings(settings, ifcgraph_clash_enabled=True, ifcgraph_validate_uploads=False)
     world = build_world(settings)
     with TestClient(create_app(settings, startup_wait_seconds=30)) as client:
         editor = login_as(client, world, "editor")

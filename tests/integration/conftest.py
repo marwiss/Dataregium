@@ -158,6 +158,14 @@ def settings(graph_target: GraphTarget, tmp_path: Path, store_kind: str, request
     )
 
 
+def bim_settings(settings: Settings, **extra: Any) -> Settings:
+    """The settings of a test of the BIM functions: on the files alone, with no graph, when PostgreSQL holds the
+    server's own data (tier 2, F59), and with IFC-DB's graph otherwise (tier 3); several parts for the fixture model
+    and time for the workers."""
+    on: dict[str, Any] = {"bim_enabled": True} if settings.store_url is not None else {"ifcgraph_enabled": True}
+    return settings.model_copy(update={"upload_part_bytes": 4096, "ifcgraph_timeout_seconds": 300, **on, **extra})
+
+
 @pytest.fixture
 def clean_database(graph_target: GraphTarget, settings: Settings, request: pytest.FixtureRequest) -> None:
     """Empty the database with the sync driver (safe from any event loop), or PostgreSQL's tables when the server's

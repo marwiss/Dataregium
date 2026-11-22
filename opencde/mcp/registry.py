@@ -114,11 +114,14 @@ class Tool:
     run: Callable[[ToolContext, Any], Awaitable[dict[str, Any]]]
     scope: str = MCP_READ
     read_only: bool = True
-    needs_ifcgraph: bool = False  # listed and called only while the IFC-DB module is on, which tries change sets
+    needs_ifcgraph: bool = False  # listed and called only while the BIM functions are on, which try change sets
+    needs_graph: bool = False  # and only while IFC-DB's graph is there (tier 3), for what it alone answers
 
     def offered(self, settings: Settings) -> bool:
         """Whether the tool is on this server: what is not on is not listed."""
-        return settings.ifcgraph_enabled or not self.needs_ifcgraph
+        if self.needs_graph and not settings.ifcgraph_enabled:
+            return False
+        return settings.bim_on or not self.needs_ifcgraph
 
     def definition(self) -> dict[str, Any]:
         return {

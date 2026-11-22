@@ -192,9 +192,9 @@ async def _may_approve(topic: TopicCtx, teams: TeamStore, node: dict[str, Any]) 
 )
 async def proposal_get(topic: TopicCtx, ifcgraph: IfcGraphDep) -> IfcProposalReport:
     """The state of the trial and its findings. 404 when the topic's snippet is not a change set that was tried, or
-    the IFC-DB module is off."""
+    the BIM functions are off."""
     if ifcgraph is None:
-        raise HTTPException(404, "Change sets are not tried on this server: the IFC-DB module is off")
+        raise HTTPException(404, "Change sets are not tried on this server: the BIM functions are off")
     node = await ifcgraph.proposal(user_id=topic.user_id, project_id=topic.project_id, topic_guid=topic.guid)
     if node is None:
         raise HTTPException(404, "This topic has no change set that was tried")
@@ -243,7 +243,7 @@ async def proposal_approve(
     `version_conflict` with the colliding attributes in `conflicts`. 403 for other roles, 409 when the trial is not
     clean or was approved already."""
     if ifcgraph is None:
-        raise HTTPException(404, "Change sets are not tried on this server: the IFC-DB module is off")
+        raise HTTPException(404, "Change sets are not tried on this server: the BIM functions are off")
     node = await ifcgraph.proposal(user_id=topic.user_id, project_id=topic.project_id, topic_guid=topic.guid)
     if node is None:
         raise HTTPException(404, "This topic has no change set that was tried")

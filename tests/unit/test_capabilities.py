@@ -179,6 +179,28 @@ def test_a_server_of_tier_1_offers_the_documents_api_and_says_so(tmp_path: Path)
         assert body["bcf_versions"] == [] and client.get("/bcf/versions").status_code == 404
 
 
+def test_the_bim_functions_of_tier_2_are_announced_without_a_graph(tmp_path: Path) -> None:
+    """F59: in tier 2 the checks, the precheck, the diff, the clash check and the change sets' trial run on the
+    files, and what only IFC-DB's graph answers (named queries, geometry, merge, the unreachable) stays off."""
+    settings = make_settings(
+        tmp_path,
+        tier="bim-gis",
+        store_url="postgresql://cde@127.0.0.1:9/cde",
+        bim_enabled=True,
+        ifcgraph_clash_enabled=True,
+    )
+    with TestClient(create_app(settings, startup_wait_seconds=0)) as client:
+        extensions = client.get("/.well-known/dataregium").json()["extensions"]
+        on = ("ifc_validation", "ifc_precheck", "ifc_diff", "ifc_clash")
+        assert all(extensions[name]["enabled"] for name in on), {name: extensions[name] for name in on}
+        assert extensions["ifc_changes"]["tried"] is True and extensions["ifc_changes"]["unreachable_url"] is None
+        for name in ("ifc_queries", "ifc_geometry", "ifc_merge"):
+            assert extensions[name] == {"enabled": False}, name
+        assert extensions["ifcgraph"]["enabled"] is False and extensions["ifcgraph"]["graph_store"] is None
+        service = client.app.state.ifcgraph  # ty: ignore[unresolved-attribute]
+        assert service is not None and service.graph is None, "the service on the files alone"
+
+
 def test_the_proposals_against_a_document_are_announced_beside_the_trial(client: TestClient) -> None:
     changes = client.get("/.well-known/dataregium").json()["extensions"]["ifc_changes"]
     assert changes["proposal_url"] == "/bcf/3.0/projects/{project_id}/topics/{topic_guid}/ifc-proposal"

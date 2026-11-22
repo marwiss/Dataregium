@@ -42,6 +42,7 @@ def test_a_tier_holds_back_what_is_above_it_and_tier_1_offers_the_documents_api(
     for values, words in (
         ({"tier": "documents", "apis": ["documents", "bcf-2.1"]}, "OPENCDE_APIS names bcf-2.1"),
         ({"tier": "documents", "mcp_enabled": True}, "OPENCDE_MCP_ENABLED is tier 2"),
+        ({"tier": "documents", "bim_enabled": True}, "OPENCDE_BIM_ENABLED is tier 2"),
         ({"tier": "bim-gis", "ifcgraph_enabled": True}, "OPENCDE_IFC_DB_ENABLED is tier 3"),
     ):
         with pytest.raises(ValidationError, match=words):
@@ -49,6 +50,9 @@ def test_a_tier_holds_back_what_is_above_it_and_tier_1_offers_the_documents_api(
     with pytest.raises(ValidationError, match="PostgreSQL alone"):
         _settings(environment="development", tier="bim-gis")
     assert _settings(environment="development", tier="experimental", ifcgraph_enabled=True).uses_graph
+    bim = _settings(**postgres, tier="bim-gis", bim_enabled=True)
+    assert bim.bim_on and not bim.uses_graph, "the BIM functions of tier 2 on the files, without a graph (F59)"
+    assert _settings(environment="development", ifcgraph_enabled=True).bim_on, "IFC-DB brings them along"
 
 
 def test_production_with_postgresql_needs_its_password_and_a_graph_password_only_with_a_graph() -> None:
