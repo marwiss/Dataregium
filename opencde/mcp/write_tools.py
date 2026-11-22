@@ -1,8 +1,8 @@
 # This file was generated with the assistance of an AI coding tool.
 """Dataspatium's write tools as the MCP endpoint offers them (ADR 0028, the design's §2): a copy, kept in step by hand.
 
-A copy of ``src/ai/write-tools.js`` (Dataspatium, branch f43, commit 9dc4f9f of 2026-11-13, with its curtain walls
-and ``set_responsible_party``): the tools' schemas and
+A copy of ``src/ai/write-tools.js`` (Dataspatium, branch f43, commit 9dc4f9f of 2026-11-13, unchanged at main
+ffd1f6e of 2026-11-22, with its curtain walls and ``set_responsible_party``): the tools' schemas and
 descriptions (``TOOLS``), ``build()`` with its checks, which turns one call into one operation in the form
 ``dataspatium-tools/1`` (the defaults filled in, the numbers checked, the texts cut at 200 characters, an optional
 field on the operation only when given), ``call()``, which appends the operation to the open change set with the

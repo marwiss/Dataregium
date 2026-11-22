@@ -7,8 +7,9 @@ Dataspatium's 437982f on IFC4 and IFC4X3, layered and door, window, column and c
 elements and stairs of create_element, wall joins, base quantities and the common sets, a storey's description, a
 room's number and type, a material's category, the vertical datum, elements changed in place, the templates that hold
 a standard set, and a door moved with its opening while the site, the building and the storeys stay; and, from 9dc4f9f, a
-curtain wall with its parts, the responsible party and a deletion that takes a whole's parts. The trial around
-it is proved against a database in ``tests/integration/test_ifc_proposal.py``."""
+curtain wall with its parts, the responsible party and a deletion that takes a whole's parts; and, from 2cbe038,
+the wall of an opening that nothing fills. The trial around it is proved against a database in
+``tests/integration/test_ifc_proposal.py``."""
 
 from __future__ import annotations
 
@@ -974,6 +975,19 @@ def test_a_door_moves_with_its_opening_and_the_site_building_and_storeys_stay(sc
     for whole in (*model.by_type("IfcSite"), *model.by_type("IfcBuilding"), model.by_type("IfcBuildingStorey")[0]):
         answer = run(model, [{**step, "ids": [whole.GlobalId]}], proposer="anna")
         assert answer["failed"]["error"].startswith(f"{whole.is_a()} #{whole.id()} {whole.Name!r} is not moved: ")
+
+
+def test_the_wall_of_a_door_and_of_an_opening_that_nothing_fills_is_found() -> None:
+    """Dataspatium's 2cbe038: ``host_of`` is defined once, as the one that finds the wall of an opening that nothing
+    fills as well as the wall a door or window is in, so that a hole cut in a wall reaches the wall's spaces too."""
+    model = new_model()
+    built = run(model, [STOREYS, WALL, DOOR, {**DOOR, "offset": 5, "fill": None}], proposer="anna")
+    assert built["failed"] is None, built
+    wall, door, hole = (made(model, built, ref) for ref in ("new-1", "new-2", "new-3"))
+    assert (door.is_a(), hole.is_a(), hole.HasFillings) == ("IfcDoor", "IfcOpeningElement", ())
+    change_set = ServerChangeSet(model, "anna")
+    assert [change_set.host_of(e).id() for e in (door, hole)] == [wall.id(), wall.id()]
+    assert change_set.host_of(wall) is None
 
 
 CURTAIN = {"start": [0, 0], "end": [6, 0], "height": 3, "base": 0, "bays": 4, "bay_width": None, "rows": 2,

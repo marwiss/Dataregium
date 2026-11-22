@@ -2,7 +2,7 @@
 """Dataspatium's write tools on an IFC model and its topology of the walls, with Dataspatium's own code (ADR 0021).
 
 A copy of Dataspatium's class ``_ChangeSet`` and of its topology (``_ifc_topology``), with the module-level helpers
-they call (``python/dataspatium.py``, branch f43, commit 9dc4f9f of 2026-11-13), kept in step by hand, so that one
+they call (``python/dataspatium.py``, main, commit ffd1f6e of 2026-11-22), kept in step by hand, so that one
 list of operations gives the same model in the app and on the server, and the server finds the rooms the app finds.
 A change set that carries the operations as ``ops`` (``documents/changes.py``) is tried by the apply worker
 (``apply.py``), which runs them with :func:`run` on the base version's file before its changes; the topology worker
@@ -48,8 +48,8 @@ Against the original only this differs, so that the next copy is a diff away:
   GlobalId; the lines that do so are marked ``# Dataregium``;
 - ruff formats the copy in lines of 120 characters and lets its idioms be (``pyproject.toml``), and forty-two
   comments quiet bandit (``# nosec B110`` and ``B112``, seventeen) and ty (``# ty: ignore``, twenty-five); no other
-  statement changed. The original defines ``unbound`` and ``host_of`` twice in ``_ChangeSet``, where the second
-  counts, and so does the copy.
+  statement changed. ``unbound`` and ``host_of`` are defined once each, as in the original since its 2cbe038: the
+  later ``unbound`` and the earlier ``host_of``, which also finds the wall of an opening that nothing fills.
 """
 
 from __future__ import annotations
@@ -1442,12 +1442,6 @@ class _ChangeSet:
         if self.owner is not None and rel.OwnerHistory is None:
             rel.OwnerHistory = self.owner
         return rel
-
-    def unbound(self, rel):
-        """Remove a space boundary and its connection geometry."""
-        import ifcopenshell.api.boundary
-
-        ifcopenshell.api.boundary.remove_boundary(self.m, boundary=rel)
 
     def face_geometry(self, space, face):
         """The IfcConnectionSurfaceGeometry of a face in the space's object coordinates, in file units. face: "o" (the plane's origin),
@@ -2844,7 +2838,8 @@ class _ChangeSet:
         return e is not None and (e.is_a("IfcWall") or e.is_a("IfcDoor") or e.is_a("IfcWindow"))
 
     def unbound(self, b):
-        """Remove a space boundary with its connection geometry, when nothing else uses that."""
+        """Remove a space boundary with its connection geometry, when nothing else uses that (the one definition: the boundaries
+        after a move and the faces of the space boundaries both use it)."""
         geometry = getattr(b, "ConnectionGeometry", None)
         self.m.remove(b)
         self.drop(geometry)
@@ -2871,16 +2866,6 @@ class _ChangeSet:
         for e, x in want:
             self.bound(space, e, x)
         return True
-
-    @staticmethod
-    def host_of(e):
-        """The wall (or other element) whose opening a door or window fills; None."""
-        o = next((r.RelatingOpeningElement for r in (getattr(e, "FillsVoids", None) or ())), None)
-        return (
-            next((r.RelatingBuildingElement for r in (getattr(o, "VoidsElements", None) or ())), None)
-            if o is not None
-            else None
-        )
 
     def loosen(self, space, outline, walls, lines, tol, meets, why):
         """A space the moved walls no longer fit keeps its outline and quantities, with a note: its boundaries to the moved walls whose
