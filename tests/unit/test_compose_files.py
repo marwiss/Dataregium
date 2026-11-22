@@ -16,9 +16,12 @@ DOCKER = shutil.which("docker")
 pytestmark = pytest.mark.skipif(DOCKER is None, reason="needs Docker's command line")
 
 ENV = """\
-OPENCDE_GRAPH_PASSWORD=a-password-for-this-test
+OPENCDE_STORE_PASSWORD=a-password-for-this-test
+OPENCDE_GRAPH_PASSWORD=another-password-for-this-test
 OPENCDE_DOMAIN=cde.example.org
 """
+GRAPH = "COMPOSE_PROFILES=graph\n"  # tier 3: IFC-DB's models in a graph beside PostgreSQL
+STORE = "postgresql://opencde@store:5432/opencde"
 
 
 def _config(tmp_path: Path, *overlays: str, extra_env: str = "") -> dict:
@@ -39,21 +42,37 @@ def _config(tmp_path: Path, *overlays: str, extra_env: str = "") -> dict:
     return json.loads(done.stdout)["services"]
 
 
-def test_the_stack_has_its_database_by_default(tmp_path: Path) -> None:
-    services = _config(tmp_path, "compose.prod.yaml")
-    assert {"graph", "api", "proxy", "backup"} <= set(services)
+def test_the_stack_has_postgresql_and_the_graph_comes_with_its_profile(tmp_path: Path) -> None:
+    """F73 a: PostgreSQL holds the server's own data in every stack, unpublished; the graph of tier 3 starts only with
+    COMPOSE_PROFILES=graph, which a stack of tiers 1 and 2 never names."""
+    services = _config(tmp_path / "postgres", "compose.prod.yaml")
+    assert {"store", "api", "proxy", "backup"} <= set(services) and "graph" not in services
+    assert services["store"]["image"].startswith("docker.io/library/postgres:") and "ports" not in services["store"]
+    for name in ("api", "backup"):
+        assert services[name]["environment"]["OPENCDE_STORE_URL"] == STORE
+        assert services[name]["depends_on"]["store"]["condition"] == "service_healthy"
+    services = _config(tmp_path / "graph", "compose.prod.yaml", extra_env=GRAPH)
     assert services["api"]["environment"]["OPENCDE_GRAPH_URI"] == "bolt://graph:7687"
     assert services["backup"]["environment"]["OPENCDE_GRAPH_URI"] == "bolt://graph:7687"
     assert services["api"]["depends_on"]["graph"]["condition"] == "service_healthy"
+    assert "ports" not in services["graph"] and services["api"]["environment"]["OPENCDE_STORE_URL"] == STORE
+
+
+def test_development_publishes_the_databases_on_the_loopback_only(tmp_path: Path) -> None:
+    services = _config(tmp_path / "postgres", "compose.dev.yaml")
+    (published,) = services["store"]["ports"]
+    assert published["host_ip"] == "127.0.0.1" and published["published"] == "5442" and "graph" not in services
+    services = _config(tmp_path / "graph", "compose.dev.yaml", extra_env=GRAPH)
+    assert {port["host_ip"] for port in services["graph"]["ports"]} == {"127.0.0.1"}
 
 
 def test_the_local_engine_publishes_the_api_on_the_loopback_only(tmp_path: Path) -> None:
-    services = _config(tmp_path, "compose.local.yaml")
+    services = _config(tmp_path, "compose.local.yaml", extra_env=GRAPH)  # opencde init --local names the graph
     assert services["api"]["environment"]["OPENCDE_ENVIRONMENT"] == "local"
     assert services["api"]["environment"]["OPENCDE_PUBLIC_URL"] == "http://127.0.0.1:8000"
     (published,) = services["api"]["ports"]
     assert published["host_ip"] == "127.0.0.1" and published["published"] == "8000"
-    assert "ports" not in services["graph"], "the database is never published"
+    assert "ports" not in services["graph"] and "ports" not in services["store"], "the databases are never published"
 
 
 def test_the_working_copy_joins_the_private_network_unpublished(tmp_path: Path) -> None:
@@ -65,8 +84,8 @@ def test_the_working_copy_joins_the_private_network_unpublished(tmp_path: Path) 
 
 def test_a_small_server_caps_memgraph_and_limits_the_containers(tmp_path: Path) -> None:
     stack = ("compose.prod.yaml", "compose.memgraph.yaml")
-    flags = _config(tmp_path / "memgraph", *stack)["graph"]["command"]
-    services = _config(tmp_path / "small", *stack, "compose.small.yaml")
+    flags = _config(tmp_path / "memgraph", *stack, extra_env=GRAPH)["graph"]["command"]
+    services = _config(tmp_path / "small", *stack, "compose.small.yaml", extra_env=GRAPH)
     assert services["graph"]["command"] == [
         "--memory-limit=1536" if flag == "--memory-limit=0" else flag for flag in flags
     ], "compose.memgraph.yaml's flags, with a cap"
@@ -80,7 +99,7 @@ def test_an_external_database_leaves_the_container_out(tmp_path: Path) -> None:
         tmp_path,
         "compose.prod.yaml",
         "compose.external-db.yaml",
-        extra_env=f"OPENCDE_STACK_GRAPH_URI={address}\n",
+        extra_env=f"OPENCDE_STACK_GRAPH_URI={address}\n" + GRAPH,
     )
     assert "graph" not in services
     assert services["api"]["environment"]["OPENCDE_GRAPH_URI"] == address

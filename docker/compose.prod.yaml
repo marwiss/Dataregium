@@ -1,6 +1,7 @@
 # Production overlay: Caddy terminates TLS with automatic Let's Encrypt
 # certificates and proxies to the API; the image comes from GHCR; a backup
-# sidecar writes a dated backup folder every night.
+# sidecar writes a dated backup folder every night, of PostgreSQL and, in tier 3,
+# of the graph's models.
 #
 #   uv run opencde init --public-url https://cde.example.org   (writes .env)
 #   docker compose up -d                          (.env: COMPOSE_FILE=docker/compose.yaml:docker/compose.prod.yaml)
@@ -49,14 +50,17 @@ services:
     healthcheck:
       disable: true
     depends_on:
+      store:
+        condition: service_healthy
       graph:
         condition: service_healthy
-        required: false  # compose.external-db.yaml leaves the container out
+        required: false  # only in tier 3, and compose.external-db.yaml leaves the container out
       api:
         condition: service_healthy  # the server makes /data's folders before the first backup reads them
     env_file:
       - ../.env
     environment:
+      OPENCDE_STORE_URL: "${OPENCDE_STACK_STORE_URL-postgresql://opencde@store:5432/opencde}"
       OPENCDE_GRAPH_URI: "${OPENCDE_STACK_GRAPH_URI:-bolt://graph:7687}"
       OPENCDE_DATA_DIR: /data
     volumes:

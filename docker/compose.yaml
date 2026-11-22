@@ -1,12 +1,12 @@
-# Base stack: the API and a Neo4j Community database on a private network.
+# Base stack: the API and its PostgreSQL, which holds the server's own data, on a private network (tiers 1 and 2,
+# F58 a). Tier 3 adds a Neo4j Community database for IFC-DB's models: COMPOSE_PROFILES=graph in .env.
 # Nothing is published to the host here. Combine with one of:
 #   compose.dev.yaml       local development on http://127.0.0.1:8000
 #   compose.local.yaml     the local engine on a person's computer, for Dataspatium (opencde init --local)
 #   compose.prod.yaml      production behind Caddy with automatic TLS and nightly backups
 #   compose.tunnel.yaml    public https through a Cloudflare Tunnel for client tests
-#   compose.memgraph.yaml  Memgraph instead of Neo4j (add to any of the above)
-#   compose.small.yaml     memory limits for a small server (add after compose.memgraph.yaml)
-#   compose.workcopy.yaml  a Memgraph working copy beside the archive (add to any of the above)
+#   compose.memgraph.yaml  Memgraph instead of Neo4j as the graph (add to any of the above)
+#   compose.workcopy.yaml  a Memgraph working copy beside the graph (add to any of the above)
 #
 #   docker compose up -d
 #
@@ -19,11 +19,34 @@
 name: dataregium
 
 services:
+  store:
+    image: docker.io/library/postgres:17.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: opencde
+      POSTGRES_DB: opencde
+      POSTGRES_PASSWORD: "${OPENCDE_STORE_PASSWORD:?Set OPENCDE_STORE_PASSWORD in .env (opencde init writes one)}"
+    volumes:
+      - store-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opencde -d opencde || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
   graph:
+    # Tier 3 only, with COMPOSE_PROFILES=graph. Compose reads the password also while the profile is off, so it is
+    # not demanded here: the server refuses to start without it when it uses the graph, and so does Neo4j.
+    profiles: ["graph"]
     image: docker.io/library/neo4j:5.26.32-community
     restart: unless-stopped
     environment:
-      NEO4J_AUTH: "${OPENCDE_GRAPH_USER:-neo4j}/${OPENCDE_GRAPH_PASSWORD:?Set OPENCDE_GRAPH_PASSWORD in .env}"
+      NEO4J_AUTH: "${OPENCDE_GRAPH_USER:-neo4j}/${OPENCDE_GRAPH_PASSWORD:-}"
       NEO4J_dbms_security_auth__minimum__password__length: "16"
       NEO4J_server_memory_heap_initial__size: "${NEO4J_HEAP:-512m}"
       NEO4J_server_memory_heap_max__size: "${NEO4J_HEAP:-512m}"
@@ -51,12 +74,15 @@ services:
         OPENCDE_GHERKIN: ${OPENCDE_GHERKIN:-0}  # 1 builds in buildingSMART's ifc-gherkin-rules (ADR 0012)
     restart: unless-stopped
     depends_on:
+      store:
+        condition: service_healthy
       graph:
         condition: service_healthy
-        required: false  # compose.external-db.yaml leaves the container out
+        required: false  # only in tier 3 (COMPOSE_PROFILES=graph), and compose.external-db.yaml leaves it out
     env_file:
       - ../.env
     environment:
+      OPENCDE_STORE_URL: "${OPENCDE_STACK_STORE_URL-postgresql://opencde@store:5432/opencde}"
       OPENCDE_GRAPH_URI: "${OPENCDE_STACK_GRAPH_URI:-bolt://graph:7687}"
       OPENCDE_DATA_DIR: /data
     volumes:
@@ -74,6 +100,7 @@ services:
       - no-new-privileges:true
 
 volumes:
+  store-data:
   graph-data:
   graph-logs:
   api-data:

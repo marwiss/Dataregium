@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 import typer
 
 from opencde import __version__
-from opencde.settings import LOOPBACK_HOSTS
+from opencde.settings import LOOPBACK_HOSTS, Tier
 
 app = typer.Typer(no_args_is_help=True, help="Dataregium OpenCDE server.", rich_markup_mode="markdown")
 user_app = typer.Typer(no_args_is_help=True, help="Manage users and their project roles.")
@@ -203,6 +203,22 @@ def _say_what_comes_next(url: str, *, dev: bool) -> None:
         typer.echo(f"          {step}")
 
 
+def _graph_lines(*, dev: bool) -> list[str]:
+    """Tier 3's graph for IFC-DB's models beside PostgreSQL (F58 a): Neo4j in the stack, which its profile starts."""
+    return [
+        "OPENCDE_IFC_DB_ENABLED=true",
+        "OPENCDE_GRAPH_DIALECT=neo4j",
+        # 127.0.0.1 rather than localhost: Windows resolves localhost to ::1 first, where Docker does not listen.
+        "OPENCDE_GRAPH_URI=bolt://127.0.0.1:7697" if dev else "OPENCDE_GRAPH_URI=bolt://graph:7687",
+        "OPENCDE_GRAPH_USER=neo4j",
+        f"OPENCDE_GRAPH_PASSWORD={secrets.token_urlsafe(24)}",
+        "NEO4J_HEAP=512m",
+        "NEO4J_PAGECACHE=256m",
+        *(("OPENCDE_DEV_NEO4J_HTTP_PORT=7484", "OPENCDE_DEV_NEO4J_BOLT_PORT=7697") if dev else ()),
+        "COMPOSE_PROFILES=graph",
+    ]
+
+
 @app.command()
 def init(
     dev: Annotated[bool, typer.Option("--dev", help="Local development on http://127.0.0.1:8000.")] = False,
@@ -210,6 +226,13 @@ def init(
         bool, typer.Option("--local", help="The local engine on this computer, for Dataspatium (ADR 0023).")
     ] = False,
     public_url: Annotated[str | None, typer.Option(help="Public https URL of the server (production).")] = None,
+    tier: Annotated[
+        Tier | None,
+        typer.Option(
+            help="What the server offers: documents (1), bim-gis (2) or experimental (3, IFC-DB's graph beside "
+            "PostgreSQL). bim-gis, unless the guide's answers ask for the graph; --local is experimental."
+        ),
+    ] = None,
     force: Annotated[bool, typer.Option(help="Overwrite an existing .env.")] = False,
     path: Annotated[Path, typer.Option(help="Where to write the file.")] = Path(".env"),
 ) -> None:
@@ -218,6 +241,8 @@ def init(
     if path.exists() and not force:
         raise _fail(f"{path} exists; use --force to overwrite")
     if local:
+        if tier not in (None, Tier.EXPERIMENTAL):
+            raise _fail("--local is tier 3 (experimental): the local engine keeps the models in its graph")
         _write_local_env(path)
         return
     extra: list[str] = []
@@ -230,27 +255,29 @@ def init(
     url = "http://127.0.0.1:8000" if dev else (public_url or "").rstrip("/")
     if not dev and not url.startswith("https://"):
         raise _fail("the public URL must start with https:// in production")
+    graph = "OPENCDE_IFC_DB_ENABLED=true" in extra  # the guide's answers ask for the graph
+    chosen = tier or (Tier.EXPERIMENTAL if graph else Tier.BIM_GIS)
+    if graph and chosen is not Tier.EXPERIMENTAL:
+        raise _fail("IFC-DB's graph is tier 3: give --tier experimental, or answer no to the graph")
     lines = [
         "# Written by `opencde init`. Keep this file private; it is git-ignored.",
         f"OPENCDE_ENVIRONMENT={'development' if dev else 'production'}",
         f"OPENCDE_PUBLIC_URL={url}",
+        f"OPENCDE_TIER={chosen.value}",
         f"OPENCDE_SECRET_KEY={secrets.token_urlsafe(48)}",
-        "OPENCDE_GRAPH_DIALECT=neo4j",
+        # The server's own data in PostgreSQL (F58 a); inside docker compose the stack's own address replaces this.
         # 127.0.0.1 rather than localhost: Windows resolves localhost to ::1 first, where Docker does not listen.
-        "OPENCDE_GRAPH_URI=bolt://127.0.0.1:7697" if dev else "OPENCDE_GRAPH_URI=bolt://graph:7687",
-        "OPENCDE_GRAPH_USER=neo4j",
-        f"OPENCDE_GRAPH_PASSWORD={secrets.token_urlsafe(24)}",
+        "OPENCDE_STORE_URL=postgresql://opencde@127.0.0.1:5442/opencde"
+        if dev
+        else "OPENCDE_STORE_URL=postgresql://opencde@store:5432/opencde",
+        f"OPENCDE_STORE_PASSWORD={secrets.token_urlsafe(24)}",
         "OPENCDE_LOG_LEVEL=DEBUG" if dev else "OPENCDE_LOG_LEVEL=INFO",
         "OPENCDE_LOG_JSON=false" if dev else "OPENCDE_LOG_JSON=true",
         'OPENCDE_CORS_ORIGINS=["*"]',
         'OPENCDE_TRUSTED_PROXIES=["127.0.0.1"]' if dev else 'OPENCDE_TRUSTED_PROXIES=["127.0.0.1", "172.16.0.0/12"]',
         "OPENCDE_ALLOW_LOCALHOST_REDIRECTS=true" if dev else "OPENCDE_ALLOW_LOCALHOST_REDIRECTS=false",
         "OPENCDE_DYNAMIC_CLIENT_REGISTRATION=true" if dev else "OPENCDE_DYNAMIC_CLIENT_REGISTRATION=false",
-        "NEO4J_HEAP=512m",
-        "NEO4J_PAGECACHE=256m",
-        "OPENCDE_DEV_PORT=8000",
-        "OPENCDE_DEV_NEO4J_HTTP_PORT=7484",
-        "OPENCDE_DEV_NEO4J_BOLT_PORT=7697",
+        *(("OPENCDE_DEV_PORT=8000", "OPENCDE_DEV_POSTGRES_PORT=5442") if dev else ()),
         # Which Compose files `docker compose` combines; the files live in docker/.
         "COMPOSE_PATH_SEPARATOR=:",
         "COMPOSE_FILE=docker/compose.yaml:docker/compose.dev.yaml"
@@ -259,6 +286,8 @@ def init(
     ]
     if not dev:
         lines.append(f"OPENCDE_DOMAIN={url.removeprefix('https://')}")
+    if chosen is Tier.EXPERIMENTAL:
+        lines += _graph_lines(dev=dev)
     # A value asked for replaces the line that says otherwise.
     names = {line.split("=", 1)[0] for line in extra}
     lines = [line for line in lines if line.split("=", 1)[0] not in names] + extra
@@ -276,7 +305,10 @@ def _write_local_env(path: Path) -> None:
         "# Written by `opencde init --local`: the local engine on this computer. Keep this file private.",
         "OPENCDE_ENVIRONMENT=local",
         "OPENCDE_PUBLIC_URL=http://127.0.0.1:8000",
+        "OPENCDE_TIER=experimental",  # the models in the graph, beside PostgreSQL (F58 a)
         f"OPENCDE_SECRET_KEY={secrets.token_urlsafe(48)}",
+        "OPENCDE_STORE_URL=postgresql://opencde@store:5432/opencde",
+        f"OPENCDE_STORE_PASSWORD={secrets.token_urlsafe(24)}",
         "OPENCDE_GRAPH_DIALECT=neo4j",
         "OPENCDE_GRAPH_URI=bolt://graph:7687",
         "OPENCDE_GRAPH_USER=neo4j",
@@ -296,6 +328,7 @@ def _write_local_env(path: Path) -> None:
         "OPENCDE_LOCAL_PORT=8000",
         "COMPOSE_PATH_SEPARATOR=:",
         "COMPOSE_FILE=docker/compose.yaml:docker/compose.local.yaml",
+        "COMPOSE_PROFILES=graph",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     typer.secho(f"OK      wrote {path}", fg=typer.colors.GREEN)

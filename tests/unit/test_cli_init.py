@@ -1,5 +1,6 @@
 # This file was generated with the assistance of an AI coding tool.
-"""`opencde init`: the two direct ways, the guide that asks, and what it says comes next."""
+"""`opencde init`: the two direct ways, the guide that asks, and what it says comes next; PostgreSQL for the
+server's own data, and the graph only in tier 3 (F58 a, F73 a, OB-46 b)."""
 
 from __future__ import annotations
 
@@ -33,6 +34,37 @@ def test_the_direct_ways_ask_nothing(tmp_path: Path) -> None:
     assert _env(production)["OPENCDE_DOMAIN"] == "cde.example.org"
 
 
+def test_postgresql_holds_the_servers_own_data_and_the_graph_comes_with_tier_3(tmp_path: Path) -> None:
+    """Tier 2 unless asked: PostgreSQL alone, on the stack's port for the host in development, with a password of its
+    own and no graph; tier 3 adds the graph for IFC-DB's models and its Compose profile."""
+    from opencde.settings import Settings, Tier
+
+    development = tmp_path / "development.env"
+    assert CliRunner().invoke(app, ["init", "--dev", "--path", str(development)]).exit_code == 0
+    env = _env(development)
+    assert (
+        env["OPENCDE_TIER"] == "bim-gis" and env["OPENCDE_STORE_URL"] == "postgresql://opencde@127.0.0.1:5442/opencde"
+    )
+    assert len(env["OPENCDE_STORE_PASSWORD"]) >= 24 and env["OPENCDE_DEV_POSTGRES_PORT"] == "5442"
+    assert not [name for name in env if name.startswith(("OPENCDE_GRAPH_", "NEO4J_", "COMPOSE_PROFILES"))]
+    settings = Settings(_env_file=development)  # type: ignore[call-arg]
+    assert settings.tier is Tier.BIM_GIS and not settings.uses_graph
+    production = tmp_path / "production.env"
+    command = ["init", "--public-url", "https://cde.example.org", "--tier", "experimental", "--path", str(production)]
+    assert CliRunner().invoke(app, command).exit_code == 0
+    env = _env(production)
+    assert env["OPENCDE_STORE_URL"] == "postgresql://opencde@store:5432/opencde" and env["COMPOSE_PROFILES"] == "graph"
+    assert env["OPENCDE_IFC_DB_ENABLED"] == "true" and env["OPENCDE_GRAPH_URI"] == "bolt://graph:7687"
+    assert len(env["OPENCDE_GRAPH_PASSWORD"]) >= 24 and "OPENCDE_DEV_PORT" not in env
+    settings = Settings(_env_file=production)  # type: ignore[call-arg]
+    assert settings.is_production and settings.tier is Tier.EXPERIMENTAL and settings.uses_graph
+    documents = tmp_path / "documents.env"
+    assert CliRunner().invoke(app, ["init", "--dev", "--tier", "documents", "--path", str(documents)]).exit_code == 0
+    assert Settings(_env_file=documents).apis == ["documents"]  # type: ignore[call-arg]
+    refused = CliRunner().invoke(app, ["init", "--local", "--tier", "bim-gis", "--path", str(tmp_path / "l.env")])
+    assert refused.exit_code != 0 and "tier 3" in refused.output
+
+
 def test_the_local_engine_gets_random_passwords_and_named_origins(tmp_path: Path) -> None:
     local = tmp_path / "local.env"
     done = CliRunner().invoke(app, ["init", "--local", "--path", str(local)])
@@ -43,6 +75,9 @@ def test_the_local_engine_gets_random_passwords_and_named_origins(tmp_path: Path
     assert "*" not in env["OPENCDE_CORS_ORIGINS"] and "null" in env["OPENCDE_CORS_ORIGINS"]
     assert env["COMPOSE_FILE"] == "docker/compose.yaml:docker/compose.local.yaml"
     assert env["OPENCDE_MCP_ENABLED"] == "true", "AI programs on the computer reach the models (ADR 0028)"
+    assert env["OPENCDE_TIER"] == "experimental" and env["COMPOSE_PROFILES"] == "graph", "the models in the graph"
+    assert env["OPENCDE_STORE_URL"] == "postgresql://opencde@store:5432/opencde"
+    assert len(env["OPENCDE_STORE_PASSWORD"]) >= 24 and env["OPENCDE_STORE_PASSWORD"] != env["OPENCDE_GRAPH_PASSWORD"]
     assert "Dataspatium" in done.output
 
 
@@ -69,6 +104,8 @@ def test_the_guide_for_this_machine(tmp_path: Path, answers: None) -> None:
     assert env["OPENCDE_DYNAMIC_CLIENT_REGISTRATION"] == "true"
     assert len([line for line in path.read_text().splitlines() if "DYNAMIC_CLIENT_REGISTRATION" in line]) == 1
     assert env["COMPOSE_FILE"] == "docker/compose.yaml:docker/compose.dev.yaml"
+    assert env["OPENCDE_TIER"] == "experimental" and env["COMPOSE_PROFILES"] == "graph", "IFC-DB is tier 3"
+    assert len([line for line in path.read_text().splitlines() if "IFC_DB_ENABLED" in line]) == 1
     assert "docker compose up -d --build --wait" in done.output and "opencde seed" in done.output
 
 
@@ -100,6 +137,7 @@ def test_the_guide_for_a_server_others_use(tmp_path: Path, answers: None) -> Non
     ):
         assert step in done.output
     assert env["OPENCDE_SECRET_KEY"] not in done.output and env["OPENCDE_GRAPH_PASSWORD"] not in done.output
+    assert env["OPENCDE_STORE_PASSWORD"] not in done.output
 
 
 def test_the_settings_accept_what_the_guide_wrote(
@@ -112,3 +150,4 @@ def test_the_settings_accept_what_the_guide_wrote(
     assert CliRunner().invoke(app, ["init", "--path", str(path)], input="\n".join(typed) + "\n").exit_code == 0
     settings = Settings(_env_file=path)  # type: ignore[call-arg]
     assert settings.is_production and settings.public_url == "https://cde.example.org"
+    assert settings.store_url is not None and not settings.uses_graph, "no graph without IFC-DB"

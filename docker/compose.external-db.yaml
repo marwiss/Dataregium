@@ -1,5 +1,6 @@
-# A database you already have instead of the one in the stack: AuraDB, Memgraph Cloud
-# or a server of your own. Say where it is in .env, and the database container stays out:
+# A graph database you already have instead of the one in the stack, for IFC-DB's models in
+# tier 3: AuraDB, Memgraph Cloud or a server of your own. Say where it is in .env, and the
+# graph container stays out:
 #
 #   OPENCDE_STACK_GRAPH_URI=neo4j+s://xxxx.databases.neo4j.io
 #   OPENCDE_GRAPH_USER=neo4j
@@ -13,4 +14,5 @@
 
 services:
   graph:
-    profiles: ["bundled-database"]
+    # !override replaces the profiles of compose.yaml, so that COMPOSE_PROFILES=graph does not start it either.
+    profiles: !override ["bundled-database"]

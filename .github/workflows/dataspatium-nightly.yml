@@ -49,8 +49,10 @@ jobs:
       - run: uv sync
       - name: Start the server with demo data and a client for the app
         run: |
-          uv run opencde init --dev
-          printf 'OPENCDE_IFC_DB_ENABLED=true\nOPENCDE_DYNAMIC_CLIENT_REGISTRATION=true\nOPENCDE_REQUEST_LOG_ENABLED=true\nOPENCDE_GRAPH_QUERY_ENABLED=true\n' >> .env
+          # Tier 3, with the server's own data in the graph as before PostgreSQL: the released Dataspatium 3.0.0
+          # asks the graph query and the graph view, which a server with PostgreSQL does not offer.
+          uv run opencde init --dev --tier experimental
+          printf 'OPENCDE_STACK_STORE_URL=\nOPENCDE_DYNAMIC_CLIENT_REGISTRATION=true\nOPENCDE_REQUEST_LOG_ENABLED=true\nOPENCDE_GRAPH_QUERY_ENABLED=true\n' >> .env
           # One run of the suite uses nearly all of the limit on signing in, and there are two.
           echo 'OPENCDE_RATE_LIMIT_SIGN_IN=60/minute' >> .env
           docker compose up -d --build

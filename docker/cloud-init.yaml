@@ -68,7 +68,7 @@ write_files:
         # The image's entrypoint is `opencde`; root inside the container, since /opt/dataregium is root's.
         docker run --rm --user 0:0 -v /opt/dataregium:/work -w /work "ghcr.io/marwiss/opencdeserver:$version" \
           init --public-url "https://$domain" --path /work/.env >/dev/null
-        # The machine's memory, not the 512 MB of a laptop.
+        # The machine's memory, not the 512 MB of a laptop, for a graph in tier 3 (nothing to change otherwise).
         sed -i 's/^NEO4J_HEAP=.*/NEO4J_HEAP=1g/; s/^NEO4J_PAGECACHE=.*/NEO4J_PAGECACHE=1g/' .env
         echo "OPENCDE_IMAGE_TAG=$version" >> .env
         if [ -n "${DATAREGIUM_ACME_EMAIL:-}" ]; then echo "OPENCDE_ACME_EMAIL=$DATAREGIUM_ACME_EMAIL" >> .env; fi

@@ -1,5 +1,5 @@
-# Memgraph instead of Neo4j. The server speaks dialect-neutral Cypher (ADR 0003),
-# so only the database container and OPENCDE_GRAPH_DIALECT change.
+# Memgraph instead of Neo4j as the graph of tier 3 (COMPOSE_PROFILES=graph). The server speaks
+# dialect-neutral Cypher (ADR 0003), so only the database container and OPENCDE_GRAPH_DIALECT change.
 #
 #   docker compose -f compose.yaml -f compose.memgraph.yaml -f compose.dev.yaml up -d
 #
