@@ -28,6 +28,8 @@ the commit history.
   Tiers 1 and 2 keep the server's own data in PostgreSQL alone and need `OPENCDE_STORE_URL`. Unset, the tier is
   `experimental` and nothing is held back, as before. `GET /.well-known/dataregium` gives `tier` at its top level,
   and `opencde doctor` and the administration's overview show it.
+- A tool call of the MCP endpoint that cannot reach PostgreSQL answers 503 `unavailable`, as the API's routes
+  do, instead of an internal error.
 - Compose keeps the server's own data in PostgreSQL by default (ADR 0029): `docker/compose.yaml` starts the service
   `store` (`docker.io/library/postgres:17.6-alpine`, user and database `opencde`, the password
   `OPENCDE_STORE_PASSWORD`, which Compose requires), published nowhere but on `127.0.0.1:5442` by `compose.dev.yaml`

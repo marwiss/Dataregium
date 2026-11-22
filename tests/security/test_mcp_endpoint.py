@@ -22,6 +22,7 @@ from opencde.auth.scopes import MCP_PROPOSE
 from opencde.logging import configure_logging
 from opencde.mcp import routes
 from opencde.mcp.registry import Arguments, Tool
+from opencde.postgres.database import PostgresUnavailable
 from tests.mcp_support import (
     BEARER,
     CLOUD,
@@ -329,6 +330,21 @@ def test_an_error_in_a_tool_logs_neither_the_body_nor_the_token(tmp_path: Path) 
     assert answer.json()["error"]["message"] == "Internal error"
     assert "mcp_internal_error" in logged and "RuntimeError" in logged, "the error was logged"
     assert marker not in logged and "a-token-the-store-knows" not in logged and "token_hash" not in logged
+
+
+def test_a_database_that_does_not_answer_is_503_as_on_the_api(tmp_path: Path) -> None:
+    """PostgreSQL that goes away during a tool call is answered 503 ``unavailable``, as the routes answer it and
+    the graph's outage, so that a client tries again; nothing of the driver's text reaches the answer (ADR 0029, the
+    review of 2026-11-22)."""
+
+    class Gone(FakeGraph):
+        async def run(self, query: str, **params: Any) -> list[dict[str, Any]]:
+            raise PostgresUnavailable("PostgreSQL at postgresql://opencde@db.internal:5432/opencde does not answer")
+
+    with endpoint(tmp_path, Gone()) as client:
+        answer = call(client, "list_models", {"project_id": None})
+    assert answer.status_code == 503, answer.text
+    assert answer.json() == {"message": "The database is not available right now", "code": "unavailable"}
 
 
 def test_a_bearer_token_is_never_answered_back(tmp_path: Path) -> None:

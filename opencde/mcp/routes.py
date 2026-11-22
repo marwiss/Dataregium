@@ -51,6 +51,7 @@ from opencde.mcp.protocol import (
 )
 from opencde.mcp.publication import GET_PUBLICATION
 from opencde.mcp.queries import SERVER_QUERY
+from opencde.postgres.database import PostgresUnavailable
 from opencde.ratelimit import RATE_MCP_TOOL_CALLS, wait_seconds
 from opencde.settings import Settings
 from opencde.store.oauth2.tokens import Principal
@@ -149,7 +150,7 @@ async def mcp_endpoint(request: Request, caller: McpPrincipal, settings: Setting
         result = await _answer(request, caller, settings, graph, method, params, modern)
     except McpError as failure:
         return _error(request_id, failure, modern)
-    except (ApiError, ServiceUnavailable, DatabaseFull):
+    except (ApiError, ServiceUnavailable, PostgresUnavailable, DatabaseFull):  # 503, as the routes answer
         raise
     except Exception as exc:  # the answer names no cause; the log has the type and the method, never the body
         if refused_for_memory(exc):  # a named query's own transaction at a full graph: 503, as the routes answer
