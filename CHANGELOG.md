@@ -14,8 +14,10 @@ the commit history.
   `OPENCDE_BIM_ENABLED=true`, which `opencde init --tier bim-gis` writes and tier 1 refuses, turns on the check
   of each upload and the precheck with the refusal of uploads with errors, the diff, the clash check, the rooms,
   bSDD, the change sets' trial and approval, and the query of what changed since a version, each in a worker
-  process with IfcOpenShell as before; the capabilities announce them, and the MCP tools that try change sets and
-  check clashes come with them. Without a graph an upload is converted into nothing, an approval compares the
+  process with IfcOpenShell as before; the capabilities announce the checks, the precheck, the diff, the clash
+  check and the trial, and the MCP tools that try change sets and check clashes come with them, while the query
+  of what changed since a version answers over the API alone (`ifc_queries` and `server_query` stay with
+  IFC-DB). Without a graph an upload is converted into nothing, an approval compares the
   keys the clients wrote, and what only the graph answers (the named queries, the geometry, the merge of a
   building, what no GlobalId reaches) stays off and says so. IFC-DB brings the BIM functions too, as before, and
   `opencde doctor` says when IfcOpenShell is missing for them.
