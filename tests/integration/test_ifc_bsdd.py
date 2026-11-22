@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from opencde.ifcgraph.bsdd import BsddClient
 from opencde.main import create_app
 from opencde.settings import Settings
-from tests.integration.conftest import GraphTarget, bim_settings
+from tests.integration.conftest import bim_settings
 from tests.integration.conftest_accounts import build_world, login_as
 from tests.integration.test_ifc_validation import checked, upload
 from tests.integration.test_web_signin import web_sign_in
@@ -74,9 +74,9 @@ def uploaded_with_bsdd(
 
 
 def test_an_upload_is_checked_against_bsdd_and_the_report_warns_of_what_it_does_not_know(
-    graph_target: GraphTarget, clean_database: None, tmp_path: Path
+    settings: Settings, clean_database: None, tmp_path: Path
 ) -> None:
-    found, ids, _ = uploaded_with_bsdd(graph_target, tmp_path, bsdd_answers)
+    found, ids, _ = uploaded_with_bsdd(settings, tmp_path, bsdd_answers)
     entries, body = found["entries"], found["body"]
     assert entries["ifc_validation_status"] == ["warnings"], "bSDD only warns"
     assert "bSDD at bsdd.test: buildingsmart/ifc/4.3, example/nosuch/1.0" in entries["ifc_validation_ruleset"]
@@ -100,9 +100,9 @@ def test_an_upload_is_checked_against_bsdd_and_the_report_warns_of_what_it_does_
 
 
 def test_when_bsdd_is_out_of_reach_the_check_fails_and_the_file_stands(
-    graph_target: GraphTarget, clean_database: None, tmp_path: Path
+    settings: Settings, clean_database: None, tmp_path: Path
 ) -> None:
-    found, _, _ = uploaded_with_bsdd(graph_target, tmp_path, bsdd_gone)
+    found, _, _ = uploaded_with_bsdd(settings, tmp_path, bsdd_gone)
     entries, body = found["entries"], found["body"]
     assert entries["ifc_validation_status"] == ["passed"], "bSDD out of reach is no error of the model"
     assert not any(ruleset.startswith("bSDD") for ruleset in entries["ifc_validation_ruleset"])
