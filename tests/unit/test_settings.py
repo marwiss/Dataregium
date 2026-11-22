@@ -31,6 +31,22 @@ def test_production_requires_graph_password_and_secret_key() -> None:
     assert _settings(environment="production", **PROD).is_production
 
 
+def test_production_with_postgresql_needs_its_password_and_a_graph_password_only_with_a_graph() -> None:
+    """Tiers 1 and 2 keep the server's own data in PostgreSQL and use no graph (F58 a): production needs
+    OPENCDE_STORE_PASSWORD then, and OPENCDE_GRAPH_PASSWORD only when IFC-DB uses the graph."""
+    postgres = {**PROD, "graph_password": "", "store_url": "postgresql://cde@db:5432/cde"}
+    with pytest.raises(ValidationError, match="OPENCDE_STORE_PASSWORD is required in production"):
+        _settings(environment="production", **postgres)
+    settings = _settings(environment="production", **postgres, store_password="s" * 20)
+    assert settings.is_production and not settings.uses_graph
+    with pytest.raises(ValidationError, match="OPENCDE_GRAPH_PASSWORD is required in production"):
+        _settings(environment="production", **postgres, store_password="s" * 20, ifcgraph_enabled=True)
+    local = {**LOCAL, "graph_password": "", "store_url": "postgresql://cde@db:5432/cde"}
+    with pytest.raises(ValidationError, match="OPENCDE_STORE_PASSWORD is required in the local environment"):
+        _settings(**local, public_url="http://127.0.0.1:8000")
+    assert _settings(**local, public_url="http://127.0.0.1:8000", store_password="s" * 20).is_local
+
+
 def test_a_published_bolt_address_must_be_encrypted_in_production() -> None:
     """An open database port carries the database password; production announces it only over TLS."""
     for insecure in ("bolt://cde.example.com:7687", "neo4j+ssc://cde.example.com:7687"):

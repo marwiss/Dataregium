@@ -32,6 +32,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from opencde.graph.dialect import refused_for_memory
 from opencde.graph.graph import DatabaseFull
 from opencde.logging import get_logger
+from opencde.postgres.database import PostgresUnavailable
 
 log = get_logger(__name__)
 
@@ -185,6 +186,14 @@ def install_error_handlers(app: FastAPI) -> None:
         # The driver could not reach the database (down, restarting, network). Nothing about it is the client's
         # fault, and the message never repeats the driver's text, which names hosts and ports.
         log.error("database_unavailable", path=request.url.path, error_type=type(exc).__name__)
+        return error_response(status.HTTP_503_SERVICE_UNAVAILABLE, "The database is not available right now")
+
+    @app.exception_handler(PostgresUnavailable)
+    async def _postgres_unavailable(request: Request, exc: PostgresUnavailable) -> JSONResponse:
+        # PostgreSQL could not be reached or went away (ADR 0029), as for the graph's driver above; the error type
+        # is the driver's, for the operator, and nothing of its text reaches the client.
+        cause = type(exc.__cause__ or exc).__name__
+        log.error("database_unavailable", path=request.url.path, error_type=cause)
         return error_response(status.HTTP_503_SERVICE_UNAVAILABLE, "The database is not available right now")
 
     @app.exception_handler(DatabaseFull)

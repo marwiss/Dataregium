@@ -130,9 +130,7 @@ async def postgres_checks(settings: Settings, postgres: Postgres) -> list[Check]
     ]
 
 
-async def store_checks(
-    settings: Settings, graph: Graph, store: Graph | None, postgres: Postgres | None = None
-) -> list[Check]:
+async def store_checks(settings: Settings, graph: Graph, store: Graph | None, postgres: Postgres | None) -> list[Check]:
     """The server's own data when it is not in the IFC graph's connection: in a graph of its own (ADR 0027), whether
     it answers and its constraints; in PostgreSQL (ADR 0029), whether it answers and its migrations."""
     if postgres is not None:
@@ -171,8 +169,8 @@ async def run_checks(
     graph: Graph,
     storage: LocalStorage,
     *,
-    store: Graph | None = None,
-    postgres: Postgres | None = None,
+    store: Graph | None,
+    postgres: Postgres | None,
 ) -> list[Check]:
     """Every check, of the IFC graph ``graph`` and of the ``store`` of the server's own data beside it, or of
     ``postgres`` when it holds that data. Without IFC-DB a server with PostgreSQL uses no graph, and none is asked."""

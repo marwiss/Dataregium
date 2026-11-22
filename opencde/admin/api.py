@@ -164,7 +164,7 @@ async def overview(
     return {
         "version": __version__,
         "uptime_s": int(time.monotonic() - started) if started is not None else None,
-        "dialect": graph.dialect.name.value,
+        "dialect": "postgres" if postgres is not None else graph.dialect.name.value,  # the store's
         "graph_ok": reachable,
         "users": counts.get("users", 0),
         "projects": counts.get("projects", 0),
@@ -634,7 +634,8 @@ async def delete_project(
     project = await projects.get(project_id)
     if project is None:
         raise HTTPException(404, "No such project")
-    await maintenance.delete_project(projects, models, project.project_id, storage)
+    in_use = request.app.state.settings.uses_graph
+    await maintenance.delete_project(projects, models if in_use else None, project.project_id, storage)
     await _record(request, audit_log, principal, "project.delete", project_id=project.project_id, name=project.name)
     return NO_CONTENT
 

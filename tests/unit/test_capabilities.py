@@ -149,6 +149,25 @@ def test_the_graph_query_is_announced_with_its_limits_when_on(tmp_path: Path) ->
         assert refused.status_code == 401 and refused.json()["code"] == "unauthenticated", "mounted, guarded"
 
 
+def test_a_server_without_a_graph_announces_none_and_mounts_no_graph_query(tmp_path: Path) -> None:
+    """Tiers 1 and 2 keep the server's own data in PostgreSQL and use no graph (F58 a): the models' store is none,
+    a published Bolt address is not announced, and the administrators' Cypher page, which reads the store alone,
+    is off (ADR 0029)."""
+    settings = make_settings(
+        tmp_path,
+        store_url="postgresql://cde@127.0.0.1:9/cde",
+        graph_query_enabled=True,
+        graph_public_bolt_url="bolt://localhost:7697",
+        workcopy_graph_uri="bolt://localhost:7698",
+    )
+    with TestClient(create_app(settings, startup_wait_seconds=0)) as client:
+        extensions = client.get("/.well-known/dataregium").json()["extensions"]
+        assert extensions["ifcgraph"] == {"enabled": False, "bolt": None, "workcopy": False, "graph_store": None}
+        assert extensions["graph_query"] == {"enabled": False}
+        assert client.post("/admin/api/graph/query", json={"cypher": "RETURN 1"}).status_code == 404
+        assert client.app.state.workcopy is None, "the working copy is IFC-DB's alone"  # ty: ignore[unresolved-attribute]
+
+
 def test_the_proposals_against_a_document_are_announced_beside_the_trial(client: TestClient) -> None:
     changes = client.get("/.well-known/dataregium").json()["extensions"]["ifc_changes"]
     assert changes["proposal_url"] == "/bcf/3.0/projects/{project_id}/topics/{topic_guid}/ifc-proposal"

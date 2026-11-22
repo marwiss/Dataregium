@@ -28,6 +28,7 @@ AUDIT_LIMIT = 200
 SAFE_SETTINGS = (
     "environment",
     "public_url",
+    "store_url",
     "graph_dialect",
     "graph_uri",
     "graph_user",
@@ -94,7 +95,7 @@ async def overview(
             counts=counts,
             recent=recent,
             graph_ok=reachable,
-            dialect=graph.dialect.name.value,
+            dialect="postgres" if postgres is not None else graph.dialect.name.value,  # the store's
         ),
     )
 

@@ -110,10 +110,12 @@ async def prune_models(
     return {"models": len(ids), "entities": entities}
 
 
-async def delete_project(projects: ProjectStore, graph: Graph, project_id: str, storage: LocalStorage) -> bool:
+async def delete_project(projects: ProjectStore, graph: Graph | None, project_id: str, storage: LocalStorage) -> bool:
     """A project's models in the IFC graph ``graph``, in batches of their own (the entities of a model reach far beyond
     what the store's deletion follows, and they live in the other graph), and then the project, what it owns and its
-    stored files in the store behind ``projects``. Returns whether the project was there."""
-    for model_id in await projects.model_ids(project_id):
-        await delete_model(graph, model_id)
+    stored files in the store behind ``projects``. Returns whether the project was there. ``graph`` is None on a
+    server that uses no graph (tiers 1 and 2, F58 a): its records of models made before go with the project."""
+    if graph is not None:
+        for model_id in await projects.model_ids(project_id):
+            await delete_model(graph, model_id)
     return await projects.delete_with_files(project_id, storage)

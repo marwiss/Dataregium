@@ -263,7 +263,6 @@
   "macro.confirm_hint": "Farlige handlinger beder om dit eget kodeord igen.",
   "admin.title": "Administration",
   "admin.overview.title": "Oversigt",
-  "admin.overview.db_down": "Grafdatabasen svarer ikke. Intet kan læses eller ændres, før den er tilbage.",
   "admin.overview.app_sessions": "Aktive app-sessioner",
   "admin.overview.database": "Database",
   "admin.overview.dialect": "Dialekt",

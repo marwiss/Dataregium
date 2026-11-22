@@ -75,9 +75,10 @@ def capabilities(settings: Settings) -> dict[str, Any]:
             },
             "ifcgraph": {
                 "enabled": settings.ifcgraph_enabled,
-                "bolt": settings.graph_public_bolt_url or None,
-                "workcopy": settings.has_workcopy,
-                "graph_store": settings.graph_dialect.value,  # the store of the models, for the queries a client offers
+                "bolt": (settings.graph_public_bolt_url or None) if settings.uses_graph else None,
+                "workcopy": settings.has_workcopy and settings.ifcgraph_enabled,
+                # the store of the models, for the queries a client offers; none without a graph (tiers 1 and 2)
+                "graph_store": settings.graph_dialect.value if settings.uses_graph else None,
             },
             "ifc_queries": (
                 {
@@ -195,7 +196,7 @@ def capabilities(settings: Settings) -> dict[str, Any]:
                     "max_rows": settings.graph_query_max_rows,
                     "timeout_seconds": settings.graph_query_timeout_seconds,
                 }
-                if settings.admin_api_enabled and settings.graph_query_enabled
+                if settings.admin_api_enabled and settings.graph_query_enabled and settings.store_url is None
                 else {"enabled": False}
             ),
             "ai_policy": (

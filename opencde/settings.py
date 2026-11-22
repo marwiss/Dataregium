@@ -7,8 +7,9 @@ Every setting is read from an environment variable prefixed ``OPENCDE_``, from a
 deployment: the same image runs on a laptop and behind a public domain.
 
 Defaults are safe rather than convenient. The server refuses to start in
-production without an ``https`` public URL, a graph database password and a
-secret key for signed form tokens and session cookies.
+production without an ``https`` public URL, the password of each database it
+uses (PostgreSQL, and the graph when it uses one) and a secret key for signed
+form tokens and session cookies.
 """
 
 from __future__ import annotations
@@ -80,6 +81,7 @@ def _names_given(env_file: object, secrets_dir: object) -> set[str]:
 
 
 RATE_LIMIT_STORES = ("memory://", "redis://", "rediss://")
+GRAPH_URI_DEFAULT = "bolt://localhost:7687"
 GRAPH_URI_SCHEMES = ("bolt://", "bolt+s://", "bolt+ssc://", "neo4j://", "neo4j+s://", "neo4j+ssc://")
 # A published Bolt address must be encrypted with a certificate clients can verify ("+ssc" trusts anything).
 SECURE_GRAPH_URI_SCHEMES = ("bolt+s://", "neo4j+s://")
@@ -200,9 +202,7 @@ class Settings(BaseSettings):
 
     # --- graph database ---------------------------------------------------
     graph_dialect: GraphDialect = Field(GraphDialect.NEO4J, description="Which graph database the server talks to.")
-    graph_uri: str = Field(
-        "bolt://localhost:7687", description="Bolt URI. Use neo4j+s:// or bolt+s:// for remote databases."
-    )
+    graph_uri: str = Field(GRAPH_URI_DEFAULT, description="Bolt URI. Use neo4j+s:// or bolt+s:// for remote databases.")
     graph_user: str = "neo4j"
     graph_password: SecretStr = SecretStr("")
     graph_database: str | None = Field(None, description="Database name. Defaults to 'neo4j' or 'memgraph' by dialect.")
@@ -231,10 +231,8 @@ class Settings(BaseSettings):
     store_url: str | None = Field(
         None,
         description="PostgreSQL for the server's own data instead of a graph (ADR 0029), as "
-        "postgresql://user@host:5432/database without the password. The accounts, OAuth2, the Documents API, BCF, "
-        "the jobs, the logs, the administration, the IFC-DB service, the command line and the backup have followed; "
-        "until it is documented and proven in a deployment it is accepted in the test environment alone; it excludes "
-        "OPENCDE_STORE_GRAPH_URI.",
+        "postgresql://user@host:5432/database without the password (OPENCDE_STORE_PASSWORD). The store of tiers 1 "
+        "and 2, where the server uses no graph unless IFC-DB is on (F58 a); it excludes OPENCDE_STORE_GRAPH_URI.",
     )
     store_password: SecretStr = SecretStr("")
     cleanup_interval_seconds: int = Field(
@@ -495,6 +493,7 @@ class Settings(BaseSettings):
     @field_validator("graph_uri")
     @classmethod
     def _check_graph_uri(cls, value: str) -> str:
+        value = value.strip() or GRAPH_URI_DEFAULT  # an emptied line of a copied .env, on a server without a graph
         if not value.startswith(GRAPH_URI_SCHEMES):
             raise ValueError(f"OPENCDE_GRAPH_URI must use one of {', '.join(GRAPH_URI_SCHEMES)}")
         return value
@@ -523,14 +522,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _store_in_postgres(self) -> Self:
-        """The server's own data in PostgreSQL is one store: not beside a graph of its own, and not outside the tests
-        until every area has followed, since a server with its data in two places cannot answer (ADR 0029)."""
-        if self.store_url is None:
-            return self
-        if self.store_graph_uri is not None:
+        """The server's own data in PostgreSQL is one store, not beside a graph of its own, since a server with its
+        data in two places cannot answer (ADR 0029)."""
+        if self.store_url is not None and self.store_graph_uri is not None:
             raise ValueError("OPENCDE_STORE_URL and OPENCDE_STORE_GRAPH_URI exclude each other: one store holds it all")
-        if self.environment != "test":
-            raise ValueError("OPENCDE_STORE_URL is not supported yet: not all of the server's data has followed")
         return self
 
     @field_validator("workcopy_graph_uri")
@@ -570,8 +565,10 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "OPENCDE_GRAPH_PUBLIC_BOLT_URL must use bolt+s:// or neo4j+s:// in production (docs/en/deploy/bolt.md)"
                 )
-            if not self.graph_password.get_secret_value():
+            if self.uses_graph and not self.graph_password.get_secret_value():
                 raise ValueError("OPENCDE_GRAPH_PASSWORD is required in production")
+            if self.store_url is not None and not self.store_password.get_secret_value():
+                raise ValueError("OPENCDE_STORE_PASSWORD is required in production with OPENCDE_STORE_URL")
             if self.has_store and not self.store_graph_password.get_secret_value():
                 raise ValueError("OPENCDE_STORE_GRAPH_PASSWORD is required in production with OPENCDE_STORE_GRAPH_URI")
             if len(self.secret_key.get_secret_value()) < MIN_SECRET_KEY_LENGTH:
@@ -588,8 +585,13 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "OPENCDE_PUBLIC_URL must be the loopback in the local environment, such as http://127.0.0.1:8000"
                 )
-            if not self.graph_password.get_secret_value():
+            if self.uses_graph and not self.graph_password.get_secret_value():
                 raise ValueError("OPENCDE_GRAPH_PASSWORD is required in the local environment (opencde init --local)")
+            if self.store_url is not None and not self.store_password.get_secret_value():
+                raise ValueError(
+                    "OPENCDE_STORE_PASSWORD is required in the local environment with OPENCDE_STORE_URL "
+                    "(opencde init --local)"
+                )
             if self.has_store and not self.store_graph_password.get_secret_value():
                 raise ValueError(
                     "OPENCDE_STORE_GRAPH_PASSWORD is required in the local environment with a store of its own"
@@ -645,6 +647,12 @@ class Settings(BaseSettings):
         if self.graph_database:
             return self.graph_database
         return {GraphDialect.NEO4J: "neo4j", GraphDialect.MEMGRAPH: "memgraph"}[self.graph_dialect]
+
+    @property
+    def uses_graph(self) -> bool:
+        """Whether the server keeps anything in a graph: not when PostgreSQL holds its own data and IFC-DB is off
+        (tiers 1 and 2, F58 a), the IFC graph's being the models' alone (ADR 0029)."""
+        return self.store_url is None or self.ifcgraph_enabled
 
     @property
     def has_workcopy(self) -> bool:

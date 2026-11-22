@@ -6,6 +6,7 @@ and the choice of store in the app."""
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import re
 from collections.abc import Awaitable, Callable
@@ -17,11 +18,13 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from ifc_db.validation import pack_report
 
+from opencde import health
 from opencde.accounts.roles import Role
 from opencde.auth import pkce
 from opencde.auth.dependencies import get_tokens
 from opencde.bcf.schemas import CommentPOST, TopicPOST
 from opencde.deps import get_clients, get_projects, get_users
+from opencde.graph.cleanup import ExpiryCleaner
 from opencde.ids import hash_secret
 from opencde.logging import REDACTED
 from opencde.main import create_app
@@ -722,9 +725,74 @@ def test_the_app_opens_postgresql_when_it_is_named_and_reports_it(tmp_path: Path
         assert isinstance(get_users(client.app.state.store, postgres), PostgresUserRepository)  # ty: ignore[unresolved-attribute]
         assert isinstance(get_projects(client.app.state.store, postgres), PostgresProjectRepository)  # ty: ignore[unresolved-attribute]
         answer = client.get("/readyz")
-        assert answer.status_code == 503 and answer.json()["store"] == "unavailable"
+        assert answer.status_code == 503
+        assert answer.json() == {"status": "not_ready", "graph": "none", "store": "unavailable"}
+        answer = client.get("/bcf/3.0/projects", headers={"Authorization": "Bearer " + "t" * 43})
+        assert (answer.status_code, answer.json()["code"]) == (503, "unavailable"), "the token is in PostgreSQL"
+        assert "127.0.0.1" not in answer.text
     with TestClient(create_app(make_settings(tmp_path), startup_wait_seconds=0)) as client:
         assert client.app.state.postgres is None  # ty: ignore[unresolved-attribute]
+
+
+async def test_a_postgresql_that_does_not_answer_is_unavailable_and_says_no_more() -> None:
+    """A refused connection is ``PostgresUnavailable``, which the API answers with 503 and the command line with
+    FAIL; the driver's error, which names the host and the port, stays its cause."""
+    postgres = Postgres(URL, "", connect_timeout_seconds=1.0)
+    calls: list[Callable[[], Awaitable[Any]]] = [
+        lambda: postgres.run("SELECT 1"),
+        lambda: postgres.one("SELECT 1"),
+        lambda: postgres.execute("SELECT 1"),
+        lambda: postgres.write(lambda tx: tx.run("SELECT 1")),
+    ]
+    try:
+        for call in calls:
+            with pytest.raises(database.PostgresUnavailable, match="does not answer") as refused:
+                await call()
+            assert isinstance(refused.value.__cause__, OSError)
+    finally:
+        await postgres.close()
+
+
+async def test_the_cleaner_sends_nothing_to_a_graph_without_one_and_a_failing_part_stops_no_other() -> None:
+    """PostgreSQL holds everything that expires when it holds the server's own data (ADR 0029): the cleaner then has
+    no graph, and a part of a round that fails never keeps the other from its turn."""
+    rounds: list[str] = []
+
+    async def each_round() -> None:
+        rounds.append("postgres")
+
+    class Down:  # a graph whose every statement fails
+        async def run(self, query: str, /, **params: Any) -> list[dict[str, Any]]:
+            raise RuntimeError("the graph is down")
+
+    for graph, wanted in ((None, 1), (Down(), 2)):
+        cleaner = ExpiryCleaner(graph, 3600, each_round=each_round)  # ty: ignore[invalid-argument-type]
+        cleaner.start()
+        for _ in range(200):
+            if len(rounds) == wanted:
+                break
+            await asyncio.sleep(0.01)
+        await cleaner.stop()
+        assert rounds == ["postgres"] * wanted
+
+
+def test_a_server_without_a_graph_is_ready_when_postgresql_answers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tiers 1 and 2 (F58 a): ``/readyz`` asks PostgreSQL alone, says "none" for the graph and names no dialect."""
+
+    async def answers(self: Postgres, seconds: float) -> bool:
+        return True
+
+    async def never(*args: Any) -> bool:
+        raise AssertionError("the graph was asked")
+
+    monkeypatch.setattr(Postgres, "ping", answers)
+    monkeypatch.setattr(health, "ping_within", never)
+    with TestClient(create_app(make_settings(tmp_path, store_url=URL), startup_wait_seconds=0)) as client:
+        answer = client.get("/readyz")
+    ready = {"status": "ready", "graph": "none", "store": "ok", "workcopy": "none", "store_dialect": "postgres"}
+    assert (answer.status_code, answer.json()) == (200, ready)
 
 
 def test_postgresql_wants_its_extra(monkeypatch: pytest.MonkeyPatch) -> None:

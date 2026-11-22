@@ -276,16 +276,16 @@ async def test_the_doctor_reports_the_store_apart_or_shared(tmp_path: Path, monk
 
     monkeypatch.setattr(doctor, "ping_within", answers)
     settings = make_settings(tmp_path)
-    shared = await doctor.store_checks(settings, ifc, ifc)  # type: ignore[arg-type]
+    shared = await doctor.store_checks(settings, ifc, ifc, None)  # type: ignore[arg-type]
     assert [(c.key, c.ok, c.detail_key) for c in shared] == [("store", True, "store_shared")]
     assert shared[0].name == "The server's own data" and "OPENCDE_STORE_GRAPH_URI" in shared[0].detail
-    apart = await doctor.store_checks(settings, ifc, store)  # type: ignore[arg-type]
+    apart = await doctor.store_checks(settings, ifc, store, None)  # type: ignore[arg-type]
     assert [(c.key, c.ok, c.detail_key) for c in apart] == [
         ("store", True, "graph_ok"),
         ("store_schema", True, "schema_count"),
     ]
     store.driver = "down"
-    silent = await doctor.store_checks(settings, ifc, store)  # type: ignore[arg-type]
+    silent = await doctor.store_checks(settings, ifc, store, None)  # type: ignore[arg-type]
     assert [(c.key, c.ok) for c in silent] == [("store", False), ("store_schema", False)]
 
 

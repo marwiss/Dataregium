@@ -19,7 +19,8 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from typing import Any, TypeVar
 
 from opencde.logging import get_logger
@@ -35,7 +36,25 @@ WRITE_RETRY_SECONDS = 0.05
 
 
 class PostgresUnavailable(RuntimeError):
-    pass
+    """PostgreSQL cannot be reached, or went away: the API answers 503, the command line says FAIL."""
+
+
+def _outage(exc: BaseException) -> bool:
+    """Whether an error means that PostgreSQL cannot be reached or went away, rather than that it refused a
+    statement: a refused or lost connection, a connection that timed out, a server that starts or stops, no
+    connection left, or a password it does not take."""
+    from asyncpg.exceptions import (
+        AdminShutdownError,
+        CannotConnectNowError,
+        CrashShutdownError,
+        InvalidAuthorizationSpecificationError,
+        PostgresConnectionError,
+        TooManyConnectionsError,
+    )
+
+    gone = (AdminShutdownError, CannotConnectNowError, CrashShutdownError, PostgresConnectionError)
+    refused = (InvalidAuthorizationSpecificationError, TooManyConnectionsError)
+    return isinstance(exc, (OSError, TimeoutError, *gone, *refused))
 
 
 def _count(status: str) -> int:
@@ -105,16 +124,33 @@ class Postgres:
                     )
         return self._pool
 
+    @asynccontextmanager
+    async def _connection(self, *, transaction: bool = False) -> AsyncGenerator[Any, None]:
+        """A connection of the pool, in a transaction when asked. A PostgreSQL that cannot be reached or went away
+        is :class:`PostgresUnavailable`, never the driver's error, whose text names hosts and ports; every other
+        error is raised as it is."""
+        try:
+            async with (await self._connections()).acquire() as connection:
+                if not transaction:
+                    yield connection
+                    return
+                async with connection.transaction():
+                    yield connection
+        except Exception as exc:
+            if _outage(exc):
+                raise PostgresUnavailable(f"PostgreSQL at {self.url} does not answer") from exc
+            raise
+
     async def run(self, query: str, /, *args: Any) -> list[dict[str, Any]]:
-        async with (await self._connections()).acquire() as connection:
+        async with self._connection() as connection:
             return await Tx(connection).run(query, *args)
 
     async def one(self, query: str, /, *args: Any) -> dict[str, Any] | None:
-        async with (await self._connections()).acquire() as connection:
+        async with self._connection() as connection:
             return await Tx(connection).one(query, *args)
 
     async def execute(self, query: str, /, *args: Any) -> int:
-        async with (await self._connections()).acquire() as connection:
+        async with self._connection() as connection:
             return await Tx(connection).execute(query, *args)
 
     async def write(self, work: Callable[[Tx], Awaitable[T]]) -> T:
@@ -124,7 +160,7 @@ class Postgres:
         while True:
             attempt += 1
             try:
-                async with (await self._connections()).acquire() as connection, connection.transaction():
+                async with self._connection(transaction=True) as connection:
                     return await work(Tx(connection))
             except TransactionRollbackError:
                 if attempt >= WRITE_ATTEMPTS:

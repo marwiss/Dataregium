@@ -191,7 +191,8 @@ async def project_action(
         if action == "delete":
             if not await password_confirmed(users, admin, data.get("confirm_password")):
                 return redirect_with_notice(page, "wrong_password")
-            await delete_project(projects, models, project.project_id, storage)
+            in_use = request.app.state.settings.uses_graph
+            await delete_project(projects, models if in_use else None, project.project_id, storage)
             await form.record(audit_log, "project.delete", project_id=project.project_id, name=project.name)
             return redirect_with_notice("/admin/projects", "deleted")
     except AccountError as exc:

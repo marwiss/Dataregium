@@ -9,6 +9,7 @@ from neo4j.exceptions import Neo4jError, ServiceUnavailable
 
 from opencde.graph.graph import DatabaseFull
 from opencde.main import create_app
+from opencde.postgres.database import PostgresUnavailable
 from opencde.settings import Settings
 from tests.conftest import test_settings as make_settings  # aliased so pytest does not collect it as a test
 
@@ -156,6 +157,23 @@ def test_database_outage_is_a_503_without_driver_details(settings: Settings) -> 
     assert response.status_code == 503
     assert response.json() == {"message": "The database is not available right now", "code": "unavailable"}
     assert "7687" not in response.text
+
+
+def test_a_postgresql_outage_is_a_503_without_driver_details(settings: Settings) -> None:
+    """PostgreSQL that cannot be reached (ADR 0029) answers as the graph's driver does: `unavailable`, and nothing
+    of the error's host, port or address."""
+    app = create_app(settings, startup_wait_seconds=0)
+
+    @app.get("/bcf/3.0/down")
+    async def down() -> None:
+        refused = ConnectionRefusedError("Connect call failed ('10.0.0.7', 5432)")
+        raise PostgresUnavailable("PostgreSQL at postgresql://cde@db.internal:5432/cde does not answer") from refused
+
+    with TestClient(app) as client:
+        response = client.get("/bcf/3.0/down")
+    assert response.status_code == 503
+    assert response.json() == {"message": "The database is not available right now", "code": "unavailable"}
+    assert "5432" not in response.text and "db.internal" not in response.text and "10.0.0.7" not in response.text
 
 
 def test_a_full_database_is_a_503_without_driver_details(settings: Settings) -> None:

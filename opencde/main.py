@@ -27,7 +27,15 @@ from opencde.admin.access import install_page_handlers
 from opencde.auth import metadata as oauth2_metadata
 from opencde.auth import routes as oauth2_routes
 from opencde.bcf import router as bcf_router
-from opencde.bootstrap import make_graph, make_postgres, make_storage, make_store, make_workcopy, wait_for_graph
+from opencde.bootstrap import (
+    make_graph,
+    make_postgres,
+    make_storage,
+    make_store,
+    make_workcopy,
+    uses_graph,
+    wait_for_graph,
+)
 from opencde.documents import routes_ai_policy as documents_ai_policy
 from opencde.documents import routes_api as documents_api
 from opencde.documents import routes_changes as documents_changes
@@ -79,7 +87,8 @@ Server implementation of the buildingSMART OpenCDE APIs:
 * **BCF API 2.1**: the same on the same data, for clients that know nothing newer.
 * **Documents API 1.0**: document selection, download, upload and version queries.
 
-Data lives in a graph database (Neo4j or Memgraph). Source: https://github.com/marwiss/Dataregium
+The server's own data lives in PostgreSQL, or in a graph database (Neo4j or Memgraph); IFC-DB's models live in
+the graph. Source: https://github.com/marwiss/Dataregium
 """
 
 OPENAPI_TAGS = [
@@ -126,7 +135,10 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
         app.state.graph = make_graph(settings)
         app.state.workcopy = make_workcopy(settings)
         app.state.store = make_store(settings) or app.state.graph  # the server's own data (F24 a)
-        app.state.postgres = make_postgres(settings)  # the areas of it that have followed to PostgreSQL (ADR 0029)
+        app.state.postgres = make_postgres(settings)  # the server's own data in PostgreSQL (ADR 0029)
+        # No graph at all in tiers 1 and 2, where PostgreSQL holds the server's own data and IFC-DB is off (F58 a):
+        # the IFC graph's connection is made, as the choosers take it, but never connected.
+        app.state.uses_graph = uses_graph(settings)
         app.state.storage = make_storage(settings)
         app.state.ifcgraph = (
             IfcGraphService(
@@ -147,8 +159,11 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
             if app.state.ifcgraph is not None:
                 await app.state.ifcgraph.resume_interrupted()
 
-        cleaner = ExpiryCleaner(
-            app.state.store, settings.cleanup_interval_seconds, app.state.storage, each_round=each_round
+        cleaner = ExpiryCleaner(  # what expires is in PostgreSQL when it holds the server's own data
+            app.state.store if app.state.postgres is None else None,
+            settings.cleanup_interval_seconds,
+            app.state.storage,
+            each_round=each_round,
         )
         app.state.requestlog = (
             RequestLogWriter(
@@ -162,14 +177,16 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
             version=__version__,
             environment=settings.environment,
             public_url=settings.public_url,
-            graph_dialect=settings.graph_dialect.value,
-            graph_database=settings.database_name,
+            graph_dialect=settings.graph_dialect.value if app.state.uses_graph else None,
+            graph_database=settings.database_name if app.state.uses_graph else None,
+            store="postgres" if app.state.postgres is not None else "graph",
         )
         for old, new in settings.renamed_settings:  # names only: a setting's value can be a secret
             log.warning("setting_renamed", old=old, new=new)
         if startup_wait_seconds > 0:
-            await wait_for_graph(app.state.graph, startup_wait_seconds)
-            await apply_schema(app.state.graph)
+            if app.state.uses_graph:
+                await wait_for_graph(app.state.graph, startup_wait_seconds)
+                await apply_schema(app.state.graph)
             if app.state.store is not app.state.graph:
                 await wait_for_graph(app.state.store, startup_wait_seconds)
                 await apply_schema(app.state.store)
@@ -299,7 +316,7 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
     if settings.admin_api_enabled:
         app.include_router(routes_requests.api_router)
         app.include_router(admin_api.router)
-        if settings.graph_query_enabled:
+        if settings.graph_query_enabled and settings.store_url is None:  # it reads the store alone (ADR 0029)
             app.include_router(graph_query.router)
     app.include_router(capabilities.router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

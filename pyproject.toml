@@ -1,13 +1,13 @@
 [project]
 name = "opencde-server"
 version = "3.0.0"
-description = "buildingSMART OpenCDE server: Foundation API 1.0, BCF API 3.0 and 2.1, and Documents API 1.0 on a graph database."
+description = "buildingSMART OpenCDE server: Foundation API 1.0, BCF API 3.0 and 2.1, and Documents API 1.0, on PostgreSQL or a graph database."
 readme = "README.md"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 # 3.11 is IfcOpenShell's baseline (its CI lints and tests on 3.11); the container ships 3.13.
 requires-python = ">=3.11,<3.16"
-keywords = ["BCF", "OpenCDE", "IFC", "BIM", "buildingSMART", "Neo4j", "Memgraph", "FastAPI"]
+keywords = ["BCF", "OpenCDE", "IFC", "BIM", "buildingSMART", "PostgreSQL", "Neo4j", "Memgraph", "FastAPI"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Framework :: FastAPI",

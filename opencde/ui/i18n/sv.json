@@ -263,7 +263,7 @@
   "macro.confirm_hint": "Riskfyllda åtgärder frågar efter ditt eget lösenord igen.",
   "admin.title": "Administration",
   "admin.overview.title": "Översikt",
-  "admin.overview.db_down": "Grafdatabasen svarar inte. Inget kan läsas eller ändras förrän den är tillbaka.",
+  "admin.overview.db_down": "Databasen svarar inte. Inget kan läsas eller ändras förrän den är tillbaka.",
   "admin.overview.app_sessions": "Aktiva appsessioner",
   "admin.overview.database": "Databas",
   "admin.overview.dialect": "Dialekt",

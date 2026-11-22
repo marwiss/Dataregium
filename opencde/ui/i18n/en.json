@@ -263,7 +263,7 @@
   "macro.confirm_hint": "Dangerous actions ask for your own password again.",
   "admin.title": "Administration",
   "admin.overview.title": "Overview",
-  "admin.overview.db_down": "The graph database does not answer. Nothing can be read or changed until it is back.",
+  "admin.overview.db_down": "The database does not answer. Nothing can be read or changed until it is back.",
   "admin.overview.app_sessions": "Active app sessions",
   "admin.overview.database": "Database",
   "admin.overview.dialect": "Dialect",

@@ -161,9 +161,9 @@ def test_a_protocol_names_every_public_method_of_its_repository_as_it_is(reposit
         assert inspect.iscoroutinefunction(fn) == inspect.iscoroutinefunction(declared[name]), name
 
 
-def test_the_store_can_be_postgresql_alone_and_only_in_the_tests_for_now(tmp_path: Path) -> None:
-    """``OPENCDE_STORE_URL`` (ADR 0029): a PostgreSQL URL without the password, not beside a graph of its own, and
-    refused outside the tests until every area has followed."""
+def test_the_store_can_be_postgresql_alone(tmp_path: Path) -> None:
+    """``OPENCDE_STORE_URL`` (ADR 0029): a PostgreSQL URL without the password, not beside a graph of its own, in
+    every environment, and then the server uses no graph unless IFC-DB is on (tiers 1 and 2, F58 a)."""
     settings = make_settings(tmp_path, store_url=" postgresql://cde@db:5432/cde ", store_password="p" * 20)
     assert settings.store_url == "postgresql://cde@db:5432/cde" and not settings.has_store
     assert make_settings(tmp_path, store_url="  ").store_url is None, "an empty value is none"
@@ -177,5 +177,7 @@ def test_the_store_can_be_postgresql_alone_and_only_in_the_tests_for_now(tmp_pat
         assert "secret" not in str(refused.value), "a refused value is never repeated"
     with pytest.raises(ValidationError, match="exclude each other"):
         make_settings(tmp_path, store_url="postgresql://cde@db/cde", store_graph_uri="bolt://store:7687")
-    with pytest.raises(ValidationError, match="not supported yet"):
-        make_settings(tmp_path, store_url="postgresql://cde@db/cde", environment="development")
+    development = make_settings(tmp_path, store_url="postgresql://cde@db/cde", environment="development")
+    assert development.store_url == "postgresql://cde@db/cde" and not development.uses_graph
+    assert make_settings(tmp_path, store_url="postgresql://cde@db/cde", ifcgraph_enabled=True).uses_graph
+    assert make_settings(tmp_path).uses_graph, "the graph holds it all without OPENCDE_STORE_URL"

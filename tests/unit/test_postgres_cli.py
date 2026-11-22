@@ -113,11 +113,21 @@ def test_a_command_over_the_servers_own_data_asks_postgresql_alone(
     assert world.waited == [] and world.ifc.statements == [], "the graph is not waited for, nor asked"
 
 
+@pytest.mark.parametrize("world", [True], ids=["with IFC-DB"], indirect=True)
 def test_the_commands_of_the_models_connect_the_ifc_graph_beside_postgresql(world: World) -> None:
     done = CliRunner().invoke(app, ["ifc-db", "prune", "--project", "p1", "--all"])
     assert done.exit_code == 0, done.output
     assert "deleted 0 model(s)" in done.output
     assert world.waited == ["ifc"] and world.database.ran(jobs.CONVERSIONS_ALL)
+
+
+@pytest.mark.parametrize("command", [["prune", "--project", "p1", "--all"], ["export", "m1", "out.ifc"]])
+def test_the_commands_of_the_models_are_refused_at_once_without_a_graph(world: World, command: list[str]) -> None:
+    """Tiers 1 and 2 (F58 a): PostgreSQL holds the server's own data and IFC-DB is off, so there are no models in
+    a graph to prune or write back, and nothing waits for one."""
+    done = CliRunner().invoke(app, ["ifc-db", *command])
+    assert done.exit_code == 1 and "this server uses no graph" in done.output
+    assert world.waited == [] and world.ifc.statements == [] and world.database.statements == []
 
 
 @pytest.mark.parametrize("world", [False, True], ids=["without IFC-DB", "with IFC-DB"], indirect=True)

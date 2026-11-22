@@ -39,7 +39,7 @@ async def _constant(value: str) -> str:
     return value
 
 
-@router.get("/readyz", summary="Readiness: the graph databases answer and take changes", include_in_schema=False)
+@router.get("/readyz", summary="Readiness: the databases answer and take changes", include_in_schema=False)
 async def readyz(request: Request) -> JSONResponse:
     settings = request.app.state.settings
     graph = request.app.state.graph
@@ -48,22 +48,21 @@ async def readyz(request: Request) -> JSONResponse:
     postgres = getattr(request.app.state, "postgres", None)
     workcopy = getattr(request.app.state, "workcopy", None)
     # The server's own data is in the IFC graph's connection ("shared") unless it has its own (ADR 0027) or is in
-    # PostgreSQL (ADR 0029); the working copy's state is reported, never a reason not to be ready (ADR 0024).
+    # PostgreSQL (ADR 0029); the working copy's state is reported, never a reason not to be ready (ADR 0024). A
+    # server that uses no graph (tiers 1 and 2, F58 a) says "none" for it and is ready when PostgreSQL is.
+    in_use = getattr(request.app.state, "uses_graph", True)
     if postgres is not None:
         store_check = _postgres(postgres, seconds)
     else:
         store_check = _state(store, seconds) if store is not graph else _constant("shared")
     copy_check = _answers(workcopy, seconds) if workcopy is not None else _constant("none")
-    graph_state, store_state, copy_state = await asyncio.gather(_state(graph, seconds), store_check, copy_check)
-    if graph_state == "ok" and store_state not in ("unavailable", "full"):
+    graph_check = _state(graph, seconds) if in_use else _constant("none")
+    graph_state, store_state, copy_state = await asyncio.gather(graph_check, store_check, copy_check)
+    if graph_state in ("ok", "none") and store_state not in ("unavailable", "full"):
         return JSONResponse(
-            {
-                "status": "ready",
-                "graph": "ok",
-                "store": store_state,
-                "dialect": graph.dialect.name.value,
-                "workcopy": copy_state,
-            }
+            {"status": "ready", "graph": graph_state, "store": store_state}
+            | ({"dialect": graph.dialect.name.value} if in_use else {})
+            | {"workcopy": copy_state}
             | ({"store_dialect": "postgres"} if postgres is not None else {})
         )
     return JSONResponse({"status": "not_ready", "graph": graph_state, "store": store_state}, status_code=503)

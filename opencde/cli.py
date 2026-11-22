@@ -101,6 +101,13 @@ def _fail(message: str) -> typer.Exit:
     return typer.Exit(code=1)
 
 
+def _needs_models() -> None:
+    """Refuse at once a command on the models in the IFC graph on a server that uses no graph (tiers 1 and 2,
+    F58 a), instead of waiting for a database that is not there."""
+    if not _settings().uses_graph:
+        raise _fail("this server uses no graph (OPENCDE_STORE_URL, and IFC-DB off), so it keeps no models there")
+
+
 # --------------------------------------------------------------------------- server
 
 
@@ -787,6 +794,7 @@ def ifcgraph_prune(
 
     if everything and not project_id:
         raise _fail("--all needs --project")
+    _needs_models()
     result = _run_both(
         lambda graphs, settings: prune_models(
             graphs.graph,
@@ -819,6 +827,8 @@ def ifcgraph_export(
 
     from opencde.bootstrap import make_storage
     from opencde.ifcgraph.service import IfcGraphService
+
+    _needs_models()
 
     async def work(graphs, settings):
         service = IfcGraphService(

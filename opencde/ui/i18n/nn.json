@@ -263,7 +263,6 @@
   "macro.confirm_hint": "Farlege handlingar spør etter ditt eige passord igjen.",
   "admin.title": "Administrasjon",
   "admin.overview.title": "Oversikt",
-  "admin.overview.db_down": "Grafdatabasen svarar ikkje. Ingenting kan lesast eller endrast før han er tilbake.",
   "admin.overview.app_sessions": "Aktive appsesjonar",
   "admin.overview.database": "Database",
   "admin.overview.dialect": "Dialekt",

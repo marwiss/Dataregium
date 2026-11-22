@@ -50,8 +50,8 @@ def make_graph(settings: Settings) -> Graph:
 
 
 def make_workcopy(settings: Settings) -> Graph | None:
-    """The working copy beside the archive (ADR 0024), when one is configured."""
-    if not settings.has_workcopy:
+    """The working copy beside the archive (ADR 0024), when one is configured and IFC-DB, its only user, is on."""
+    if not settings.has_workcopy or not settings.ifcgraph_enabled:
         return None
     return Graph(
         create_workcopy_driver(settings), settings.workcopy_database_name, get_dialect(settings.workcopy_graph_dialect)
@@ -81,9 +81,9 @@ def make_storage(settings: Settings) -> LocalStorage:
 
 
 def uses_graph(settings: Settings) -> bool:
-    """Whether the server keeps anything in a graph: not when PostgreSQL holds its own data and IFC-DB is off, the
-    IFC graph's being the models' alone (ADR 0029)."""
-    return settings.store_url is None or settings.ifcgraph_enabled
+    """Whether the server keeps anything in a graph (``Settings.uses_graph``): not in tiers 1 and 2, where
+    PostgreSQL holds its own data and IFC-DB is off (F58 a)."""
+    return settings.uses_graph
 
 
 class Store(NamedTuple):

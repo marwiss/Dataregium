@@ -263,7 +263,6 @@
   "macro.confirm_hint": "Hættulegar aðgerðir biðja aftur um þitt eigið lykilorð.",
   "admin.title": "Stjórnun",
   "admin.overview.title": "Yfirlit",
-  "admin.overview.db_down": "Grafgagnagrunnurinn svarar ekki. Ekkert er hægt að lesa eða breyta fyrr en hann er kominn aftur.",
   "admin.overview.app_sessions": "Virkar forritasetur",
   "admin.overview.database": "Gagnagrunnur",
   "admin.overview.dialect": "Mállýska",

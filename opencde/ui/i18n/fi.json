@@ -263,7 +263,6 @@
   "macro.confirm_hint": "Vaaralliset toiminnot kysyvät omaa salasanaasi uudelleen.",
   "admin.title": "Hallinta",
   "admin.overview.title": "Yleiskuva",
-  "admin.overview.db_down": "Graafitietokanta ei vastaa. Mitään ei voi lukea tai muuttaa ennen kuin se palaa.",
   "admin.overview.app_sessions": "Aktiiviset sovellusistunnot",
   "admin.overview.database": "Tietokanta",
   "admin.overview.dialect": "Murre",
