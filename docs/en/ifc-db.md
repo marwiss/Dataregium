@@ -297,7 +297,9 @@ storeys, 500 rooms a storey and 200 entries in every other list, with `cut` sayi
 Once the model is converted, the report gets a check `graph` of its own, with two kinds of issues. An instance that
 nothing with a GlobalId reaches, forward or backward, is a warning of the kind `reachability`, with its STEP id in
 `step_id` and its class in the message: only that number names it, as with an unused placement, so a change set can
-address it by its STEP id alone. A product whose shape the geometry pass could not build is an issue of the kind
+address it by its STEP id alone. Dataspatium's guard of the STEP ids, a loose `IfcDocumentReference` named
+`StepIdGuard` that holds the highest id the document has had, is no such warning: it is loose by design, and the
+server never proposes removing it. A product whose shape the geometry pass could not build is an issue of the kind
 `geometry`, with its GlobalId. Neither refuses the file: they come after the upload, and a warning leaves the status at
 `warnings`. Until the model is converted, the report has no check `graph`.
 An instance kept with the geometry in a STEP block, such as a loose point, is not

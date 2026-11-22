@@ -16,7 +16,7 @@ from ifc_db.validation import pack_report, unpack_report
 
 from opencde.ids import new_id
 from opencde.ifcgraph import service as service_module
-from opencde.ifcgraph.service import IfcGraphService
+from opencde.ifcgraph.service import IfcGraphService, guard_steps
 from opencde.storage import LocalStorage, make_key
 from tests.conftest import test_settings as make_settings  # aliased so pytest does not collect it as a test
 
@@ -534,3 +534,17 @@ async def test_a_change_set_that_keeps_theirs_is_tried_on_the_latest_version(
     )
     retried = await service._try_proposal(proposal_id, "project-1", key, base_version_index=1, author="anna")
     assert versions.asked == [2, 1] and retried["base_version_index"] == 1, "the approval's merge names its own"
+
+
+def test_the_apps_guards_of_the_step_ids_are_known_by_their_line() -> None:
+    """F70 d, SA-112: a guard is loose by design, so what no GlobalId reaches leaves it out; it is found in the file's
+    text, in IFC4's five attributes and IFC2X3's three, and only with a whole number for the id it holds."""
+    lines = [
+        b"#1=IFCCARTESIANPOINT((0.,0.,0.));\n",
+        b"#9002=IFCDOCUMENTREFERENCE($,'9001','StepIdGuard');\r\n",
+        b"#21= IFCDOCUMENTREFERENCE($,'20','StepIdGuard',$,$);\n",
+        b"#30=IFCDOCUMENTREFERENCE('https://example.org/a.pdf',$,'Drawing',$,$);\n",
+        b"#31=IFCDOCUMENTREFERENCE($,'A7','StepIdGuard',$,$);\n",
+        b"#32=IFCDOCUMENTREFERENCE($,'5','A note',$,$);\n",
+    ]
+    assert guard_steps(lines) == {9002, 21}

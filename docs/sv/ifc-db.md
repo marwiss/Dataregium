@@ -299,7 +299,9 @@ filen säger. Avstängt som standard; kapabilitetsdokumentet säger om det är p
 När modellen är konverterad får rapporten en egen kontroll, `graph`, med två slags anmärkningar. En instans som inget
 med ett GlobalId når, framåt eller bakåt, är en varning av slaget `reachability`, med sitt STEP-id i `step_id` och sin
 klass i meddelandet: bara det numret namnger den, som en placering som inget använder, så ett ändringsset kan peka ut
-den bara med sitt STEP-id. En produkt vars form geometripasset inte kunde bygga är en anmärkning av slaget `geometry`,
+den bara med sitt STEP-id. Dataspatiums vakt för STEP-id:na, en lös `IfcDocumentReference` med namnet `StepIdGuard`
+som håller det högsta id dokumentet har haft, är ingen sådan varning: den är lös med avsikt, och servern föreslår
+aldrig att den tas bort. En produkt vars form geometripasset inte kunde bygga är en anmärkning av slaget `geometry`,
 med sitt GlobalId. Ingen av dem avvisar filen: de kommer efter uppladdningen, och en varning ger statusen `warnings`.
 Innan modellen är konverterad har rapporten ingen kontroll `graph`.
 En instans som hålls med geometrin i ett STEP-block, som en lös punkt, listas inte:

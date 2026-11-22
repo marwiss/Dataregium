@@ -29,9 +29,9 @@ import re
 import sys
 import tempfile
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
-from typing import Annotated, Any
+from typing import IO, Annotated, Any
 
 from fastapi import Depends, Request
 from ifc_db.exporter import NotExportable, export_records
@@ -168,6 +168,26 @@ def _op_issue(failed: dict[str, Any]) -> dict[str, Any]:
         "op": int(failed["op"]),
         "tool": failed["tool"],
     }
+
+
+#: The app's guard of the STEP ids (F70 d), as ``_ifc_is_guard`` in ``ops.py`` knows it: a loose
+#: IfcDocumentReference named StepIdGuard whose identification is a whole number, loose by design.
+_GUARD = re.compile(
+    rb"^\s*#([0-9]+)\s*=\s*IFCDOCUMENTREFERENCE\s*\(\s*(?:\$|'[^']*')\s*,\s*'([0-9]+)'\s*,\s*'StepIdGuard'"
+)
+
+
+def guard_steps(lines: Iterable[bytes]) -> set[int]:
+    """The STEP ids of the app's guards among the lines of a file, which IfcOpenShell writes one instance a line."""
+    return {int(found.group(1)) for line in lines if (found := _GUARD.match(line))}
+
+
+def _lines(stream: IO[bytes], limit: int) -> Iterator[bytes]:
+    """A file's lines up to ``limit`` bytes in all, none longer than a megabyte."""
+    read = 0
+    while read < limit and (line := stream.readline(1 << 20)):
+        read += len(line)
+        yield line
 
 
 def _unreached_issue(node: dict[str, Any]) -> dict[str, Any]:
@@ -431,7 +451,7 @@ class IfcGraphService:
         nothing), and the products whose shape could not be built. A failure here is logged and leaves the report as
         the checks of the file made it."""
         try:
-            unreached = await unreachable(self.models, model_id)
+            unreached = await self._unreached(model_id)
             issues = [_unreached_issue(node) for node in unreached] + list(geometry)
             await self.conversions.set_fields(
                 model_id,
@@ -458,7 +478,38 @@ class IfcGraphService:
     async def unreached(self, model_id: str) -> list[dict[str, Any]]:
         """The instances of a converted model that no GlobalId reaches, forward or backward, as ``{"step",
         "ifc_class"}`` (IFC-DB F13 a)."""
-        return await unreachable(self.models, model_id)
+        return await self._unreached(model_id)
+
+    async def _unreached(self, model_id: str) -> list[dict[str, Any]]:
+        """What no GlobalId reaches in a converted model but the app's guards of the STEP ids, which are loose by
+        design (F70 d): IFC-DB answers what no GlobalId reaches as it is (its B-119), so the server leaves them
+        out, finding them in the version's file rather than asking the library's nodes (SA-112). The file is read
+        only when an IfcDocumentReference is among what is out of reach."""
+        found = await unreachable(self.models, model_id)
+        if not any(node.get("ifc_class") == "IfcDocumentReference" for node in found):
+            return found
+        conversion = await self.conversions.get(model_id) or {}
+        key, file_name = str(conversion.get("storage_key") or ""), str(conversion.get("file_name") or "")
+        if not key:
+            return found
+        guards = await asyncio.to_thread(self._guards_in, key, file_name)
+        return [node for node in found if int(node["step"]) not in guards]
+
+    def _guards_in(self, storage_key: str, file_name: str) -> set[int]:
+        """The STEP ids of the app's guards in a version's file, read as text up to the upload limit; an ``.ifczip``
+        is read from its one IFC file as it is unpacked."""
+        path = self.storage.path(storage_key)
+        limit = self.settings.max_upload_bytes
+        with contextlib.ExitStack() as stack:
+            if file_name.lower().endswith(".ifczip"):
+                archive = stack.enter_context(zipfile.ZipFile(path))
+                members = [m for m in archive.infolist() if not m.is_dir() and m.filename.lower().endswith(".ifc")]
+                if len(members) != 1:
+                    return set()
+                stream: IO[bytes] = stack.enter_context(archive.open(members[0]))
+            else:
+                stream = stack.enter_context(path.open("rb"))
+            return guard_steps(_lines(stream, limit))
 
     async def geometry(
         self, *, model_id: str, lod: str = "full", classes: tuple[str, ...] = (), storey: str | None = None
