@@ -128,7 +128,21 @@ def serve(
 
     settings = _settings()  # fail fast on bad configuration, before the socket opens
     if settings.is_local and host not in LOOPBACK_HOSTS:
-        raise _fail(f"the local engine listens on the loopback only, not on {host} (ADR 0023)")
+        if not settings.local_in_container:
+            raise _fail(
+                f"the local engine listens on the loopback only, not on {host} (ADR 0023); in a container, "
+                "compose.local.yaml sets OPENCDE_LOCAL_IN_CONTAINER=true"
+            )
+        if not _in_a_container():
+            raise _fail(
+                "OPENCDE_LOCAL_IN_CONTAINER is set, but this process runs in no container: the local engine "
+                "listens on the loopback only (ADR 0023, F77 a)"
+            )
+        typer.secho(
+            f"NOTE    the local engine listens on {host} inside its container; Compose publishes it on the "
+            "host's loopback alone (F77 a)",
+            err=True,
+        )
     uvicorn.run(
         "opencde.asgi:app",
         host=host,
@@ -139,6 +153,11 @@ def serve(
         server_header=False,
         log_config=None,
     )
+
+
+def _in_a_container() -> bool:
+    """Whether this process runs in a container, by the file Docker or Podman puts in its root."""
+    return Path("/.dockerenv").exists() or Path("/run/.containerenv").exists()
 
 
 def _interactive() -> bool:

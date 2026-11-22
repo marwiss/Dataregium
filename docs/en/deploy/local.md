@@ -140,6 +140,16 @@ uv run opencde init --local   # .env: OPENCDE_ENVIRONMENT=local, random password
 docker compose up -d          # the API on http://127.0.0.1:8000 only; the databases are never published
 ```
 
+In its container the engine listens on the container's own interfaces, since
+the container's loopback is not the computer's; `compose.local.yaml` publishes
+the port on the computer's loopback alone and says so with
+`OPENCDE_LOCAL_IN_CONTAINER=true`. `opencde serve` refuses that setting in a
+process that runs in no container, and `opencde doctor` shows where the engine
+listens. Never publish the engine's port on every interface, as
+`docker run -p 8000:8000` does: the network would then reach an engine made for
+one person, and the `Host` check stops a browser that a page has fooled, not a
+program on the network that writes its own `Host`.
+
 ## Podman
 
 The Compose files work with Podman as well as Docker: the images have full names,

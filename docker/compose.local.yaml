@@ -11,4 +11,7 @@ services:
       - "127.0.0.1:${OPENCDE_LOCAL_PORT:-8000}:8000"
     environment:
       OPENCDE_ENVIRONMENT: local
+      # The engine listens on the container's own interfaces, which the port above publishes on the host's
+      # loopback alone (F77 a); outside a container the server refuses this and keeps to the loopback.
+      OPENCDE_LOCAL_IN_CONTAINER: "true"
       OPENCDE_PUBLIC_URL: "http://127.0.0.1:${OPENCDE_LOCAL_PORT:-8000}"

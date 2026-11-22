@@ -39,6 +39,11 @@ the commit history.
 - The check of what no GlobalId reaches (tier 3) leaves out Dataspatium's guard of the STEP ids, a loose
   `IfcDocumentReference` named `StepIdGuard`, and the server's proposal to remove what nothing reaches leaves it in
   the file.
+- The local engine starts in its container (F77 a): `compose.local.yaml` sets `OPENCDE_LOCAL_IN_CONTAINER=true`,
+  so that `opencde serve` listens on the container's own interfaces, which Compose publishes on the computer's
+  loopback alone; outside a container the server refuses the setting and keeps to the loopback, and
+  `opencde doctor` shows where the engine listens. Before, the engine's container never started, since `serve`
+  refused every interface but the loopback, which a container's port does not reach.
 - A tool call of the MCP endpoint that cannot reach PostgreSQL answers 503 `unavailable`, as the API's routes
   do, instead of an internal error.
 - Compose keeps the server's own data in PostgreSQL by default (ADR 0029): `docker/compose.yaml` starts the service

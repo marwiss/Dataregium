@@ -177,6 +177,9 @@ async def run_checks(
     ``postgres`` when it holds that data. Without IFC-DB a server with PostgreSQL uses no graph, and none is asked."""
     checks = [Check("version", True, value=__version__), Check("environment", True, value=settings.environment)]
     checks.append(Check("tier", True, value=settings.tier.value))
+    if settings.is_local:  # where the engine listens (ADR 0023, F77 a)
+        where = "local_in_container" if settings.local_in_container else "local_loopback"
+        checks.append(Check("local_listen", True, where))
     checks.append(Check("apis", True, value=", ".join(settings.apis)))
     if settings.bim_on:  # the BIM functions run IfcOpenShell in their workers (F59)
         ready = importlib.util.find_spec("ifcopenshell") is not None

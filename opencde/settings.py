@@ -195,6 +195,12 @@ class Settings(BaseSettings):
         "a person's own computer: http on the loopback only, with a Host check, explicit CORS origins and the "
         "passwords `opencde init --local` wrote (ADR 0023).",
     )
+    local_in_container: bool = Field(
+        False,
+        description="The local engine runs in a container (F77 a), whose own interfaces `opencde serve` may then "
+        "listen on, since Compose publishes the port on the host's loopback alone; compose.local.yaml sets it, and "
+        "`serve` refuses it in a process that runs in no container.",
+    )
     public_url: str = Field(
         "http://127.0.0.1:8000",
         description="Base URL clients use to reach the server. Used in links and OAuth2 metadata. https in production.",
