@@ -17,6 +17,7 @@
 <section class="card">
   <h2>{{ t("admin.overview.database") }}</h2>
   <dl class="facts">
+    <dt>{{ t("tier.title") }}</dt><dd>{{ t("tier." ~ tier) }}</dd>
     <dt>{{ t("admin.overview.dialect") }}</dt><dd>{{ dialect }}</dd>
     <dt>{{ t("common.status") }}</dt><dd>{% if graph_ok %}<span class="badge badge--success">{{ t("admin.overview.answers") }}</span>{% else %}<span class="badge badge--danger">{{ t("admin.overview.unavailable") }}</span>{% endif %}</dd>
   </dl>

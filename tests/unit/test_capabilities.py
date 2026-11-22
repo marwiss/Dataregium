@@ -15,7 +15,8 @@ def test_capabilities_document_has_the_agreed_shape_and_no_secrets(client: TestC
     assert response.headers["cache-control"] == "public, max-age=300"
     assert response.headers["access-control-allow-origin"] == "*", "clients read it cross-origin"
     body = response.json()
-    assert set(body) == {"server", "apis", "bcf_versions", "scopes", "extensions", "limits", "links"}
+    assert set(body) == {"server", "tier", "apis", "bcf_versions", "scopes", "extensions", "limits", "links"}
+    assert body["tier"] == "experimental", "unset, nothing is held back"
     assert body["server"]["name"] == "Dataregium OpenCDE server" and body["server"]["public_url"] == "http://testserver"
     assert body["apis"] == {"foundation": "1.0", "bcf": "3.0", "documents": "1.0"}
     assert body["bcf_versions"] == ["3.0", "2.1"]
@@ -166,6 +167,16 @@ def test_a_server_without_a_graph_announces_none_and_mounts_no_graph_query(tmp_p
         assert extensions["graph_query"] == {"enabled": False}
         assert client.post("/admin/api/graph/query", json={"cypher": "RETURN 1"}).status_code == 404
         assert client.app.state.workcopy is None, "the working copy is IFC-DB's alone"  # ty: ignore[unresolved-attribute]
+
+
+def test_a_server_of_tier_1_offers_the_documents_api_and_says_so(tmp_path: Path) -> None:
+    """OB-46 b: tier 1 (documents) offers the Foundation and Documents APIs unless OPENCDE_APIS says less, and the
+    capabilities name the tier, as Dataspatium reads it (SA-105)."""
+    settings = make_settings(tmp_path, tier="documents", store_url="postgresql://cde@127.0.0.1:9/cde")
+    with TestClient(create_app(settings, startup_wait_seconds=0)) as client:
+        body = client.get("/.well-known/dataregium").json()
+        assert body["tier"] == "documents" and body["apis"] == {"foundation": "1.0", "documents": "1.0"}
+        assert body["bcf_versions"] == [] and client.get("/bcf/versions").status_code == 404
 
 
 def test_the_proposals_against_a_document_are_announced_beside_the_trial(client: TestClient) -> None:

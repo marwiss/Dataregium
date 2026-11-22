@@ -50,6 +50,7 @@ def offered_apis(settings: Settings) -> dict[str, str]:
 def capabilities(settings: Settings) -> dict[str, Any]:
     return {
         "server": {"name": "Dataregium OpenCDE server", "version": __version__, "public_url": settings.public_url},
+        "tier": settings.tier.value,  # documents, bim-gis or experimental (OB-46 b, agreed with Dataspatium)
         "apis": offered_apis(settings),
         "bcf_versions": [version for version in (BCF_VERSION, BCF_OLDER_VERSION) if settings.offers(f"bcf-{version}")],
         "scopes": offered_scopes(settings),

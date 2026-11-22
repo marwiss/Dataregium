@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from opencde.settings import GraphDialect, Settings
+from opencde.settings import GraphDialect, Settings, Tier
 
 
 def _settings(**values: object) -> Settings:
@@ -29,6 +29,26 @@ def test_production_requires_graph_password_and_secret_key() -> None:
     with pytest.raises(ValidationError, match="LOCALHOST"):
         _settings(environment="production", **PROD, allow_localhost_redirects=True)
     assert _settings(environment="production", **PROD).is_production
+
+
+def test_a_tier_holds_back_what_is_above_it_and_tier_1_offers_the_documents_api() -> None:
+    """OB-46 b: a function can be off within the tier, never on above it, and tiers 1 and 2 keep the server's own
+    data in PostgreSQL alone (F58 a); unset, nothing is held back."""
+    postgres = {"environment": "development", "store_url": "postgresql://cde@db/cde"}
+    assert _settings(environment="development").tier is Tier.EXPERIMENTAL
+    documents = _settings(**postgres, tier="documents")
+    assert documents.apis == ["documents"] and documents.offers("foundation") and not documents.offers("bcf-3.0")
+    assert _settings(**postgres, tier="bim-gis").apis == ["bcf-3.0", "bcf-2.1", "documents"]
+    for values, words in (
+        ({"tier": "documents", "apis": ["documents", "bcf-2.1"]}, "OPENCDE_APIS names bcf-2.1"),
+        ({"tier": "documents", "mcp_enabled": True}, "OPENCDE_MCP_ENABLED is tier 2"),
+        ({"tier": "bim-gis", "ifcgraph_enabled": True}, "OPENCDE_IFC_DB_ENABLED is tier 3"),
+    ):
+        with pytest.raises(ValidationError, match=words):
+            _settings(**postgres, **values)
+    with pytest.raises(ValidationError, match="PostgreSQL alone"):
+        _settings(environment="development", tier="bim-gis")
+    assert _settings(environment="development", tier="experimental", ifcgraph_enabled=True).uses_graph
 
 
 def test_production_with_postgresql_needs_its_password_and_a_graph_password_only_with_a_graph() -> None:

@@ -424,6 +424,7 @@
   "admin.settings.check": "Check",
   "check.version": "Version",
   "check.environment": "Environment",
+  "check.tier": "Tier",
   "check.apis": "APIs offered",
   "check.public_url": "Public URL",
   "check.graph": "Graph database",
@@ -514,5 +515,9 @@
   "error.project.not_found": "No such project.",
   "error.project.member_not_found": "No such user or project.",
   "error.project.unknown_extensions": "Unknown extension lists: {names}.",
-  "error.project.ai_policy": "The AI policy must be local or cloud."
+  "error.project.ai_policy": "The AI policy must be local or cloud.",
+  "tier.title": "Tier",
+  "tier.documents": "Documents",
+  "tier.bim-gis": "BIM + GIS",
+  "tier.experimental": "Experimental"
 }

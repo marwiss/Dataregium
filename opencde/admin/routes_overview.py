@@ -96,6 +96,7 @@ async def overview(
             recent=recent,
             graph_ok=reachable,
             dialect="postgres" if postgres is not None else graph.dialect.name.value,  # the store's
+            tier=settings.tier.value,
         ),
     )
 

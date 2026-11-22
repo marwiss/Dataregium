@@ -175,6 +175,7 @@ async def run_checks(
     """Every check, of the IFC graph ``graph`` and of the ``store`` of the server's own data beside it, or of
     ``postgres`` when it holds that data. Without IFC-DB a server with PostgreSQL uses no graph, and none is asked."""
     checks = [Check("version", True, value=__version__), Check("environment", True, value=settings.environment)]
+    checks.append(Check("tier", True, value=settings.tier.value))
     checks.append(Check("apis", True, value=", ".join(settings.apis)))
     https = settings.public_url.startswith("https://")
     fine = https or settings.environment != "production"

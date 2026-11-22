@@ -424,6 +424,7 @@
   "admin.settings.check": "Kontroll",
   "check.version": "Version",
   "check.environment": "Miljö",
+  "check.tier": "Nivå",
   "check.apis": "API:er som erbjuds",
   "check.public_url": "Publik adress",
   "check.graph": "Grafdatabas",
@@ -514,5 +515,9 @@
   "error.project.not_found": "Det finns inget sådant projekt.",
   "error.project.member_not_found": "Det finns ingen sådan användare eller inget sådant projekt.",
   "error.project.unknown_extensions": "Okända utökningslistor: {names}.",
-  "error.project.ai_policy": "AI-policyn måste vara local eller cloud."
+  "error.project.ai_policy": "AI-policyn måste vara local eller cloud.",
+  "tier.title": "Nivå",
+  "tier.documents": "Dokument",
+  "tier.bim-gis": "BIM och GIS",
+  "tier.experimental": "Experimentell"
 }

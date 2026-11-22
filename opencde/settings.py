@@ -131,6 +131,14 @@ class GraphDialect(StrEnum):
     MEMGRAPH = "memgraph"
 
 
+class Tier(StrEnum):
+    """What a server offers (B-78, F55 c, F56 c): each tier holds the ones below it."""
+
+    DOCUMENTS = "documents"  # 1: the Foundation and Documents APIs
+    BIM_GIS = "bim-gis"  # 2: BCF 3.0 and 2.1 and the AI endpoint beside them
+    EXPERIMENTAL = "experimental"  # 3: IFC-DB's graph too
+
+
 class Settings(BaseSettings):
     """All runtime configuration. Instantiate once at startup."""
 
@@ -173,6 +181,13 @@ class Settings(BaseSettings):
         return [(old, _new_name(old)) for old in self._old_names]
 
     # --- deployment -------------------------------------------------------
+    tier: Tier = Field(
+        Tier.EXPERIMENTAL,
+        description="The tier the server offers (OB-46 b): documents (1: the Foundation and Documents APIs), "
+        "bim-gis (2: BCF 3.0 and 2.1 too, and the MCP endpoint) or experimental (3: IFC-DB's graph too). A function "
+        "can be off within the tier, never on above it, and tiers 1 and 2 keep the server's own data in PostgreSQL "
+        "alone (F58 a). `opencde init --tier` writes it; unset, nothing is held back.",
+    )
     environment: Literal["development", "test", "production", "local"] = Field(
         "production",
         description="'development' relaxes the https requirement and prints readable logs; 'local' is the engine on "
@@ -526,6 +541,27 @@ class Settings(BaseSettings):
         data in two places cannot answer (ADR 0029)."""
         if self.store_url is not None and self.store_graph_uri is not None:
             raise ValueError("OPENCDE_STORE_URL and OPENCDE_STORE_GRAPH_URI exclude each other: one store holds it all")
+        return self
+
+    @model_validator(mode="after")
+    def _within_the_tier(self) -> Self:
+        """A function can be off within the tier, never on above it (OB-46 b). Tier 1 offers the Documents API
+        unless OPENCDE_APIS says otherwise; going down a tier hides what is above it and keeps its data."""
+        if self.tier is Tier.EXPERIMENTAL:
+            return self
+        name = f"OPENCDE_TIER={self.tier.value}"
+        if self.tier is Tier.DOCUMENTS:
+            if "apis" not in self.model_fields_set:
+                object.__setattr__(self, "apis", ["documents"])
+            above = [api for api in self.apis if api != "documents"]
+            if above:
+                raise ValueError(f"OPENCDE_APIS names {', '.join(above)}, which tier 2 (bim-gis) offers, beyond {name}")
+            if self.mcp_enabled:
+                raise ValueError(f"OPENCDE_MCP_ENABLED is tier 2 (bim-gis), beyond {name}")
+        if self.ifcgraph_enabled:
+            raise ValueError(f"OPENCDE_IFC_DB_ENABLED is tier 3 (experimental), beyond {name}")
+        if self.store_url is None:
+            raise ValueError(f"{name} keeps the server's own data in PostgreSQL alone: set OPENCDE_STORE_URL (F58 a)")
         return self
 
     @field_validator("workcopy_graph_uri")
