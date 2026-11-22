@@ -2,8 +2,10 @@
 """Dataspatium's write tools on an IFC model and its topology of the walls, with Dataspatium's own code (ADR 0021).
 
 A copy of Dataspatium's class ``_ChangeSet`` and of its topology (``_ifc_topology``), with the module-level helpers
-they call (``python/dataspatium.py``, main, commit ffd1f6e of 2026-11-22), kept in step by hand, so that one
-list of operations gives the same model in the app and on the server, and the server finds the rooms the app finds.
+they call and the guard of the STEP ids that the app's writers keep (``_ifc_hold_ids`` and ``_ifc_keep_guard``,
+the owner's decision F70 d) (``python/dataspatium.py``, main, commit b408004 of 2026-11-22), kept in step by hand,
+so that one list of operations gives the same model in the app and on the server, a version the server writes
+keeps the document's STEP ids as the app's do, and the server finds the rooms the app finds.
 A change set that carries the operations as ``ops`` (``documents/changes.py``) is tried by the apply worker
 (``apply.py``), which runs them with :func:`run` on the base version's file before its changes; the topology worker
 (``topology.py``) finds the rooms of a file (the owner's decision F36 a: the server makes the client's room check).
@@ -41,13 +43,15 @@ Against the original only this differs, so that the next copy is a diff away:
   ``_ifc_schema``, ``_ifc_declaration``, ``_ifc_enum_items``, ``_ifc_concrete`` and ``IFC_NEW_SCHEMAS``, which the
   original keeps further down): not its read tools ``_ifc_class_search`` and ``_ifc_class_report`` with their
   helpers;
+- of the guard of the STEP ids, ``_ifc_keep_ids`` is left out, which takes the highest id from the app's dataset:
+  the apply worker holds the ids of the base version's file and of the guards in it;
 - the owner settings: :class:`ServerChangeSet`, below the copy, overrides ``owner_settings``, so that the owner
   histories IfcOpenShell's API makes name the proposer and this server instead of the file's own owner;
 - ``_ifc_topology`` also gives each storey the GlobalIds of the walls it could not read (``unread_walls``), and
   ``_topo_plan`` those of the walls with an open end (``dangling``), for the report's rooms, which name elements by
   GlobalId; the lines that do so are marked ``# Dataregium``;
-- ruff formats the copy in lines of 120 characters and lets its idioms be (``pyproject.toml``), and forty-two
-  comments quiet bandit (``# nosec B110`` and ``B112``, seventeen) and ty (``# ty: ignore``, twenty-five); no other
+- ruff formats the copy in lines of 120 characters and lets its idioms be (``pyproject.toml``), and forty-three
+  comments quiet bandit (``# nosec B110`` and ``B112``, eighteen) and ty (``# ty: ignore``, twenty-five); no other
   statement changed. ``unbound`` and ``host_of`` are defined once each, as in the original since its 2cbe038: the
   later ``unbound`` and the earlier ``host_of``, which also finds the wall of an opening that nothing fills.
 """
@@ -77,6 +81,78 @@ def _is_na(v):
     except Exception:  # nosec B110
         pass
     return isinstance(v, float) and math.isnan(v)
+
+
+# The STEP id guard (decision F70 d, the same form as Dataregium's server writes): a loose IfcDocumentReference named StepIdGuard
+# whose Identification (ItemReference in IFC2X3; attribute 2 in all three schemas, the name 3) is the highest id the document has
+# had, at a fresh id one above it. It keeps the id history in the file itself, so that no writer gives a deleted id again (ifcmerge
+# merges three ways on the ids). It is added only when the file's own highest id is below the history's, never edited or moved,
+# and of several the highest is kept.
+STEP_ID_GUARD = "StepIdGuard"
+_ifc_ids = {}  # id(model) -> {"high": the highest id the document has had, "made": the id of the guard made on opening or None}
+
+
+def _ifc_is_guard(e):
+    """Whether an instance is a STEP id guard (its protected id an integer)."""
+    try:
+        return e.is_a() == "IfcDocumentReference" and e[2] == STEP_ID_GUARD and int(str(e[1]).strip()) >= 0
+    except Exception:
+        return False
+
+
+def _ifc_guards(model):
+    """The STEP id guards of a model as [(guard, protected id)], lowest id first."""
+    try:
+        refs = model.by_type("IfcDocumentReference")
+    except Exception:
+        return []
+    return sorted(((e, int(str(e[1]).strip())) for e in refs if _ifc_is_guard(e)), key=lambda g: g[0].id())
+
+
+def _ifc_new_guard(model, high):
+    """A guard of `high` at the fresh id high + 1 (above IfcOpenShell's counter only if that refuses the id)."""
+    try:
+        return model.create_entity("IfcDocumentReference", None, str(int(high)), STEP_ID_GUARD, id=int(high) + 1)
+    except Exception:
+        return model.create_entity("IfcDocumentReference", None, str(int(high)), STEP_ID_GUARD)
+
+
+def _ifc_hold_ids(model, known=0):
+    """Hold the model's id history while it is changed: the highest id it has had is the most of `known` (the dataset's, which
+    data/model keeps), the file's own highest and its guards' ids and protected ids. When the file's own is below that, a guard is
+    made at once, which also makes IfcOpenShell number new instances above it; _ifc_keep_guard decides before writing whether it
+    stays. Returns the model."""
+    top = int(model.get_max_id() or 0)  # freshly opened: the file's highest id
+    high = max(int(known or 0), top)
+    for g, n in _ifc_guards(model):
+        high = max(high, n, g.id())
+    made = _ifc_new_guard(model, high).id() if top < high else None
+    _ifc_ids[id(model)] = {"high": high, "made": made}
+    return model
+
+
+def _ifc_keep_guard(model, source=None):
+    """Before writing a model held by _ifc_hold_ids (`source` when the written model is another one): a guard only when the file's
+    own highest id is below the highest the document has had (the one made on opening stays then and goes otherwise; a new one when
+    the change deleted the highest), and of several guards only the highest. Returns the model."""
+    state = _ifc_ids.pop(id(source if source is not None else model), None) or {}
+    made = state.get("made") if source is None or source is model else None
+    high = int(state.get("high") or 0)
+    for g, n in _ifc_guards(model):
+        if g.id() != made:
+            high = max(high, n, g.id())
+    top = max((e.id() for e in model if e.id() != made), default=0)
+    if made is not None and top >= high:
+        try:
+            model.remove(model.by_id(made))
+        except Exception:  # nosec B110
+            pass
+    elif made is None and top < high:
+        _ifc_new_guard(model, high)
+    for g, _ in _ifc_guards(model)[:-1]:
+        if not model.get_inverse(g):
+            model.remove(g)
+    return model
 
 
 def _ifc_text(v):
