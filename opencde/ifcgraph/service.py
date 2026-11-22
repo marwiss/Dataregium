@@ -35,6 +35,7 @@ from typing import IO, Annotated, Any
 
 from fastapi import Depends, Request
 from ifc_db.exporter import NotExportable, export_records
+from ifc_db.files import worker_environment
 from ifc_db.gherkin_install import MANIFEST
 from ifc_db.graph import rebuild_point_indexes
 from ifc_db.importer import delete_model, import_records, model_facts, models
@@ -1400,10 +1401,12 @@ class IfcGraphService:
         self, command: list[str], what: str, answers: tuple[int, ...] = (0,), seconds: float | None = None
     ) -> str:
         """Run a worker with the time limit, the module's or a shorter one. Returns what it wrote to stdout, for an
-        exit code that is an answer."""
+        exit code that is an answer. It runs in IFC-DB's worker environment, as the library's own workers do:
+        OpenBLAS on one thread and glibc's malloc on two arenas unless set, since every thread and arena reserves
+        address space that the worker's memory limit counts."""
         limit = self.settings.ifcgraph_timeout_seconds if seconds is None else seconds
         process = await asyncio.create_subprocess_exec(
-            *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=worker_environment()
         )
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=limit)

@@ -548,3 +548,14 @@ def test_the_apps_guards_of_the_step_ids_are_known_by_their_line() -> None:
         b"#32=IFCDOCUMENTREFERENCE($,'5','A note',$,$);\n",
     ]
     assert guard_steps(lines) == {9002, 21}
+
+
+async def test_the_servers_workers_start_as_ifc_dbs_own_do(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """IFC-DB's worker_environment() (its eb110b0): OpenBLAS on one thread and malloc on two arenas unless set, which
+    the memory limit counts."""
+    monkeypatch.delenv("OPENBLAS_NUM_THREADS", raising=False)
+    monkeypatch.setenv("MALLOC_ARENA_MAX", "4")
+    service = IfcGraphService(Graph(), LocalStorage(tmp_path), make_settings(tmp_path, ifcgraph_enabled=True))
+    shown = "import os; print(os.environ['OPENBLAS_NUM_THREADS'], os.environ['MALLOC_ARENA_MAX'])"
+    printed = await service._in_a_process([sys.executable, "-c", shown], "the environment")
+    assert printed.split() == ["1", "4"], "a value already set stays"
