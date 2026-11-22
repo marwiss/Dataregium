@@ -1106,7 +1106,7 @@ wheels = [
 [[package]]
 name = "ifc-db"
 version = "1.0.0"
-source = { git = "https://github.com/marwiss/IFC-DB?rev=34d7d45#34d7d4550ce72b44f92e3620ff6fcf6b1e190e2f" }
+source = { git = "https://github.com/marwiss/IFC-DB?rev=bfb1c49#bfb1c498e7c24aca3a7646bb14a978f748620bad" }
 
 [package.optional-dependencies]
 ifcopenshell = [
@@ -2045,8 +2045,8 @@ requires-dist = [
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.31" },
     { name = "fastapi", specifier = ">=0.160" },
     { name = "httpx", specifier = ">=0.28" },
-    { name = "ifc-db", git = "https://github.com/marwiss/IFC-DB?rev=34d7d45" },
-    { name = "ifc-db", extras = ["ifcopenshell"], marker = "extra == 'ifc-db'", git = "https://github.com/marwiss/IFC-DB?rev=34d7d45" },
+    { name = "ifc-db", git = "https://github.com/marwiss/IFC-DB?rev=bfb1c49" },
+    { name = "ifc-db", extras = ["ifcopenshell"], marker = "extra == 'ifc-db'", git = "https://github.com/marwiss/IFC-DB?rev=bfb1c49" },
     { name = "ifcclash", marker = "extra == 'ifc-db'", specifier = ">=0.9.0" },
     { name = "itsdangerous", specifier = ">=2.2" },
     { name = "jinja2", specifier = ">=3.1.6" },

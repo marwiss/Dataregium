@@ -50,3 +50,17 @@ def test_the_rules_see_none_of_the_servers_settings(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("OPENCDE_SECRET_KEY", "not for the rules")
     monkeypatch.setenv("OPENCDE_GRAPH_PASSWORD", "nor this")
     assert not [key for key in gherkin._clean_environment() if key.startswith("OPENCDE_")]
+
+
+def test_the_lock_holds_the_rev_the_project_names() -> None:
+    """CI and the image sync with uv.lock as it is (UV_FROZEN, uv sync --frozen), so a rev moved in pyproject.toml
+    alone would keep the old IFC-DB without a word."""
+    sources = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["uv"]["sources"]
+    rev = sources["ifc-db"]["rev"]
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))["package"]
+    (library,) = [package for package in lock if package["name"] == "ifc-db"]
+    named, commit = library["source"]["git"].split("#", 1)
+    assert named.endswith(f"?rev={rev}") and commit.startswith(rev), "uv lock after moving the rev"
+    (server,) = [package for package in lock if package["name"] == "opencde-server"]
+    wanted = [entry for entry in server["metadata"]["requires-dist"] if entry["name"] == "ifc-db"]
+    assert wanted and all(entry["git"].endswith(f"?rev={rev}") for entry in wanted)
