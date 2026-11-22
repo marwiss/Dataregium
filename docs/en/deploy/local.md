@@ -123,9 +123,10 @@ writes a `.env` for that, always in tier 3: PostgreSQL for the server's own data
 the graph beside it for the models, and IFC-DB and the MCP endpoint on.
 `OPENCDE_ENVIRONMENT=local` makes the server keep to it: the public URL must be
 the loopback, the databases' passwords and a secret key are required, the CORS
-origins must be named (`*` is refused), no
-database address may be published, and `opencde serve` refuses any interface
-but the loopback. A request whose `Host` is not `127.0.0.1`, `localhost` or
+origins must be named (`*` is refused), no database address may be announced
+(`OPENCDE_GRAPH_PUBLIC_BOLT_URL`), and `opencde serve` refuses any interface but
+the loopback, save the container's own in the engine's container (below). A
+request whose `Host` is not `127.0.0.1`, `localhost` or
 `::1` is answered `421`, before anything else, so that a page on the internet
 cannot reach the engine through a name of its own that resolves to the
 loopback. A public page that asks in its preflight
@@ -135,7 +136,6 @@ file writes are `null` (Dataspatium opened from a file), `http://127.0.0.1:8080`
 (a local http server) and `https://marwiss.github.io`; drop `null` when the
 app runs from an http origin.
 
-```sh
 The engine runs in its container or on the computer itself, with its databases
 in Compose either way. In its container:
 
@@ -169,7 +169,7 @@ uv run opencde serve                         # the engine on http://127.0.0.1:80
 loopback alone and starts no API container; programs on the same computer reach
 the databases, with the passwords in `.env`. The `.env` of either way names the
 databases on the loopback, and inside Compose the stack's own addresses replace
-them. The engine on the computer keeps its files in `data/` beside the checkout
+them. The engine on the computer keeps its files in the checkout's `data/`
 (`OPENCDE_DATA_DIR`), the engine in its container in its volume, so keep to one
 way for one installation.
 
@@ -190,3 +190,6 @@ of CI.
 ```sh
 docker compose down -v   # removes the volumes: databases and files
 ```
+
+A server run on the computer itself keeps its files in the checkout's `data/`
+instead; remove that folder too.

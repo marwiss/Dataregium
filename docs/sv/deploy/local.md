@@ -123,9 +123,10 @@ skriver en `.env` för det, alltid i nivå 3: PostgreSQL för serverns egna data
 grafen bredvid för modellerna, och IFC-DB och MCP-ändpunkten påslagna.
 `OPENCDE_ENVIRONMENT=local` får servern att hålla sig till det: den publika
 adressen måste vara loopback, databasernas lösenord och hemlig nyckel krävs,
-CORS-ursprungen måste namnges (`*` avvisas), ingen
-databasadress får publiceras, och `opencde serve` vägrar andra gränssnitt än
-loopback. En begäran vars `Host` inte är `127.0.0.1`, `localhost` eller `::1`
+CORS-ursprungen måste namnges (`*` avvisas), ingen databasadress får annonseras
+(`OPENCDE_GRAPH_PUBLIC_BOLT_URL`), och `opencde serve` vägrar andra gränssnitt än
+loopback, utom containerns egna i motorns container (se nedan). En begäran vars
+`Host` inte är `127.0.0.1`, `localhost` eller `::1`
 besvaras med `421` före allt annat, så att en sida på internet inte når motorn
 genom ett eget namn som pekar på loopback. En publik sida som frågar i sin
 preflight (`Access-Control-Request-Private-Network: true`) tillåts när dess
@@ -134,7 +135,6 @@ filen skriver är `null` (Dataspatium öppnad från en fil), `http://127.0.0.1:8
 (en lokal http-server) och `https://marwiss.github.io`; ta bort `null` när
 appen körs från ett http-ursprung.
 
-```sh
 Motorn körs i sin container eller direkt på datorn, med sina databaser i Compose
 i båda fallen. I sin container:
 
@@ -168,7 +168,7 @@ uv run opencde serve                         # the engine on http://127.0.0.1:80
 och startar ingen API-container; program på samma dator når databaserna, med
 lösenorden i `.env`. Båda sättens `.env` anger databaserna på loopback, och inne i
 Compose ersätts de av stackens egna adresser. Motorn på datorn har sina filer i
-`data/` bredvid utcheckningen (`OPENCDE_DATA_DIR`), motorn i sin container i sin
+utcheckningens `data/` (`OPENCDE_DATA_DIR`), motorn i sin container i sin
 volym, så håll dig till ett sätt för en installation.
 
 ## Podman
@@ -188,3 +188,6 @@ inte i CI.
 ```sh
 docker compose down -v   # tar bort volymerna: databaser och filer
 ```
+
+En server som körs direkt på datorn har i stället sina filer i utcheckningens
+`data/`; ta bort den mappen också.

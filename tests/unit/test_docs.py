@@ -19,6 +19,8 @@ LANGUAGES = ("sv", "da", "nb", "nn", "fi", "is")
 COMPLETE = ("sv",)
 
 FENCED = re.compile(r"^[ \t]*```.*?^[ \t]*```[ \t]*$", re.DOTALL | re.MULTILINE)
+#: A fence that names a language, which opens a block and never closes one.
+OPENING = re.compile(r"^[ \t]*```\S", re.MULTILINE)
 INLINE_CODE = re.compile(r"`[^`\n]*`")
 LINK = re.compile(r"\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)|src=\"([^\"]+)\"")
 SETTING = re.compile(r"OPENCDE_[A-Z0-9_]+")
@@ -69,6 +71,14 @@ def test_the_english_pages_are_found() -> None:
 def test_relative_links_point_at_something(path: Path) -> None:
     broken = [target for target in relative_targets(read(path)) if not (path.parent / target).exists()]
     assert not broken, f"{path.relative_to(ROOT)} links to what does not exist: {broken}"
+
+
+@pytest.mark.parametrize("path", markdown_files(), ids=lambda path: path.relative_to(ROOT).as_posix())
+def test_no_code_block_opens_inside_another(path: Path) -> None:
+    """A fence that names a language inside a block closes nothing, and the prose before it turns into code."""
+    blocks = [block.split("\n", 1) for block in FENCED.findall(read(path))]
+    nested = [first for first, rest in blocks if OPENING.search(rest)]
+    assert not nested, f"{path.relative_to(ROOT)} opens a code block inside another: {nested}"
 
 
 @pytest.mark.parametrize("lang", COMPLETE)
