@@ -23,11 +23,6 @@ to existing instances, as the app found it: a change the operations already made
 made twice, and one they did not is applied as any. Last, each key of ``keep_theirs`` (``#170.NominalValue`` or
 ``<guid>/<path>.Name``, as the server's conflicts name them) gets back what the file held before: the latest
 version's value, which the proposer gave up. ``--proposer`` names who the owner histories the operations make name.
-
-The file written keeps the STEP ids as the app's writers keep them, with the app's own code (the owner's decision
-F70 d): when the changes delete the base's highest instance, a loose ``IfcDocumentReference`` named
-``StepIdGuard`` at the next id holds that id, so that no writer gives a deleted id again; a guard the base has
-stays, never moved or edited, and of several only the highest.
 """
 
 from __future__ import annotations
@@ -370,9 +365,7 @@ def apply_all(
 ) -> dict[str, Any]:
     import ifcopenshell
 
-    from opencde.ifcgraph.ops import _ifc_hold_ids, _ifc_keep_guard  # the app's guard of the STEP ids
-
-    model = _ifc_hold_ids(ifcopenshell.open(str(base)))
+    model = ifcopenshell.open(str(base))
     touched: list[int] = []
     problems: list[dict[str, Any]] = []
     held = _hold(model, keep_theirs or [], problems)
@@ -393,7 +386,6 @@ def apply_all(
                 if len(problems) < MAX_PROBLEMS:
                     problems.append({"change": index, "error": str(exc)[:300]})
         _restore(model, held, problems)
-    _ifc_keep_guard(model)
     model.write(str(out))
     summary = {
         "applied": len(touched) + already,

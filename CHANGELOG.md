@@ -30,10 +30,6 @@ the commit history.
   Tiers 1 and 2 keep the server's own data in PostgreSQL alone and need `OPENCDE_STORE_URL`. Unset, the tier is
   `experimental` and nothing is held back, as before. `GET /.well-known/dataregium` gives `tier` at its top level,
   and `opencde doctor` and the administration's overview show it.
-- A version the server writes from a change set keeps the STEP ids as Dataspatium does since its b408004: when
-  the change deletes the file's highest instance, a loose `IfcDocumentReference` named `StepIdGuard` at the next
-  id holds it, so that no writer gives a deleted id again, and a guard already in the file stays (copied from
-  the app's `python/dataspatium.py`).
 - A tool call of the MCP endpoint that cannot reach PostgreSQL answers 503 `unavailable`, as the API's routes
   do, instead of an internal error.
 - Compose keeps the server's own data in PostgreSQL by default (ADR 0029): `docker/compose.yaml` starts the service

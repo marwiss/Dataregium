@@ -161,9 +161,8 @@ def test_dialect_ddl_and_cypher_lint() -> None:
 
     # Application Cypher must stay portable between Neo4j and Memgraph (ADR 0003).
     offenders: list[str] = []
-    copied = REPO_ROOT / "opencde" / "ifcgraph" / "ops.py"  # Dataspatium's Python: no Cypher, and id() is Python's
     for path in (REPO_ROOT / "opencde").rglob("*.py"):
-        if path.name == "dialect.py" or path == copied:
+        if path.name == "dialect.py":
             continue
         text = path.read_text(encoding="utf-8")
         for pattern, reason in FORBIDDEN_CYPHER:
