@@ -10,8 +10,8 @@ is the production overlay without its Caddy.
 What it leaves alone: ports 80 and 443, the proxy's other sites and
 certificates, and every container, network and volume that is there. What it
 adds: the folder `/opt/dataregium`, the Compose project `dataregium` (the API,
-Neo4j and the nightly backup), the port `127.0.0.1:8010`, one nginx site and
-one certificate for the new name.
+PostgreSQL and the nightly backup, and Neo4j in tier 3), the port
+`127.0.0.1:8010`, one nginx site and one certificate for the new name.
 
 ## 1. Check
 

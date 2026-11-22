@@ -2,20 +2,28 @@
 
 Som standard lyssnar ingenting annat än Caddy på en produktionsvärd:
 grafdatabasen ligger på det privata compose-nätet och bara servern talar med
-den. Vissa klienter vill fråga IFC-grafen direkt med Cypher över Bolt, som
+den. Grafen hör till nivå 3 (`OPENCDE_TIER=experimental`,
+`OPENCDE_IFC_DB_ENABLED=true` och `COMPOSE_PROFILES=graph` i `.env`, som
+`opencde init --tier experimental` skriver dem) och håller IFC-DB:s modeller,
+med PostgreSQL bredvid för serverns egna data; en server i nivå 1 eller 2 har
+ingen. Vissa klienter vill fråga IFC-grafen direkt med Cypher över Bolt, som
 Dataspatiums grafvy gör mot utvecklingsstacken. Den här sidan beskriver hur en
-administratör publicerar porten med avsikt, vad det kostar och hur porten
-stängs igen. Alternativet som håller databasen privat är serverns
-skrivskyddade graffråga för administratörer, `POST /admin/api/graph/query`
-bakom `OPENCDE_GRAPH_QUERY_ENABLED` ([client-guide.md §7](../client-guide.md));
-publicera porten bara när en klient behöver Bolt i sig.
+administratör publicerar porten med avsikt, vad det kostar och hur porten stängs
+igen. Alternativet som håller databasen privat är serverns skrivskyddade
+graffråga för administratörer, `POST /admin/api/graph/query` bakom
+`OPENCDE_GRAPH_QUERY_ENABLED` ([client-guide.md §7](../client-guide.md)), men
+den läser grafen som håller serverns egna data och är därför avstängd när
+PostgreSQL håller dem (ADR 0029); publicera porten bara när en klient behöver
+Bolt i sig.
 
 ## Vad en öppen port innebär
 
 - **Full åtkomst.** Communityutgåvorna av Neo4j och Memgraph har inga
   skrivskyddade databasanvändare: den som har databasanvändaren och lösenordet
-  kan läsa och skriva allt, inklusive användare, tokens och revisionsposter.
-  Ge lösenordet bara till personer du skulle göra till administratörer.
+  kan läsa och skriva allt i grafen. Det är IFC-DB:s modeller och, där grafen
+  håller serverns egna data (`OPENCDE_STACK_STORE_URL` satt men tom), också
+  användare, tokens och revisionsposter. Ge lösenordet bara till personer du
+  skulle göra till administratörer.
 - **Alltid krypterat.** Överlagringen slår på TLS för Bolt (`bolt+s://`) och
   servern vägrar att annonsera en okrypterad `bolt://`-adress i produktion.
   Webbläsarklienter som Dataspatium behöver ett certifikat som webbläsaren
@@ -23,7 +31,8 @@ publicera porten bara när en klient behöver Bolt i sig.
 - **Annonserad för klienter.** `OPENCDE_GRAPH_PUBLIC_BOLT_URL` publiceras i
   kapabilitetsdokumentet (`/.well-known/dataregium`, `extensions.ifcgraph.bolt`),
   där Dataspatium läser den, och visas på administrationens sida Inställningar.
-  Lämna den tom medan porten är stängd.
+  Lämna den tom medan porten är stängd. En server utan graf (nivå 1 och 2) har
+  `null` där, och i `graph_store` bredvid.
 
 ## 1. Ett certifikat för Bolt-porten
 
@@ -59,7 +68,8 @@ OPENCDE_GRAPH_PUBLIC_BOLT_URL=bolt+s://cde.example.org:7687
 # OPENCDE_BOLT_PORT=7687          # värdporten, om 7687 är upptagen
 ```
 
-Starta sedan med överlagringen tillagd i `COMPOSE_FILE` i `.env`:
+Starta sedan med överlagringen tillagd i `COMPOSE_FILE` i `.env`, bredvid
+`COMPOSE_PROFILES=graph`:
 
 ```sh
 # .env: COMPOSE_FILE=docker/compose.yaml:docker/compose.prod.yaml:docker/compose.bolt.yaml

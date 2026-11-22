@@ -16,11 +16,13 @@ varje projekt.
 
 Tekniskt är Dataregium en server för buildingSMARTs öppna **OpenCDE-API:er**
 (Foundation API 1.0, BCF API 3.0 och 2.1 samt Documents API 1.0), byggd på
-grafdatabasen Neo4j eller Memgraph. I 3-serien blir varje uppladdad IFC-modell
-en förlustfri graf genom biblioteket [IFC-DB](https://github.com/marwiss/IFC-DB),
-med versioner, kontroller och ändringsförslag. Servern skrevs om från grunden ur
-en forskningsprototyp från 2023, med säkerhet som första krav, och varje klient
-som följer specifikationerna kan ansluta.
+databasen PostgreSQL. I 3-serien blir varje uppladdad IFC-modell en förlustfri
+graf i Neo4j eller Memgraph genom biblioteket
+[IFC-DB](https://github.com/marwiss/IFC-DB), med versioner, kontroller och
+ändringsförslag; grafen kommer med den tredje av serverns [tre
+nivåer](#vad-du-kan-göra). Servern skrevs om från grunden ur en
+forskningsprototyp från 2023, med säkerhet som första krav, och varje klient som
+följer specifikationerna kan ansluta.
 
 ![Administrationens översikt i en Dataregium-server: antal användare, projekt, klienter, ärenden och dokument, databasens status och de senaste revisionshändelserna](docs/images/admin-overview.png)
 
@@ -53,7 +55,8 @@ eller Podman. Är du van vid containrar och Python står det korta sättet under
 
 En container är ett färdigpackat program som körs avskilt på datorn, och Docker
 och Podman är program som startar containrar. Snabbstarten startar två: servern
-och dess databas.
+och dess databas, PostgreSQL. Med modeller, i nivå 3, startar den också
+grafdatabasen Neo4j.
 
 1. **Ladda ned.** Hämta koden med git, eller som ZIP-fil under *Code > Download
    ZIP* på GitHub. Grenen `main` är 3-serien; `release-2` och `release-1` är 2-
@@ -65,11 +68,16 @@ och dess databas.
    ```
 
 2. **Ställ in.** Kopiera `.env.example` till `.env`, filen med serverns
-   inställningar, och sätt `OPENCDE_GRAPH_PASSWORD` till ett eget lösenord på
-   minst 16 tecken. Ska du prova med Dataspatium och modeller, sätt också
-   `OPENCDE_DYNAMIC_CLIENT_REGISTRATION=true`, `OPENCDE_REQUEST_LOG_ENABLED=true`
-   och `OPENCDE_IFC_DB_ENABLED=true`; [snabbstarten med Dataspatium](docs/sv/quickstart.md)
-   förklarar varför. Varje inställning förklaras i [.env.example](.env.example).
+   inställningar, och sätt `OPENCDE_STORE_PASSWORD`, PostgreSQL:s lösenord, till
+   ett eget långt slumpat värde. Ska du prova med Dataspatium och modeller, som
+   hör till nivå 3, sätt också `OPENCDE_TIER=experimental`, `COMPOSE_PROFILES=graph`,
+   `OPENCDE_GRAPH_PASSWORD` till ett lösenord på minst 16 tecken,
+   `OPENCDE_IFC_DB_ENABLED=true`, `OPENCDE_DYNAMIC_CLIENT_REGISTRATION=true` och
+   `OPENCDE_REQUEST_LOG_ENABLED=true`; [snabbstarten med
+   Dataspatium](docs/sv/quickstart.md) förklarar varför. `uv run opencde init`
+   skriver i stället en sådan `.env` med nya lösenord: svara nej på att andra
+   ska använda servern och ja på det som snabbstarten med Dataspatium använder.
+   Varje inställning förklaras i [.env.example](.env.example).
 3. **Starta.** Samma compose-filer fungerar med Docker och med Podman; välj den du har:
 
    <details open>
@@ -79,7 +87,7 @@ och dess databas.
    docker compose up -d --build
    ```
 
-   startar servern på <http://127.0.0.1:8000> och en Neo4j-databas; första gången tar några minuter. `docker compose logs -f api` visar serverloggen.
+   startar servern på <http://127.0.0.1:8000> och PostgreSQL, och i nivå 3 också Neo4j; första gången tar några minuter. `docker compose logs -f api` visar serverloggen.
 
    </details>
 
@@ -98,21 +106,22 @@ och dess databas.
    <summary><b>Utan container</b></summary>
 
    ```sh
-   uv sync --extra ifc-db           # installerar Python 3.13 och alla beroenden, med IFC-DB
-   uv run opencde doctor            # kontrollerar konfiguration och databas
-   uv run opencde serve             # http://127.0.0.1:8000
+   uv sync --extra postgres --extra ifc-db   # installerar Python 3.13 och alla beroenden, med IFC-DB
+   uv run opencde doctor                     # kontrollerar konfiguration och databas
+   uv run opencde serve                      # http://127.0.0.1:8000
    ```
 
-   kör servern från utcheckningen med [uv](https://docs.astral.sh/uv/); en databas behövs fortfarande (Neo4j Desktop, Memgraph Lab eller databasen ur compose-filerna).
+   kör servern från utcheckningen med [uv](https://docs.astral.sh/uv/); den behöver PostgreSQL, till exempel stackens på `127.0.0.1:5442`, som `.env.example` anger, och i nivå 3 också en grafdatabas, till exempel stackens på `127.0.0.1:7697`: ta bort `#` före `OPENCDE_GRAPH_URI` i `.env`.
 
    </details>
 
 4. **Se dig omkring.** <http://127.0.0.1:8000/docs> visar varje anrop servern
-   tar emot och låter dig prova dem, <http://127.0.0.1:8000/readyz> säger om
-   servern och databasen är redo, och <http://127.0.0.1:7484> är Neo4j Browser,
-   där du ser databasen (Bolt på `127.0.0.1:7697`; utvecklingsöverlagringen
-   undviker Neo4j:s standardportar, som ofta upptas av en annan Neo4j på samma
-   dator).
+   tar emot och låter dig prova dem, och <http://127.0.0.1:8000/readyz> säger om
+   servern och dess databaser är redo (`"graph":"none"` när den inte använder
+   någon graf). PostgreSQL svarar på `127.0.0.1:5442`, och i nivå 3 är
+   <http://127.0.0.1:7484> Neo4j Browser, där du ser grafen (Bolt på
+   `127.0.0.1:7697`). Utvecklingsöverlagringen undviker standardportarna, som
+   ofta upptas av en annan PostgreSQL eller Neo4j på samma dator.
 5. **Lägg in demodata och logga in.**
 
    <details open>
@@ -167,20 +176,28 @@ Varje sätt är en compose-fil plus en överlagring:
 | Bredvid det som redan körs på en server, bakom dess nginx | [docs/sv/deploy/proxied.md](docs/sv/deploy/proxied.md) |
 | Coolify, Dokploy, Portainer | [docs/sv/deploy/paas.md](docs/sv/deploy/paas.md) |
 | Den egna regionen hos AWS, Azure eller Google Cloud: en maskin, uppsatt av en cloud-init-fil | [docs/sv/deploy/cloud.md](docs/sv/deploy/cloud.md) |
-| Containertjänst plus hanterad Neo4j AuraDB eller Memgraph Cloud | [docs/sv/deploy/cloud-aura.md](docs/sv/deploy/cloud-aura.md) |
-| Säkerhetskopiering och återställning (flyttbar mellan Neo4j och Memgraph) | [docs/sv/deploy/backup.md](docs/sv/deploy/backup.md) |
+| Containertjänst plus hanterad PostgreSQL och, i nivå 3, hanterad Neo4j AuraDB eller Memgraph Cloud | [docs/sv/deploy/cloud-aura.md](docs/sv/deploy/cloud-aura.md) |
+| Säkerhetskopiering och återställning av PostgreSQL och grafen (flyttbar mellan Neo4j och Memgraph) | [docs/sv/deploy/backup.md](docs/sv/deploy/backup.md) |
 
 `uv run opencde init --public-url https://cde.example.org` skriver en
-produktions-`.env` med nya hemligheter; `opencde doctor` kontrollerar
-resultatet.
+produktions-`.env` med nya hemligheter, PostgreSQL:s lösenord bland dem, för
+nivå 2 (`bim-gis`) om inte `--tier` säger `documents` eller `experimental`;
+`opencde doctor` kontrollerar resultatet. En installation från tidigare, med
+serverns egna data i grafen, flyttas till PostgreSQL med en säkerhetskopia och
+en återställning
+([docs/sv/deploy/backup.md](docs/sv/deploy/backup.md#från-grafen-till-postgresql)).
 
 ### Konfiguration
 
 Allt läses från miljövariabler med prefixet `OPENCDE_`, från `.env` eller
 från Docker-hemligheter i `/run/secrets/opencde_<namn>`. Den kommenterade
-listan finns i [.env.example](.env.example). Standardvärdena är säkra:
-produktion vägrar starta utan en publik `https`-adress och ett
-databaslösenord, och inget är öppet förrän det har konfigurerats.
+listan finns i [.env.example](.env.example). Servern håller sina egna data i
+PostgreSQL (`OPENCDE_STORE_URL`, utan lösenordet, som är
+`OPENCDE_STORE_PASSWORD`), och i nivå 3 IFC-DB:s modeller i en graf, Neo4j eller
+Memgraph (`OPENCDE_GRAPH_URI`), som där också håller serverns egna data när
+`OPENCDE_STORE_URL` inte är satt. Standardvärdena är säkra: produktion vägrar
+starta utan en publik `https`-adress och lösenordet till varje databas den
+använder, och inget är öppet förrän det har konfigurerats.
 
 ### För den tekniskt kunnige
 
@@ -188,17 +205,28 @@ databaslösenord, och inget är öppet förrän det har konfigurerats.
   Trivy och med SBOM. Taggarna är `3.0.0` och `latest` för 3-serien,
   `3.0.0-gherkin` och `latest-gherkin` med buildingSMARTs ifc-gherkin-rules,
   `2.0.0` och `1.0.0`; `OPENCDE_IMAGE_TAG` väljer i compose-filerna.
-- **Compose**: `docker/compose.yaml` plus överlagringar för utveckling, produktion
-  med Caddy, bakom en befintlig proxy, Memgraph, extern databas, Bolt med TLS,
-  tunnel, lokal motor och arbetskopia. `COMPOSE_FILE` i `.env` väljer dem, så
-  kommandona är utan `-f`.
+  `docker/Dockerfile` installerar extrapaketen `postgres` och `ifc-db`, och
+  `--build-arg OPENCDE_EXTRAS="--extra postgres"` bygger en slankare image utan
+  IfcOpenShell.
+- **Compose**: `docker/compose.yaml` startar servern och PostgreSQL, och grafen i
+  nivå 3 med `COMPOSE_PROFILES=graph`, plus överlagringar för utveckling,
+  produktion med Caddy, bakom en befintlig proxy, tunnel och lokal motor, och för
+  nivå 3 Memgraph, extern grafdatabas, Bolt med TLS, arbetskopia och liten server.
+  `COMPOSE_FILE` i `.env` väljer dem, så kommandona är utan `-f`.
+  `OPENCDE_STACK_STORE_URL` anger en annan PostgreSQL, till exempel en hanterad,
+  och satt men tom behåller den serverns egna data i grafen, i nivå 3.
 - **Utan container**: Python 3.11 eller senare med uv (provad på 3.11, 3.13 och
-  3.14), `uv sync --extra ifc-db`, och Neo4j 5.26 eller Memgraph 3.14 på `OPENCDE_GRAPH_URI`.
-- **De viktigaste inställningarna**: `OPENCDE_APIS` väljer API:erna (alla tre som
-  standard, `["documents"]` i 1.0.0); `OPENCDE_IFC_DB_ENABLED=true` slår på
-  grafen och allt i 2- och 3-serien som rör modeller; `OPENCDE_ENVIRONMENT` är
+  3.14), `uv sync --extra postgres --extra ifc-db`, PostgreSQL på
+  `OPENCDE_STORE_URL`, och i nivå 3 Neo4j 5.26 eller Memgraph 3.14 på
+  `OPENCDE_GRAPH_URI`.
+- **De viktigaste inställningarna**: `OPENCDE_TIER` väljer nivån (`documents`,
+  `bim-gis` eller `experimental`, som är standard); `OPENCDE_APIS` väljer API:erna
+  inom den (alla tre som standard, `["documents"]` i nivå 1 och i 1.0.0);
+  `OPENCDE_STORE_URL`, som nivå 1 och 2 kräver, anger den PostgreSQL som håller
+  serverns egna data; `OPENCDE_IFC_DB_ENABLED=true` slår på grafen, i nivå 3, och
+  allt i 2- och 3-serien som rör modeller; `OPENCDE_ENVIRONMENT` är
   `development`, `production` eller `local` (den lokala motorn, `opencde init --local`).
-- **Ändpunkter**: `/.well-known/dataregium` (version och påslagna tillägg),
+- **Ändpunkter**: `/.well-known/dataregium` (version, nivå och påslagna tillägg),
   `/foundation/versions`, `/openapi.json` och `/docs`, `/healthz` och `/readyz`,
   `/admin/api` (administration) och `/manage/1.0` (projektadministration).
   3-seriens tillägg ligger under `/documents/1.0/` (versionernas `ifc-queries`,
@@ -218,12 +246,13 @@ konto. För att köra servern själv:
 
 - Windows, macOS eller Linux med Docker (Desktop på Windows/macOS, Engine på
   Linux) eller Podman 5, eller Python 3.11 eller senare med
-  [uv](https://docs.astral.sh/uv/) och en egen Neo4j 5.26- eller Memgraph 3.14-databas.
-- Ungefär 1 GB minne för databascontainern (`NEO4J_HEAP` och
+  [uv](https://docs.astral.sh/uv/) och en egen PostgreSQL 17-databas, och i nivå 3
+  också en Neo4j 5.26- eller Memgraph 3.14-databas.
+- I nivå 3 ungefär 1 GB minne för grafens container (`NEO4J_HEAP` och
   `NEO4J_PAGECACHE` i `.env`), och mer för stora modeller med IFC-DB.
-- Lokalt: port 8000 för servern och 7484/7697 för databasen, alla bundna till
-  `127.0.0.1`. I produktion: portarna 80 och 443 nåbara från internet och ett
-  DNS-namn för servern.
+- Lokalt: port 8000 för servern, 5442 för PostgreSQL och, i nivå 3, 7484/7697 för
+  grafen, alla bundna till `127.0.0.1`. I produktion: portarna 80 och 443 nåbara
+  från internet och ett DNS-namn för servern.
 - Klienter behöver en `https`-adress i produktion; lokalt accepteras
   `http://127.0.0.1` som redirect-URI, och `http://localhost` med `OPENCDE_ALLOW_LOCALHOST_REDIRECTS=true` (eller, medan MCP-ändpunkten är på, för en inloggning mot den ensam).
 
@@ -245,9 +274,13 @@ Orden README använder, i vardagligt språk; hela ordlistan finns i
 - **API**: det sätt en app talar med servern på, med bestämda frågor och svar.
 - **Server och klient**: servern lagrar och delar projektets underlag; klienten är
   appen du arbetar i, till exempel Dataspatium.
-- **Databas och graf**: databasen är där servern sparar allt. En grafdatabas
-  sparar saker och sambanden mellan dem, som en vägg som sitter på en våning, och
-  kan därför svara på frågor om hur delarna hänger ihop.
+- **Databas och graf**: databasen är där servern sparar sina konton, projekt,
+  dokument och ärenden; Dataregiums är PostgreSQL. En grafdatabas sparar saker och
+  sambanden mellan dem, som en vägg som sitter på en våning, och kan därför svara
+  på frågor om hur delarna hänger ihop; i nivå 3 sparas modellerna i en sådan,
+  Neo4j eller Memgraph.
+- **Nivå**: hur mycket en server erbjuder: Dokument, BIM och GIS eller
+  Experimentell, var och en med allt som nivån före den har.
 - **Container**: ett färdigpackat program som körs avskilt på datorn; Docker och
   Podman startar dem.
 - **OAuth2**: det säkra sättet att logga in från en app utan att appen får ditt lösenord.
@@ -259,6 +292,21 @@ Orden README använder, i vardagligt språk; hela ordlistan finns i
 
 Det som går i en version går också i nästa. Varje version hör ihop med samma
 version av Dataspatium.
+
+En server erbjuder en av tre nivåer, som `OPENCDE_TIER` väljer, och var och en har
+allt som nivån före den har: **Dokument** (`documents`) Foundation API och
+Documents API, **BIM och GIS** (`bim-gis`) också BCF API 3.0 och 2.1 och
+MCP-ändpunkten, och **Experimentell** (`experimental`) också IFC-DB:s graf i Neo4j
+eller Memgraph. IFC-DB-modulen (`OPENCDE_IFC_DB_ENABLED`) hör till nivå 3, och med
+den kontrollerna, frågorna, jämförelserna, krocktesten, prövningarna av
+ändringsset, sammanfogningarna och geometrin nedan. En funktion kan vara avstängd
+inom sin nivå men aldrig påslagen över den: servern vägrar starta när
+`OPENCDE_APIS`, `OPENCDE_MCP_ENABLED` eller `OPENCDE_IFC_DB_ENABLED` begär mer
+än nivån erbjuder, och namnger inställningen, och det som kräver IFC-DB, som
+arbetskopian och krocktestet, förblir avstängt utan den. Nivå 1 och 2 håller
+serverns egna data enbart i PostgreSQL. Är nivån inte satt är den Experimentell,
+och inget hålls tillbaka. Kapabilitetsdokumentet anger nivån som `tier`, och
+`opencde doctor` och administrationens översikt visar den.
 
 ### Version 1 (med Dataspatium 1)
 
@@ -284,9 +332,10 @@ version av Dataspatium.
 - **Ärenden om modellen** (BCF API 3.0 och 2.1): frågor och anmärkningar med
   kommentarer, bilder och vyer som pekar ut byggdelar, med filter och
   händelselogg, validerade mot buildingSMARTs scheman.
-- **Modellen som graf** (IFC-DB-modulen, påslagen med
-  `OPENCDE_IFC_DB_ENABLED`): en uppladdad IFC-modell blir en graf i databasen,
-  kopplad till byggdelarna i ärendenas vyer (se [IFC-DB](docs/sv/ifc-db.md)).
+- **Modellen som graf** (IFC-DB-modulen i nivå 3, påslagen med
+  `OPENCDE_IFC_DB_ENABLED`): en uppladdad IFC-modell blir en graf i Neo4j eller
+  Memgraph, kopplad till byggdelarna i ärendenas vyer (se
+  [IFC-DB](docs/sv/ifc-db.md)).
 
 ### Också i version 3 (med Dataspatium 3)
 
@@ -364,10 +413,10 @@ publicerar appen versioner med basversion och förhandskontroll, skickar
 ändringsset som servern prövar, låter den projektansvarige godkänna dem och
 avgöra krockar, jämför versioner i 3D och ställer namngivna frågor till grafen;
 en administratör kan också fråga grafen med Cypher genom serverns läsande
-ändpunkt. Appen skickar `X-Request-ID` på varje anrop, så att begärandeloggen
-här och loggen i appen visar samma samtal, läser serverns kapabilitetsdokument
-för att se vilka tillägg som är påslagna och reagerar på de felkoder servern
-lägger i sina felkroppar.
+ändpunkt medan serverns egna data ligger i grafen. Appen skickar `X-Request-ID`
+på varje anrop, så att begärandeloggen här och loggen i appen visar samma samtal,
+läser serverns kapabilitetsdokument för att se vilka tillägg som är påslagna och
+reagerar på de felkoder servern lägger i sina felkroppar.
 
 Så här hänger de ihop:
 
@@ -428,14 +477,15 @@ senaste i varje serie rättas. Dataregium och Dataspatium med samma nummer hör 
 - [docs/sv/graph-schema.md](docs/sv/graph-schema.md): grafmodellen.
 - [docs/sv/ifc-db.md](docs/sv/ifc-db.md): IFC-DB-modulen, kontrollerna, versionerna, ändringsseten, geometrin och exempel på Cypher-frågor.
 - [docs/sv/mcp.md](docs/sv/mcp.md): MCP-ändpunkten, genom vilken AI-program läser projektens modeller: att slå på den, dess token, protokollet, verktygen, AI-policyn och gränserna.
-- Arkitekturbeslut som ligger fast: grafdatabas som enda lager, opaka token i
-  stället för JWT, portabel Cypher för Neo4j och Memgraph, webbgränssnitt utan
-  ramverk, säkerhetskopia på applikationsnivå, BCF API 2.1 bredvid 3.0, en
-  förlustfri IFC-graf som läser och skriver STEP själv och valideras när den
-  skrivs, buildingSMARTs regler i en egen miljö, IFC-DB som bibliotek, kontroll
-  mot projektets IDS, namngivna frågor för medlemmar, krocktest på servern med
-  IfcClash, versioner som noder med ändringar och en bas, en lokal motor som bara
-  svarar på den egna datorn och en arbetskopia i minnet bredvid arkivet.
+- Arkitekturbeslut som ligger fast: serverns egna data i PostgreSQL och modellerna
+  i en grafdatabas, opaka token i stället för JWT, portabel Cypher för Neo4j och
+  Memgraph, webbgränssnitt utan ramverk, säkerhetskopia på applikationsnivå, BCF
+  API 2.1 bredvid 3.0, en förlustfri IFC-graf som läser och skriver STEP själv och
+  valideras när den skrivs, buildingSMARTs regler i en egen miljö, IFC-DB som
+  bibliotek, kontroll mot projektets IDS, namngivna frågor för medlemmar, krocktest
+  på servern med IfcClash, versioner som noder med ändringar och en bas, en lokal
+  motor som bara svarar på den egna datorn och en arbetskopia i minnet bredvid
+  arkivet.
 - [spec/SOURCES.md](spec/SOURCES.md): de exakta specifikationsversioner
   som servern testas mot.
 
@@ -456,8 +506,9 @@ Dokumentationen finns på den här README-filens sju språk, varje språk under
 ## Begränsningar i korthet
 
 - Allt som rör modeller, i 2- och 3-serien, kräver IFC-DB-modulen, som är
-  avstängd tills `OPENCDE_IFC_DB_ENABLED=true`. buildingSMARTs regler körs bara
-  med imagen `-gherkin`; utan den kontrolleras schemat och IDS.
+  avstängd tills `OPENCDE_IFC_DB_ENABLED=true` och hör till nivå 3
+  (`OPENCDE_TIER=experimental`). buildingSMARTs regler körs bara med imagen
+  `-gherkin`; utan den kontrolleras schemat och IDS.
 - Servern implementerar BCF API 3.0 och 2.1, inte 1.0, vars resurser ser annorlunda ut.
 - Export av ett projekt som BCFzip överlåts åt klienterna; servern lagrar
   ärenden, kommentarer och viewpoints så som API:t definierar dem.
@@ -465,7 +516,8 @@ Dokumentationen finns på den här README-filens sju språk, varje språk under
   databasanvändare, så en exponerad Bolt-port ger full åtkomst åt den som
   har lösenordet. Porten förblir stängd om inte administratören avsiktligt
   publicerar den; administrations-API:ts läsande graffråga
-  (`OPENCDE_GRAPH_QUERY_ENABLED`) ger Cypher utan porten.
+  (`OPENCDE_GRAPH_QUERY_ENABLED`) ger Cypher utan porten och förblir avstängd
+  när PostgreSQL håller serverns egna data.
 - IFC-DB-importen, kontrollerna och prövningen av ändringsset körs i separata
   processer med minnes- och tidsgränser (`OPENCDE_IFC_DB_*`); mycket stora
   modeller avvisas i stället för att lämnas halvimporterade, eller hanteras av

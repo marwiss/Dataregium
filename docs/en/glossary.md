@@ -48,19 +48,20 @@ viewpoint and project are the same words as in Dataspatium.
 
 | Word | What it means here |
 |---|---|
-| IFC graph | An uploaded model as nodes and relationships in the database, optional |
+| IFC graph | An uploaded model as nodes and relationships in the graph database, optional in tier 3 |
 | IFC-DB | The module that turns IFC files into an IFC graph and back, named IFC-graph and then IFC-LPG until November 2026 |
 | `GlobalId` | The permanent id of an element in an IFC file |
 | `gtin` | The GTIN of the element a viewpoint's component names, read from the model and kept on the component |
 | GTIN | Global Trade Item Number, a product's number; here read from the property set `Reuse` |
 | Cypher | The query language of the graph database |
-| Bolt | The database's own connection, optional for those who query the graph directly |
+| Bolt | The graph database's own connection, optional for those who query the graph directly |
 
 ## Running the server
 
 | Word | What it means here |
 |---|---|
-| Stack | The containers that make up a running server: the API, the database and, in production, the proxy and the backup |
+| Tier | What a server offers (`OPENCDE_TIER`): Documents (the Foundation and Documents APIs), BIM + GIS (BCF API 3.0 and 2.1 and the MCP endpoint too) or Experimental (IFC-DB's graph too). Each tier holds the ones below it |
+| Stack | The containers that make up a running server: the API, PostgreSQL, in tier 3 the graph database and, in production, the proxy and the backup |
 | Seed | `opencde seed`, which loads demonstration data into an empty database |
 | Capabilities | `/.well-known/dataregium`, which says what this server has switched on |
 | Request log | An optional record of the requests the server has answered |

@@ -48,19 +48,20 @@ kommentar, viewpoint och projekt är samma ord som i Dataspatium.
 
 | Ord | Vad det betyder här |
 |---|---|
-| IFC-graf | En uppladdad modell som noder och relationer i databasen, valfritt |
+| IFC-graf | En uppladdad modell som noder och relationer i grafdatabasen, valfritt i nivå 3 |
 | IFC-DB | Modulen som gör IFC-filer till en IFC-graf och tillbaka, fram till november 2026 kallad IFC-graph och sedan IFC-LPG |
 | `GlobalId` | Det bestående id:t för ett element i en IFC-fil |
 | `gtin` | GTIN för det element en viewpoints komponent nämner, läst ur modellen och sparad på komponenten |
 | GTIN | Global Trade Item Number, en produkts nummer; här läst från egenskapsuppsättningen `Reuse` |
 | Cypher | Grafdatabasens frågespråk |
-| Bolt | Databasens egen anslutning, valfri för den som frågar grafen direkt |
+| Bolt | Grafdatabasens egen anslutning, valfri för den som frågar grafen direkt |
 
 ## Att driva servern
 
 | Ord | Vad det betyder här |
 |---|---|
-| Stack | Containrarna som utgör en körande server: API:et, databasen och i produktion proxyn och säkerhetskopieringen |
+| Nivå (tier) | Vad en server erbjuder (`OPENCDE_TIER`): Dokument (Foundation API och Documents API), BIM och GIS (även BCF API 3.0 och 2.1 och MCP-ändpunkten) eller Experimentell (även IFC-DB:s graf). Varje nivå rymmer nivåerna under sig |
+| Stack | Containrarna som utgör en körande server: API:et, PostgreSQL, i nivå 3 grafdatabasen och i produktion proxyn och säkerhetskopieringen |
 | Seed | `opencde seed`, som läser in demonstrationsdata i en tom databas |
 | Capabilities | `/.well-known/dataregium`, som säger vad den här servern har slagit på |
 | Begärandelogg | En valfri förteckning över anropen som servern har svarat på |

@@ -27,15 +27,26 @@ och driftsätt `docker/compose.yaml docker/compose.prod.yaml docker/compose.paas
 ## Miljö
 
 Sätt variablerna från `.env.example` i plattformens miljöredigerare. Minimum
-för produktion:
+för produktion i nivå 2, den nivå som `opencde init` skriver som standard:
 
 ```
 OPENCDE_ENVIRONMENT=production
 OPENCDE_PUBLIC_URL=https://cde.example.org
+OPENCDE_TIER=bim-gis
 OPENCDE_SECRET_KEY=<48 slumpmässiga tecken>
-OPENCDE_GRAPH_PASSWORD=<24 slumpmässiga tecken>
+OPENCDE_STORE_PASSWORD=<24 slumpmässiga tecken>
 OPENCDE_TRUSTED_PROXIES=["172.16.0.0/12", "10.0.0.0/8", "192.168.0.0/16"]
 ```
+
+Serverns egna data finns i PostgreSQL, stackens tjänst `store`: Compose ger
+API:t dess adress i `OPENCDE_STORE_URL`, och dess lösenord är
+`OPENCDE_STORE_PASSWORD`. `OPENCDE_STACK_STORE_URL` anger en annan PostgreSQL,
+som plattformens egen, utan lösenordet. Imagen behöver extrat `postgres`, som
+`docker/Dockerfile` installerar som standard
+(`OPENCDE_EXTRAS="--extra postgres --extra ifc-db"`); en image utan
+IfcOpenShell byggs med `--build-arg OPENCDE_EXTRAS="--extra postgres"`.
+`OPENCDE_GRAPH_PASSWORD` behövs bara med en graf: i nivå 3, där
+`COMPOSE_PROFILES=graph` startar Neo4j för IFC-DB:s modeller.
 
 `OPENCDE_DOMAIN` behövs bara av Caddy och kan utelämnas.
 
@@ -44,8 +55,8 @@ OPENCDE_TRUSTED_PROXIES=["172.16.0.0/12", "10.0.0.0/8", "192.168.0.0/16"]
 - Håll plattformen själv uppdaterad: Coolify publicerade till exempel
   rättningar för allvarliga sårbarheter i januari 2026. Plattformens
   administrationsgränssnitt ska inte gå att nå från det öppna internet.
-- Databasvolymen och lagringsvolymen är datat; ta med dem i plattformens
-  säkerhetskopiering, och behåll även volymen för den nattliga tjänsten
-  `backup`.
+- PostgreSQL:s volym och lagringsvolymen är datat, och i nivå 3 även grafens
+  volym; ta med dem i plattformens säkerhetskopiering, och behåll även volymen
+  för den nattliga tjänsten `backup`.
 - Första administratören: öppna en konsol på tjänsten `api` och kör
   `opencde user create admin --admin`.

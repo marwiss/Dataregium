@@ -1,9 +1,11 @@
 # Your own region on AWS, Azure or Google Cloud
 
 One virtual machine in the region you choose runs the whole stack, as on
-[your own server](vps-caddy.md): the API, Neo4j, Caddy with automatic HTTPS and
-the nightly backup. The file [docker/cloud-init.yaml](../../../docker/cloud-init.yaml)
-sets it up as the machine's user data, the same file on all three clouds. The
+[your own server](vps-caddy.md): the API, PostgreSQL, Caddy with automatic HTTPS
+and the nightly backup. The file
+[docker/cloud-init.yaml](../../../docker/cloud-init.yaml) sets it up as the
+machine's user data, the same file on all three clouds, with `opencde init
+--public-url`: the server is in tier 2, BIM + GIS (`OPENCDE_TIER=bim-gis`). The
 database, the documents and the backups stay on the machine's disk, in its
 region. Dataspatium clients anywhere in the world sign in to the same server
 over HTTPS.
@@ -17,7 +19,8 @@ over HTTPS.
   `<public address>.sslip.io`, a name that resolves to the machine's address,
   so that the certificate comes at once. `DATAREGIUM_ACME_EMAIL` is optional.
 - A machine with 2 vCPU and 4 GB of memory or more (8 GB with the IFC-DB
-  module and large models), Ubuntu 24.04 LTS and a disk of 30 GB or more.
+  module of tier 3 and large models), Ubuntu 24.04 LTS and a disk of 30 GB or
+  more.
 - A fixed public address, so that the name keeps pointing at the machine. Azure
   gives one with `--public-ip-sku Standard`; on AWS, attach an Elastic IP; on
   Google Cloud, reserve a static external address.
@@ -105,3 +108,11 @@ sudo git fetch --depth 1 origin tag v<version> && sudo git checkout v<version>
 sudo sed -i 's/^OPENCDE_IMAGE_TAG=.*/OPENCDE_IMAGE_TAG=<version>/' .env
 sudo docker compose up -d
 ```
+
+A machine set up before PostgreSQL keeps the server's own data in the graph.
+Before the commands above, take a backup while the old stack still runs from
+the old checkout; then update, and restore the backup into PostgreSQL as
+[From the graph to PostgreSQL](backup.md#from-the-graph-to-postgresql) says. The
+new compose files start nothing until `.env` holds `OPENCDE_STORE_PASSWORD`. A
+release given again under the same number moves its tag, so fetch it with
+`sudo git fetch --depth 1 --force origin tag v<version>`.

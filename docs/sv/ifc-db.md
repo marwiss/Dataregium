@@ -6,11 +6,19 @@ på, och så att frågor om modellen kan ställas i Cypher bredvid ärendena och
 dokumenten.
 
 Slå på den med `OPENCDE_IFC_DB_ENABLED=true` och installera extrapaketet
-`ifc-db` (`uv sync --extra ifc-db`). Docker-avbildningen innehåller
-extrapaketet som standard (`ARG OPENCDE_EXTRAS` i Dockerfile), vilket mer än
-dubblar dess storlek (ungefär 680 MB, eller 1,1 GB med buildingSMARTs regler, mot 300 MB); bygg med
-`--build-arg OPENCDE_EXTRAS="--extra postgres"` för en slankare avbildning utan
-IfcOpenShell när modulen förblir avstängd.
+`ifc-db` (`uv sync --extra ifc-db`). Modulen hör till nivå 3
+(`OPENCDE_TIER=experimental`, eller ingen nivå satt): en server i en lägre nivå
+vägrar starta med den på och namnger inställningen. Dess graf, Neo4j eller
+Memgraph, håller modellerna, med PostgreSQL bredvid för serverns egna data som
+standard ([nedan](#serverns-egna-data-skilda-från-ifc-grafen)); docker compose
+startar grafen med `COMPOSE_PROFILES=graph` i `.env`. `opencde init` skriver de
+raderna och grafens inställningar med `--tier experimental`, med ett ja på dess
+fråga om IFC-DB eller grafen, och med `--local`. Docker-avbildningen innehåller
+extrapaketet som standard, bredvid `postgres` för PostgreSQL
+(`ARG OPENCDE_EXTRAS="--extra postgres --extra ifc-db"` i Dockerfile); `ifc-db`
+mer än dubblar dess storlek (ungefär 680 MB, eller 1,1 GB med buildingSMARTs
+regler, mot 300 MB). Bygg med `--build-arg OPENCDE_EXTRAS="--extra postgres"`
+för en slankare avbildning utan IfcOpenShell när modulen förblir avstängd.
 
 Dess inställningar heter `OPENCDE_IFC_DB_*`. Fram till november 2026 hette
 modulen IFC-graph och sedan IFC-LPG: inställningarna `OPENCDE_IFCGRAPH_*` och
@@ -857,32 +865,45 @@ docker compose up -d
 ## Serverns egna data skilda från IFC-grafen
 
 Servern håller sina egna data (konton, projekt, team, dokument och deras
-versioner, ärenden, kommentarer och vypunkter, och sina jobb: kontroller,
+versioner, ärenden, kommentarer och viewpoints, och sina jobb: kontroller,
 förhandskontroller, provningar, krocktester, sammanslagningar och
 konverteringar) skilda från IFC-grafen, som håller IFC-DB:s modeller
 (`Model`, `Entity`, `StepBlock`); de två möts bara genom värden, som en
 konverterings `model_id` och en komponents GlobalId (ADR 0027). Som standard
-delar de IFC-grafens anslutning. `OPENCDE_STORE_GRAPH_URI` ger serverns egna
-data en egen graf, med `OPENCDE_STORE_GRAPH_DIALECT` (`neo4j` som standard),
-`_USER`, `_PASSWORD` och `_DATABASE` bredvid; produktion och den lokala miljön
-kräver lösenordet. Lagret och IFC-grafen kan vara olika databaser i samma
+ligger serverns egna data i PostgreSQL (`OPENCDE_STORE_URL`, ADR 0029), som
+docker compose startar bredvid grafen, och grafen håller bara modellerna. Den
+Cypher på den här sidan som når projekt, konverteringar, viewpoints, komponenter
+eller ärenden kräver serverns egna data i IFC-grafen, som före PostgreSQL: utan
+`OPENCDE_STORE_URL` (i docker compose `OPENCDE_STACK_STORE_URL` satt men tom)
+delar de IFC-grafens anslutning. `OPENCDE_STORE_GRAPH_URI`, som utesluter
+`OPENCDE_STORE_URL`, ger i stället serverns egna data en egen graf, med
+`OPENCDE_STORE_GRAPH_DIALECT` (`neo4j` som standard), `_USER`, `_PASSWORD` och
+`_DATABASE` bredvid; produktion och den lokala miljön kräver lösenordet.
+Lagret och IFC-grafen kan vara olika databaser i samma
 produkt, två Neo4j eller två Memgraph, eller i olika produkter, som serverns
 egna data i Neo4j och modellerna i Memgraph; Neo4j:s community-utgåva håller en
 databas per server, så där är två databaser två servrar. IFC-DB-tjänsten
 skriver modellerna till IFC-grafen och sina poster till lagret, och varje annan
 rutt läser och skriver lagret. Kommandoraden öppnar lagret för det som rör
 serverns egna data och båda för `seed`, `backup`, `restore`, `ifc-db prune`
-och `ifc-db export`; `opencde doctor` och sidan Inställningar kontrollerar
-båda, och `/readyz` säger i `store` om lagret är `shared`, `ok` eller
-`unavailable`, och är redo bara när båda svarar. En publicerad Bolt-port
-([deploy/bolt.md](deploy/bolt.md)) och administrationens graffråga når en graf
-var: porten IFC-grafen, frågan lagret. Servern flyttar inte det en databas
-redan håller: sätt lagret på en ny installation, eller flytta data med
-`opencde backup` och `opencde restore` ([deploy/backup.md](deploy/backup.md)).
+och `ifc-db export`, och de två sista vägrar genast på en server utan graf;
+`opencde doctor` och sidan Inställningar kontrollerar båda, och `/readyz` säger
+i `store` om lagret är `shared`, `ok` eller `unavailable`, med
+`"store_dialect": "postgres"` för PostgreSQL, och är redo bara när båda svarar.
+Utan graf (nivå 1 och 2) säger den `"graph": "none"` och är redo när PostgreSQL
+svarar. En publicerad Bolt-port ([deploy/bolt.md](deploy/bolt.md)) och
+administrationens graffråga når en graf var: porten IFC-grafen, frågan lagret,
+och därför är frågan avstängd med PostgreSQL (ADR 0029). Servern flyttar inte
+det en databas redan håller: sätt lagret på en ny installation, eller flytta
+data med `opencde backup` och `opencde restore`. En säkerhetskopia av en graf
+återställs till PostgreSQL som rader; en säkerhetskopia av PostgreSQL
+återställs inte till en graf
+([deploy/backup.md](deploy/backup.md#från-grafen-till-postgresql)).
 
 ```sh
 # .env
-OPENCDE_STORE_GRAPH_URI=bolt://store:7687
+OPENCDE_STACK_STORE_URL=
+OPENCDE_STORE_GRAPH_URI=bolt://store-graph:7687
 OPENCDE_STORE_GRAPH_DIALECT=neo4j
 OPENCDE_STORE_GRAPH_USER=neo4j
 OPENCDE_STORE_GRAPH_PASSWORD=<ett eget lösenord>
@@ -935,7 +956,8 @@ komponenter genom `GlobalId`, den senaste färdiga modellen per dokument);
 frågorna finns i Dataspatiums dokumentation (`docs/grafer.md`). En
 produktionsserver publicerar inte Bolt; administrations-API:ts graffråga
 (`OPENCDE_GRAPH_QUERY_ENABLED`, [client-guide.md §7](client-guide.md)) ger
-administratörer läsande Cypher utan porten. Appen ritar också
+administratörer läsande Cypher utan porten, men är avstängd när PostgreSQL
+håller serverns egna data (ADR 0029). Appen ritar också
 grafen, i sitt kort IFC-DB, genom den frågan eller över Bolt.
 
 ## Gränser och status
@@ -944,8 +966,8 @@ grafen, i sitt kort IFC-DB, genom den frågan eller över Bolt.
   entiteter) importeras på ungefär en sekund; en arkitektmodell på 200 MB tar
   minuter.
 - `Conversion` bär `state`, `entities`, `relationships`,
-  `lossless`, `geometry`, `schema`, `ifc_project_guid`, tidsstämplar och `error`. Administratörer kan
-  granska den i Neo4j Browser eller Memgraph Lab:
+  `lossless`, `geometry`, `schema`, `ifc_project_guid`, tidsstämplar och `error`. Där en graf
+  håller serverns egna data kan administratörer granska den i Neo4j Browser eller Memgraph Lab:
   `MATCH (c:Conversion) RETURN c.file_name, c.state, c.entities, c.error`.
 - När ett projekt tas bort tas dess modellers entiteter bort med det.
 - En modell kommer tillbaka identisk från båda databaserna upp till 224 496 instanser och

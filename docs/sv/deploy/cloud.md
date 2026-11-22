@@ -1,9 +1,11 @@
 # Den egna regionen hos AWS, Azure eller Google Cloud
 
 En virtuell maskin i den region du väljer kör hela stacken, som på
-[en egen server](vps-caddy.md): API:t, Neo4j, Caddy med automatisk HTTPS och
-den nattliga säkerhetskopian. Filen [docker/cloud-init.yaml](../../../docker/cloud-init.yaml)
-sätter upp den som maskinens användardata, samma fil i alla tre molnen.
+[en egen server](vps-caddy.md): API:t, PostgreSQL, Caddy med automatisk HTTPS
+och den nattliga säkerhetskopian. Filen
+[docker/cloud-init.yaml](../../../docker/cloud-init.yaml) sätter upp den som
+maskinens användardata, samma fil i alla tre molnen, med `opencde init
+--public-url`: servern är i nivå 2, BIM och GIS (`OPENCDE_TIER=bim-gis`).
 Databasen, dokumenten och säkerhetskopiorna stannar på maskinens disk, i dess
 region. Dataspatium-klienter var som helst i världen loggar in på samma server
 över HTTPS.
@@ -16,8 +18,8 @@ region. Dataspatium-klienter var som helst i världen loggar in på samma server
   serverns DNS-namn, eller lämna det tomt: servern heter då
   `<publik adress>.sslip.io`, ett namn som pekar på maskinens adress, så att
   certifikatet kommer direkt. `DATAREGIUM_ACME_EMAIL` är valfri.
-- En maskin med 2 vCPU och 4 GB minne eller mer (8 GB med IFC-DB-modulen och
-  stora modeller), Ubuntu 24.04 LTS och en disk på 30 GB eller mer.
+- En maskin med 2 vCPU och 4 GB minne eller mer (8 GB med IFC-DB-modulen i
+  nivå 3 och stora modeller), Ubuntu 24.04 LTS och en disk på 30 GB eller mer.
 - En fast publik adress, så att namnet fortsätter att peka på maskinen. Azure
   ger en med `--public-ip-sku Standard`; hos AWS kopplar du en Elastic IP; hos
   Google Cloud reserverar du en statisk extern adress.
@@ -106,3 +108,11 @@ sudo git fetch --depth 1 origin tag v<version> && sudo git checkout v<version>
 sudo sed -i 's/^OPENCDE_IMAGE_TAG=.*/OPENCDE_IMAGE_TAG=<version>/' .env
 sudo docker compose up -d
 ```
+
+En maskin som sattes upp före PostgreSQL har serverns egna data i grafen. Ta
+före kommandona ovan en säkerhetskopia medan den gamla stacken ännu körs från
+den gamla utcheckningen; uppdatera sedan och återställ säkerhetskopian till
+PostgreSQL som [Från grafen till PostgreSQL](backup.md#från-grafen-till-postgresql)
+beskriver. De nya compose-filerna startar ingenting förrän `.env` har
+`OPENCDE_STORE_PASSWORD`. En utgåva som ges ut igen under samma nummer flyttar
+sin tagg, så hämta den med `sudo git fetch --depth 1 --force origin tag v<version>`.

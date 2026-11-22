@@ -1,22 +1,28 @@
 # Publishing the database port (Bolt) in production
 
 By default nothing but Caddy listens on a production host: the graph database
-sits on the private compose network and only the server talks to it. Some
-clients want to query the IFC graph directly with Cypher over Bolt, as
-Dataspatium's graph view does against the development stack. This page is how
-an administrator publishes the port on purpose, what it costs, and how to
-close it again. The alternative that keeps the database private is the
-server's read-only graph query for administrators,
+sits on the private compose network and only the server talks to it. The graph
+is tier 3 (`OPENCDE_TIER=experimental`, `OPENCDE_IFC_DB_ENABLED=true` and
+`COMPOSE_PROFILES=graph` in `.env`, as `opencde init --tier experimental` writes
+them) and holds IFC-DB's models, with PostgreSQL beside it for the server's own
+data; a server of tier 1 or 2 has none. Some clients want to query the IFC graph
+directly with Cypher over Bolt, as Dataspatium's graph view does against the
+development stack. This page is how an administrator publishes the port on
+purpose, what it costs, and how to close it again. The alternative that keeps
+the database private is the server's read-only graph query for administrators,
 `POST /admin/api/graph/query` behind `OPENCDE_GRAPH_QUERY_ENABLED`
-([client-guide.md §7](../client-guide.md)); publish the port only when a
-client needs Bolt itself.
+([client-guide.md §7](../client-guide.md)), but it reads the graph that holds
+the server's own data, so it stays off when PostgreSQL holds that data (ADR
+0029); publish the port only when a client needs Bolt itself.
 
 ## What an open port means
 
 - **Full access.** The community editions of Neo4j and Memgraph have no
   read-only database users: whoever holds the database user and password can
-  read and write everything, including users, tokens and audit records. Give
-  the password only to people you would make administrators.
+  read and write everything in the graph. That is IFC-DB's models and, where
+  the graph holds the server's own data (`OPENCDE_STACK_STORE_URL` set but
+  empty), users, tokens and audit records too. Give the password only to
+  people you would make administrators.
 - **Encrypted, always.** The overlay turns on TLS for Bolt (`bolt+s://`) and
   the server refuses to announce a plain `bolt://` address in production.
   Browser clients such as Dataspatium need a certificate the browser trusts,
@@ -24,7 +30,9 @@ client needs Bolt itself.
 - **Announced to clients.** `OPENCDE_GRAPH_PUBLIC_BOLT_URL` is published in
   the capabilities document (`/.well-known/dataregium`,
   `extensions.ifcgraph.bolt`), where Dataspatium reads it, and shown on the
-  administration's Settings page. Leave it empty while the port is closed.
+  administration's Settings page. Leave it empty while the port is closed. A
+  server without a graph (tiers 1 and 2) has `null` there, and in
+  `graph_store` beside it.
 
 ## 1. A certificate for the Bolt port
 
@@ -60,7 +68,8 @@ OPENCDE_GRAPH_PUBLIC_BOLT_URL=bolt+s://cde.example.org:7687
 # OPENCDE_BOLT_PORT=7687          # the host port, if 7687 is taken
 ```
 
-Then start with the overlay added to `COMPOSE_FILE` in `.env`:
+Then start with the overlay added to `COMPOSE_FILE` in `.env`, beside
+`COMPOSE_PROFILES=graph`:
 
 ```sh
 # .env: COMPOSE_FILE=docker/compose.yaml:docker/compose.prod.yaml:docker/compose.bolt.yaml

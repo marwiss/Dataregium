@@ -10,17 +10,19 @@ sequenceDiagram
     autonumber
     participant A as The reporter's client
     participant S as Server
-    participant G as Graph database
+    participant D as Database
+    participant G as IFC graph
     participant F as File storage
     participant B as The reader's client
 
     A->>S: POST /bcf/3.0/projects/{id}/topics (title, type, status)
-    S->>G: Check the role through MEMBER_OF, create the Topic
+    S->>D: Check the role through the membership, create the topic
     S-->>A: 201 topic with guid and server_assigned_id
     A->>S: POST …/topics/{guid}/viewpoints (camera, components, snapshot)
     S->>F: Store the image under a name the server chooses
-    S->>G: Create the Viewpoint and its Components
-    S->>G: Copy the GTIN from the finished models onto the components, if the IFC graph is on
+    S->>D: Create the viewpoint and its components
+    S->>G: Look up the components' GlobalIds in the finished models, if the IFC graph is on
+    S->>D: Copy the GTINs found onto the components
     S-->>A: 201 viewpoint with guid
     A->>S: POST …/topics/{guid}/comments (comment, viewpoint_guid)
     S-->>A: 201 comment
@@ -64,7 +66,9 @@ A project the user is not a member of does not exist for them (404).
 
 With the [IFC-DB](../ifc-db.md) on, every component that names a `GlobalId`
 the project's finished models have gets the element's GTIN as `gtin`, also when
-the model is uploaded afterwards; the element itself is found by the `GlobalId`:
+the model is uploaded afterwards; the element itself is found by the `GlobalId`.
+Where the graph holds the server's own data too, as before PostgreSQL, one query
+goes from the viewpoint to the element:
 
 ```cypher
 MATCH (:Viewpoint {guid: $viewpoint})-[:HAS_COMPONENT]->(c:Component)

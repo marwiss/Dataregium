@@ -8,6 +8,112 @@ before it is withdrawn (its commits remain) and its notes are folded into the
 new one. Every release lists what a client can see; internal changes are in
 the commit history.
 
+## Unreleased
+
+- The tier says what a server offers: `OPENCDE_TIER` is `documents` (tier 1, Documents: the Foundation and Documents
+  APIs, with `OPENCDE_APIS` then `["documents"]` by default), `bim-gis` (tier 2, BIM + GIS: BCF API 3.0 and 2.1 too,
+  and the MCP endpoint) or `experimental` (tier 3, Experimental: IFC-DB's graph too, `OPENCDE_IFC_DB_ENABLED` with
+  Neo4j or Memgraph, and the choice of keeping the server's own data in a graph). A function can be off within the
+  tier but never on above it: the server refuses to start, naming the setting, when `OPENCDE_APIS`,
+  `OPENCDE_MCP_ENABLED` or `OPENCDE_IFC_DB_ENABLED` asks for more than the tier offers. Tiers 1 and 2 keep the
+  server's own data in PostgreSQL alone and need `OPENCDE_STORE_URL`. Unset, the tier is `experimental` and nothing is held back,
+  as before. `GET /.well-known/dataregium` gives `tier` at its top level, and `opencde doctor` and the
+  administration's overview show it.
+- Compose keeps the server's own data in PostgreSQL by default (ADR 0029): `docker/compose.yaml` starts the service
+  `store` (`docker.io/library/postgres:17.6-alpine`, user and database `opencde`, the password
+  `OPENCDE_STORE_PASSWORD`, which Compose requires), published nowhere but on `127.0.0.1:5442` by `compose.dev.yaml`
+  (`OPENCDE_DEV_POSTGRES_PORT`), and gives the api container
+  `OPENCDE_STORE_URL=postgresql://opencde@store:5432/opencde`; the API and the nightly backup wait for it, and the
+  backup takes it too. `OPENCDE_STACK_STORE_URL` names another PostgreSQL, such as a managed one, and set but empty
+  keeps the server's own data in the graph as before PostgreSQL (tier 3 only). The graph, Neo4j, starts only with
+  `COMPOSE_PROFILES=graph` in `.env` (tier 3), and `compose.memgraph.yaml`, `compose.bolt.yaml`,
+  `compose.workcopy.yaml`, `compose.small.yaml` and `compose.external-db.yaml` are for tier 3.
+- `opencde init` writes `OPENCDE_TIER` (`bim-gis` unless `--tier` names another tier; `experimental` after a yes to the
+  guide's question about IFC-DB or the graph, and with `--local`), `OPENCDE_STORE_URL` (in development
+  `postgresql://opencde@127.0.0.1:5442/opencde`, for commands run on the host, and in production
+  `postgresql://opencde@store:5432/opencde`) and a random `OPENCDE_STORE_PASSWORD`. The graph's settings
+  (`OPENCDE_GRAPH_DIALECT`, `_URI`, `_USER` and `_PASSWORD`, `NEO4J_HEAP`, `NEO4J_PAGECACHE` and in development the
+  `OPENCDE_DEV_NEO4J_*` ports), `OPENCDE_IFC_DB_ENABLED=true` and `COMPOSE_PROFILES=graph` come only with tier 3:
+  `--tier experimental`, a yes to the guide's question about IFC-DB or the graph, or `--local`, the local engine, which
+  is always tier 3, with MCP. `.env.example` holds `OPENCDE_TIER`, `OPENCDE_STORE_URL` and `OPENCDE_STORE_PASSWORD`,
+  with the graph's lines commented.
+- A server that uses no graph, with the server's own data in PostgreSQL and IFC-DB off (tiers 1 and 2), waits for
+  PostgreSQL alone at start, and `GET /readyz` answers
+  `{"status":"ready","graph":"none","store":"ok","workcopy":"none","store_dialect":"postgres"}`, and 503
+  `{"status":"not_ready","graph":"none","store":"unavailable"}` while PostgreSQL does not answer. The capabilities say
+  `"graph_store": null` and `"bolt": null` in `extensions.ifcgraph`, `opencde ifc-db prune` and `export` refuse at
+  once, and each store's part of the expiry cleaner's round runs on its own, so that one store's trouble no longer
+  stops the other's.
+- `OPENCDE_STORE_URL` is accepted in every environment, no longer in the test environment alone. Production and the
+  local engine refuse to start without `OPENCDE_STORE_PASSWORD` when it is set, and need `OPENCDE_GRAPH_PASSWORD` only
+  when a graph is used. When PostgreSQL cannot be reached or goes away, the API answers 503
+  `{"message":"The database is not available right now","code":"unavailable"}`, as for the graph, with nothing of the
+  driver's text. The administrators' Cypher query (`/admin/api/graph/query`, `OPENCDE_GRAPH_QUERY_ENABLED`) stays off
+  while PostgreSQL holds the server's own data (ADR 0029); the administration's overview names the store's dialect
+  (`postgres`), and its settings page lists `OPENCDE_STORE_URL`.
+- The image installs the `postgres` extra (asyncpg) beside `ifc-db`, so that it can keep the server's own data in
+  PostgreSQL: `ARG OPENCDE_EXTRAS="--extra postgres --extra ifc-db"` in `docker/Dockerfile`, and
+  `--build-arg OPENCDE_EXTRAS="--extra postgres"` builds a slimmer image without IfcOpenShell.
+- An installation from before, with the server's own data in the graph, moves to PostgreSQL with a backup and a
+  restore: `docker compose exec api opencde backup /data/migration` with the old stack running; the checkout
+  updated, with `OPENCDE_STORE_PASSWORD` (a long random value), `OPENCDE_TIER` and, to keep IFC-DB's models (tier 3),
+  `COMPOSE_PROFILES=graph` in `.env`, or a new `.env` from `opencde init` with the secrets carried over;
+  `docker compose up -d`; and `docker compose exec api opencde restore /data/migration/opencde-backup-<UTC time>`,
+  with `--force` if it says the database is not empty. A backup of a graph restores into PostgreSQL as rows, and a
+  backup of PostgreSQL does not restore into a graph. A graph's backup holds the nodes with a unique key, so the
+  teams, the publications of versions, the components of viewpoints and the trials, clash checks and merges stay
+  behind, and the backup says how many nodes it left out. See
+  [docs/en/deploy/backup.md](docs/en/deploy/backup.md#from-the-graph-to-postgresql).
+- With `OPENCDE_STORE_URL` every part of the server keeps its own data in PostgreSQL (ADR 0029): the IFC-DB service,
+  the merge, the named queries and the MCP tool `list_models` read the documents, viewpoints and conversions there,
+  and so do the administration's figures and the project administration; the audit log, the request log and the
+  sign-in throttle have their tables in migration 0006 (`audit_events`, `request_log_entries`, `sign_in_throttles`),
+  and the cleaner deletes the expired entries and throttles and keeps the audit log.
+- The command line opens the server's own data where it is, PostgreSQL, waited for and migrated, when
+  `OPENCDE_STORE_URL` names it, and connects no graph while IFC-DB is off: `user`, `project`, `client`, `revoke`
+  (`--all` too), `cleanup`, `seed`, `ifc-db list` and `ifc-db prune` reach it. `opencde seed` refuses unless
+  PostgreSQL and the graph are empty, and `--reset` empties both; `opencde doctor` reports PostgreSQL's connection and
+  its migrations beside those the server ships, and the graph as not used without IFC-DB.
+- A backup of a server with its own data in PostgreSQL holds the IFC graph's nodes and relationships in the same two
+  files as before and the tables' rows beside them in `store.jsonl.gz`, read in one snapshot; the manifest names
+  `store_dialect` `postgres`, the rows and the last migration. It restores into PostgreSQL alone, into empty tables
+  (`opencde restore --force` empties them), and a database with migrations after the backup's is refused. A graph's
+  backup restores into PostgreSQL by a mapping of its labels and relationships to the tables, the audit log and the
+  sign-in throttle among them; what has no place is refused in one message before anything is written.
+- A change set's operations follow Dataspatium at 9dc4f9f and 2cbe038, all additions to `dataspatium-tools/1`:
+  `create_element` makes an IfcCurtainWall along `curtain` (`start`, `end`, `height`, `base`, `bays` or `bay_width`,
+  `rows` or `row_height`) with its mullions, transoms and panels as its parts, and `define_type` has the kind
+  `curtain_wall` with `panel_material`, `member_width`, `member_depth` and `panel_thickness`; the new tool
+  `set_responsible_party` names the organisation that answers for the model with its role in IfcRoleEnum,
+  `user_role`, `designation` and `contact_role`, and refuses a contact person's name from an AI, as the app does.
+  `delete_elements` takes a whole's aggregated parts, the spaces get first-level boundaries with their faces, a moved
+  wall is joined anew and its spaces fitted, a curtain wall with an Axis counts as a wall in the topology, and an
+  opening that nothing fills finds its wall, so that the hole reaches the wall's spaces. The capabilities document
+  lists `set_responsible_party` in `ifc_changes.ops_tools`, and the MCP endpoint offers it with the app's schema.
+- A small server: `docker/compose.small.yaml`, added after `compose.memgraph.yaml` as the last file, caps Memgraph
+  at 1536 MiB (`OPENCDE_MEMGRAPH_MEMORY_MIB`) and limits the graph container to 2048 MiB
+  (`OPENCDE_GRAPH_CONTAINER_MIB`) and the api container to 1024 MiB (`OPENCDE_API_CONTAINER_MIB`), the defaults for
+  a machine of 4 GB, so that a model too large for the machine fails alone instead of taking its memory. The section
+  "A small server" in `docs/en/deploy/vps-caddy.md` gives the numbers and how to choose them; the page's update
+  command is `docker compose pull && docker compose up -d`, which keeps the overlays in `COMPOSE_FILE`.
+- A statement the graph has no memory for is answered with 503 `unavailable` and "The database is full and takes no
+  changes", also from the named queries, the administrators' query and the MCP endpoint: on Memgraph at once, where
+  the driver tried it again for half a minute before a 500, and on Neo4j after the driver's tries. After such a
+  refusal the server asks Memgraph to free memory, and a failed import is removed in up to five rounds, each after the
+  database gave memory back. `/readyz` answers 503 with `"graph": "full"` (or `"store": "full"`) from 95 % of
+  Memgraph's limit, and `docker/compose.memgraph.yaml` takes `OPENCDE_MEMGRAPH_MEMORY_MIB` as Memgraph's
+  `--memory-limit` (0, the default, leaves it to Memgraph).
+- The Settings page and `/admin/api/health` check the PostgreSQL connection of a server whose own data is there, as
+  `opencde doctor` does, where they showed the graph's checks for it.
+- The Compose files start Memgraph with `--telemetry-enabled=false`, so that it sends its vendor no usage statistics,
+  and as the graph with `--storage-wal-file-flush-every-n-tx=1`, so that an answered write is on disk, where Memgraph
+  flushed its write-ahead log every 100,000 transactions. The image makes `/backups` owned by the server's user, so
+  that a new backups volume is writable, and the backup sidecar waits for a healthy server and takes no new backup
+  at a start within 20 hours of the last.
+- The selection page's own upload closes the files of its form when the request is over, whatever the answer: a file
+  refused as too large kept its temporary copy in `/tmp` until the garbage collector came by, on a busy server the
+  restart, so that a few refused uploads filled `/tmp` and the next upload got a 500.
+
 ## 3.0.0 — 2026-11-12
 
 Released again on 2026-11-12 (the fifteenth time) in step with Dataspatium 3.0.0; the releases of 2026-11-08,

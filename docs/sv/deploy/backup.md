@@ -6,6 +6,7 @@
 |---|---|
 | `nodes.jsonl.gz` | varje nod: etiketter och egenskaper, ett JSON-objekt per rad |
 | `relationships.jsonl.gz` | varje relation, med start- och slutnod angivna genom sina unika nycklar |
+| `store.jsonl.gz` | med PostgreSQL: varje tabellrad med serverns egna data, ett JSON-objekt per rad |
 | `storage.tar.gz` | lagringskatalogen: dokument, snapshots, bitmaps, snippets |
 | `manifest.json` | format, tid, serverversion, dialekt, antal, SHA-256 för varje fil |
 
@@ -14,6 +15,16 @@ aldrig med databasinterna id:n, så en säkerhetskopia tagen från Neo4j kan
 återställas i Memgraph och tvärtom (ADR 0006). Databasen fortsätter köra under
 säkerhetskopieringen; en kopia tagen medan uppladdningar pågår kan sakna
 delarna av de uppladdningarna, vilket klienterna helt enkelt gör om.
+
+Med serverns egna data i PostgreSQL (`OPENCDE_STORE_URL`), som `opencde init`
+och Compose-filerna ställer in det, ligger dess rader i `store.jsonl.gz`, varje
+rad `{"table": ..., "row": {...}}`, tabell efter tabell i ordningen för deras
+främmande nycklar och alla från samma ögonblicksbild av databasen.
+`nodes.jsonl.gz` och `relationships.jsonl.gz` håller då bara IFC-DB:s modeller,
+och ingenting på en server utan graf (nivå 1 och 2). `manifest.json` anger
+`postgres` i `store_dialect`, antalet rader i `rows`, databasens senaste
+migrering i `store_migration` och `none` i `dialect` när det inte finns någon
+graf.
 
 Med serverns egna data i en egen graf (`OPENCDE_STORE_GRAPH_URI`,
 [ifc-db.md](../ifc-db.md)) håller en säkerhetskopia båda graferna i samma
@@ -37,12 +48,23 @@ lagringskatalogen. Sessioner och tokens återställs också; kör
 `opencde revoke --all` efteråt om kopian är gammal eller kommer från en annan
 server.
 
+Till PostgreSQL går en kopia av PostgreSQL in i de tomma tabellerna i en
+databas utan någon migrering efter kopians: `restore` migrerar den upp till
+kopians migrering, lägger tillbaka raderna i en transaktion och kör sedan de
+senare migreringarna över dem. En grafs kopia återställs också i PostgreSQL:
+serverns egna noder och relationer blir rader, och IFC-DB:s noder går till
+grafen. Det som saknar plats i tabellerna vägras, allt i ett meddelande, och
+ingen rad går in. En kopia som håller IFC-DB:s modeller kräver en server med
+graf (nivå 3), och en kopia av PostgreSQL återställs inte i en graf.
+
 ## I Docker Compose
 
 `docker/compose.prod.yaml` kör en tjänst `backup` som anropar `opencde backup /backups`
-en gång om dagen och behåller de 14 nyaste mapparna i volymen `backups`.
-Kopiera den volymen någon annanstans (en annan värd, objektlagring); en
-säkerhetskopia på samma disk som datat är bara en halv säkerhetskopia:
+en gång om dagen och behåller de 14 nyaste mapparna i volymen `backups`. Den
+väntar på PostgreSQL och säkerhetskopierar den med de lagrade filerna och, i
+nivå 3, grafens modeller. Kopiera den volymen någon annanstans (en annan värd,
+objektlagring); en säkerhetskopia på samma disk som datat är bara en halv
+säkerhetskopia:
 
 ```sh
 docker run --rm -v dataregium_backups:/backups -v "$PWD":/out alpine \
@@ -55,9 +77,43 @@ För att återställa på en ny värd: starta stacken, kopiera en
 säkerhetskopiemapp in i containern `api` (eller montera den) och kör
 `docker compose exec api opencde restore /sökväg --force`.
 
+## Från grafen till PostgreSQL
+
+En installation från före PostgreSQL har serverns egna data i grafen. Den
+flyttar till PostgreSQL med en säkerhetskopia och en återställning, som för med
+sig noderna med en unik nyckel: team, en versions publicering, viewpointernas
+komponenter och provningarna, krocktesterna och sammanslagningarna finns inte i
+en grafs säkerhetskopia och blir kvar, och säkerhetskopieringen säger hur många
+noder den lämnade (`WARN … nodes without a unique key were not exported`).
+Skriv, medan den gamla stacken körs, en säkerhetskopia till datavolymen, som den
+nya stacken behåller:
+
+```sh
+docker compose exec api opencde backup /data/migration
+```
+
+Uppdatera sedan utcheckningen, ta bort `OPENCDE_STORE_GRAPH_URI` ur `.env` om
+den är satt, och lägg till `OPENCDE_STORE_PASSWORD` (ett långt slumpat värde)
+och `OPENCDE_TIER` i `.env`, och `COMPOSE_PROFILES=graph` för att behålla
+IFC-DB:s modeller i nivå 3 (`OPENCDE_TIER=experimental`); eller flytta undan den
+gamla `.env`, skriv en ny med `opencde init` (`--tier experimental` för att
+behålla IFC-DB:s modeller) och för över hemligheterna, som `OPENCDE_SECRET_KEY`
+och `OPENCDE_GRAPH_PASSWORD`. Starta den nya stacken och återställ kopian:
+
+```sh
+docker compose up -d
+docker compose exec api opencde restore /data/migration/opencde-backup-<UTC-tid>
+```
+
+Lägg till `--force` om den säger att databasen inte är tom. En säkerhetskopia av
+en graf återställs i PostgreSQL som rader, och en säkerhetskopia av PostgreSQL
+återställs inte i en graf.
+
 ## Testa din återställning
 
 En säkerhetskopia du aldrig har återställt är en förhoppning, inte en
 säkerhetskopia. Integrationstestet `tests/integration/test_backup.py`
-återställer en kopia i en tom databas på både Neo4j och Memgraph; gör samma
-sak en gång på en testinstans när produktionen är uppsatt.
+återställer en kopia i en tom databas på både Neo4j och Memgraph, och
+`tests/integration/test_postgres_cli.py` återställer kopior av PostgreSQL och
+av en graf i PostgreSQL; gör samma sak en gång på en testinstans när
+produktionen är uppsatt.

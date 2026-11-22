@@ -10,17 +10,19 @@ sequenceDiagram
     autonumber
     participant A as Rapportörens klient
     participant S as Server
-    participant G as Grafdatabas
+    participant D as Databas
+    participant G as IFC-graf
     participant F as Fillagring
     participant B as Läsarens klient
 
     A->>S: POST /bcf/3.0/projects/{id}/topics (titel, typ, status)
-    S->>G: Kontrollera rollen genom MEMBER_OF, skapa Topic
+    S->>D: Kontrollera rollen genom medlemskapet, skapa ärendet
     S-->>A: 201 ärende med guid och server_assigned_id
     A->>S: POST …/topics/{guid}/viewpoints (kamera, komponenter, bild)
     S->>F: Spara bilden under ett namn som servern väljer
-    S->>G: Skapa Viewpoint och dess Component
-    S->>G: Kopiera GTIN från de färdiga modellerna till komponenterna, om IFC-grafen är på
+    S->>D: Skapa viewpointen och dess komponenter
+    S->>G: Slå upp komponenternas GlobalId i de färdiga modellerna, om IFC-grafen är på
+    S->>D: Kopiera de GTIN som hittades till komponenterna
     S-->>A: 201 viewpoint med guid
     A->>S: POST …/topics/{guid}/comments (comment, viewpoint_guid)
     S-->>A: 201 kommentar
@@ -64,7 +66,9 @@ Ett projekt som användaren inte är medlem i finns inte för hen (404).
 
 När [IFC-DB](../ifc-db.md) är på får varje komponent som nämner ett `GlobalId`
 som projektets färdiga modeller har elementets GTIN som `gtin`, också när modellen
-laddas upp efteråt; själva elementet hittas genom sitt `GlobalId`:
+laddas upp efteråt; själva elementet hittas genom sitt `GlobalId`. Där grafen
+håller serverns egna data också, som före PostgreSQL, går en fråga från
+viewpointen till elementet:
 
 ```cypher
 MATCH (:Viewpoint {guid: $viewpoint})-[:HAS_COMPONENT]->(c:Component)

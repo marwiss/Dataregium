@@ -21,11 +21,12 @@ library in [client/](../../client/) does all of this; the examples in
 }
 ```
 
-A server can be set to offer only some of these (`OPENCDE_APIS`). Then the lists
-hold only what it offers, and an API it does not offer answers 404. A server for
-BCF API 2.1 alone has no Foundation API: a client finds it through `GET
-/bcf/versions` and signs in through `GET /bcf/2.1/auth`. A document server
-offers the Foundation API and the Documents API, and no BCF.
+A server can be set to offer only some of these (`OPENCDE_APIS`, within its
+tier). Then the lists hold only what it offers, and an API it does not offer
+answers 404. A server for BCF API 2.1 alone has no Foundation API: a client finds
+it through `GET /bcf/versions` and signs in through `GET /bcf/2.1/auth`. A
+document server, such as every server of tier 1, offers the Foundation API and
+the Documents API, and no BCF.
 
 ### The capabilities document (extension)
 
@@ -37,6 +38,7 @@ of probing:
 ```json
 {
   "server": {"name": "Dataregium OpenCDE server", "version": "3.0.0", "public_url": "https://cde.example.org"},
+  "tier": "experimental",
   "apis": {"foundation": "1.0", "bcf": "3.0", "documents": "1.0"},
   "scopes": ["profile", "bcf", "documents", "project", "admin"],
   "extensions": {
@@ -65,11 +67,19 @@ of probing:
 }
 ```
 
+`tier` is the server's tier: `documents` (tier 1, the Foundation and Documents
+APIs), `bim-gis` (tier 2, BCF API 3.0 and 2.1 and the MCP endpoint too) or
+`experimental` (tier 3, IFC-DB's graph too). A function can be off within the
+tier but never on above it, so a client can leave out what lies above the
+server's tier, and reads `apis` and `extensions` for what is on.
+
 A `404` means a server without extensions (another OpenCDE server, or an
 older Dataregium). Treat unknown keys as absent. `ifcgraph.bolt` is set only
 when the operator has deliberately published the graph database
-(`OPENCDE_GRAPH_PUBLIC_BOLT_URL`); `graph_query` is on only when the
-operator has set `OPENCDE_GRAPH_QUERY_ENABLED` (§7); `links.dataspatium`
+(`OPENCDE_GRAPH_PUBLIC_BOLT_URL`), and a server without a graph (tiers 1 and
+2) says `"graph_store": null` and `"bolt": null` in `ifcgraph`; `graph_query`
+is on only when the operator has set `OPENCDE_GRAPH_QUERY_ENABLED` and the
+server's own data is in the graph (§7); `links.dataspatium`
 carries the address of a Dataspatium installation when the operator has set
 `OPENCDE_DATASPATIUM_URL`. Nothing in the document is secret.
 
@@ -262,8 +272,8 @@ The flows involve the user's browser; see [flows/documents.md](flows/documents.m
 Your client needs a callback URL the browser can reach (a loopback listener
 for desktop apps). The server never calls that URL itself.
 
-With the IFC-DB module on, an IFC file uploaded as a version is checked
-against the IFC schema and, where the server has them, buildingSMART's
+With the IFC-DB module on (tier 3), an IFC file uploaded as a version is
+checked against the IFC schema and, where the server has them, buildingSMART's
 ifc-gherkin-rules. Its metadata then carries `ifc_validation_status` and,
 once checked, the other `ifc_validation_*` entries; `ifc_validation_report` is
 the address of the report, an extension that answers to the same token. See
@@ -354,7 +364,7 @@ server cannot read, as the server answers, where FastAPI itself would say `422`.
 | `upload_too_large` | 413 | A chosen file or part is over the upload limit (`max_size_in_bytes` in the upload instructions) | Tell the user the limit |
 | `rate_limited` | 429 | Too many requests from one address; `Retry-After` says when | Wait and retry |
 | `internal_error` | 500 | An unexpected error; `message` is always "Internal server error" | Report with the `X-Request-ID` |
-| `unavailable` | 503 | The graph database cannot be reached or is full | Retry later |
+| `unavailable` | 503 | PostgreSQL or the graph database cannot be reached ("The database is not available right now"), or the graph is full | Retry later |
 
 The list is closed: a code you do not know is treated like a missing one, and
 you show `message`. Statuses the framework answers on its own (405, 415) carry
@@ -364,6 +374,13 @@ specification requires, so act on `error` there (`invalid_request`,
 `invalid_client`, `invalid_grant`, `unauthorized_client`,
 `unsupported_grant_type`, `invalid_scope`, `invalid_target`). The capabilities document (§1)
 is served by every server that emits codes.
+
+`GET /readyz` tells a client that waits whether the server's databases answer
+again. A server without a graph (tiers 1 and 2) says `"graph": "none"` there: it
+answers
+`{"status":"ready","graph":"none","store":"ok","workcopy":"none","store_dialect":"postgres"}`,
+and `503` with `{"status":"not_ready","graph":"none","store":"unavailable"}`
+while PostgreSQL does not answer.
 
 ## 7. The administration API (extension)
 
@@ -377,7 +394,7 @@ The capabilities document says whether the API is on
 
 | Endpoint | Returns |
 |---|---|
-| `GET /admin/api/overview` | `version`, `uptime_s`, `dialect`, `graph_ok`, the counts `users`, `projects`, `clients`, `sessions`, `topics`, `documents`, `models`, and `request_log` (`enabled`, `rows`) |
+| `GET /admin/api/overview` | `version`, `uptime_s`, `dialect` (where the server's own data is: `postgres`, `neo4j` or `memgraph`), `graph_ok` (whether it answers), the counts `users`, `projects`, `clients`, `sessions`, `topics`, `documents`, `models`, and `request_log` (`enabled`, `rows`) |
 | `GET /admin/api/users?q=&limit=` | users (`id`, `username`, `name`, `email`, `is_admin`, `disabled`, `must_change_password`, `created_at`, `last_sign_in_at`, `projects` as `[{project_id, role}]`); `q` searches user name, name and e-mail |
 | `GET /admin/api/users/{id}` | one user; `projects` also carries the project `name` |
 | `GET /admin/api/projects?q=` | projects with `members` (`user_id`, `username`, `role`), the counts `topics`, `documents`, `models`, and `ai_policy` |
@@ -419,7 +436,8 @@ client and the `X-Request-ID` of the call.
 
 ### Graph query (off by default)
 
-When the operator sets `OPENCDE_GRAPH_QUERY_ENABLED=true`, the capabilities
+When the operator sets `OPENCDE_GRAPH_QUERY_ENABLED=true` and the server's own
+data is in the graph, not in PostgreSQL (ADR 0029), the capabilities
 document announces `graph_query` with `url`, `max_rows` and
 `timeout_seconds`, and administrators holding the `admin` scope may run
 **reading** Cypher against the whole graph, the IFC graph included, without
@@ -525,7 +543,8 @@ above, and its live test suites run against the development stack.
   `3eT96F_cnDsOufCEsotwtp` (GTIN 2) and `3k3LbXmTfDWODxdSuyCGYE` (GTIN 1),
   in property set `Reuse`; the same file is `tests/fixtures/three_walls_gtin.ifc`.
 - `docker compose up -d` gives you a
-  server on `http://127.0.0.1:8000` with Neo4j Browser on `:7484`.
+  server on `http://127.0.0.1:8000` with PostgreSQL on `127.0.0.1:5442` and, in
+  tier 3 (`COMPOSE_PROFILES=graph`), Neo4j Browser on `:7484`.
 - Register a client for your app in the admin UI (`/admin` → Clients) or with
   `uv run opencde client create "My app" --redirect-uri http://127.0.0.1/callback --public`.
 - `opencde_client.testing` can complete the sign-in and the Documents API

@@ -10,8 +10,8 @@ produktionsöverlagringen utan sin Caddy.
 Det som lämnas orört: portarna 80 och 443, proxyns andra webbplatser och
 certifikat, och varje container, nätverk och volym som finns där. Det som
 läggs till: mappen `/opt/dataregium`, Compose-projektet `dataregium` (API:t,
-Neo4j och den nattliga säkerhetskopian), porten `127.0.0.1:8010`, en
-nginx-webbplats och ett certifikat för det nya namnet.
+PostgreSQL och den nattliga säkerhetskopian, och Neo4j i nivå 3), porten
+`127.0.0.1:8010`, en nginx-webbplats och ett certifikat för det nya namnet.
 
 ## 1. Kontrollera
 

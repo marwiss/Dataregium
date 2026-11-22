@@ -15,10 +15,11 @@ the server decides who may sign in and what each person may do in each project.
 
 Technically, Dataregium is a server for buildingSMART's open **OpenCDE APIs**
 (Foundation API 1.0, BCF API 3.0 and 2.1, and Documents API 1.0), built on the
-graph database Neo4j or Memgraph. In the 3 series every uploaded IFC model
-becomes a lossless graph through the [IFC-DB](https://github.com/marwiss/IFC-DB)
-library, with versions, checks and proposed changes. The server was rewritten from
-scratch out of a research prototype from 2023, with security as the first
+database PostgreSQL. In the 3 series every uploaded IFC model becomes a lossless
+graph in Neo4j or Memgraph through the [IFC-DB](https://github.com/marwiss/IFC-DB)
+library, with versions, checks and proposed changes; the graph comes with the
+third of the server's [three tiers](#what-you-can-do). The server was rewritten
+from scratch out of a research prototype from 2023, with security as the first
 requirement, and any client that follows the specifications can connect.
 
 ![The administration overview of a Dataregium server: the numbers of users, projects, clients, topics and documents, the state of the database and the latest audit events](../images/admin-overview.png)
@@ -52,7 +53,8 @@ are at home with containers and Python, the short way is under
 
 A container is a ready-packed program that runs apart on the computer, and Docker
 and Podman are programs that start containers. The quick start starts two: the
-server and its database.
+server and its database, PostgreSQL. With models, in tier 3, it also starts the
+graph database Neo4j.
 
 1. **Download.** Get the code with git, or as a ZIP file under *Code > Download
    ZIP* on GitHub. The `main` branch is the 3 series; `release-2` and `release-1`
@@ -64,11 +66,16 @@ server and its database.
    ```
 
 2. **Set up.** Copy `.env.example` to `.env`, the file with the server's
-   settings, and set `OPENCDE_GRAPH_PASSWORD` to a password of your own of at
-   least 16 characters. To try it with Dataspatium and models, also set
-   `OPENCDE_DYNAMIC_CLIENT_REGISTRATION=true`, `OPENCDE_REQUEST_LOG_ENABLED=true`
-   and `OPENCDE_IFC_DB_ENABLED=true`; the [quick start with Dataspatium](quickstart.md)
-   explains why. Every setting is explained in [.env.example](../../.env.example).
+   settings, and set `OPENCDE_STORE_PASSWORD`, PostgreSQL's password, to a long
+   random value of your own. To try it with Dataspatium and models, which are
+   tier 3, also set `OPENCDE_TIER=experimental`, `COMPOSE_PROFILES=graph`,
+   `OPENCDE_GRAPH_PASSWORD` to a password of at least 16 characters,
+   `OPENCDE_IFC_DB_ENABLED=true`, `OPENCDE_DYNAMIC_CLIENT_REGISTRATION=true` and
+   `OPENCDE_REQUEST_LOG_ENABLED=true`; the [quick start with
+   Dataspatium](quickstart.md) explains why. `uv run opencde init` writes such a
+   `.env` with fresh passwords instead: answer no to other people using the
+   server and yes to what the quick start with Dataspatium uses. Every setting
+   is explained in [.env.example](../../.env.example).
 3. **Start.** The same compose files work with Docker and with Podman; pick the one you have:
 
    <details open>
@@ -78,7 +85,7 @@ server and its database.
    docker compose up -d --build
    ```
 
-   starts the server on <http://127.0.0.1:8000> and a Neo4j database; the first time takes a few minutes. `docker compose logs -f api` shows the server log.
+   starts the server on <http://127.0.0.1:8000> and PostgreSQL, and in tier 3 Neo4j too; the first time takes a few minutes. `docker compose logs -f api` shows the server log.
 
    </details>
 
@@ -97,21 +104,22 @@ server and its database.
    <summary><b>Without a container</b></summary>
 
    ```sh
-   uv sync --extra ifc-db           # installs Python 3.13 and every dependency, with IFC-DB
-   uv run opencde doctor            # checks the configuration and the database
-   uv run opencde serve             # http://127.0.0.1:8000
+   uv sync --extra postgres --extra ifc-db   # installs Python 3.13 and every dependency, with IFC-DB
+   uv run opencde doctor                     # checks the configuration and the database
+   uv run opencde serve                      # http://127.0.0.1:8000
    ```
 
-   runs the server from the checkout with [uv](https://docs.astral.sh/uv/); a database is still needed (Neo4j Desktop, Memgraph Lab or the database from the compose files).
+   runs the server from the checkout with [uv](https://docs.astral.sh/uv/); it needs PostgreSQL, such as the stack's on `127.0.0.1:5442`, which `.env.example` names, and in tier 3 a graph database too, such as the stack's on `127.0.0.1:7697`: remove the `#` before `OPENCDE_GRAPH_URI` in `.env`.
 
    </details>
 
 4. **Look around.** <http://127.0.0.1:8000/docs> shows every call the server
-   takes and lets you try them, <http://127.0.0.1:8000/readyz> says whether the
-   server and the database are ready, and <http://127.0.0.1:7484> is Neo4j
-   Browser, where you see the database (Bolt on `127.0.0.1:7697`; the development
-   overlay avoids Neo4j's default ports, which another Neo4j on the same computer
-   often holds).
+   takes and lets you try them, and <http://127.0.0.1:8000/readyz> says whether
+   the server and its databases are ready (`"graph":"none"` when it uses no
+   graph). PostgreSQL answers on `127.0.0.1:5442`, and in tier 3
+   <http://127.0.0.1:7484> is Neo4j Browser, where you see the graph (Bolt on
+   `127.0.0.1:7697`). The development overlay avoids the default ports, which
+   another PostgreSQL or Neo4j on the same computer often holds.
 5. **Load demonstration data and sign in.**
 
    <details open>
@@ -166,18 +174,26 @@ Each way is one compose file plus an overlay:
 | Beside what already runs on a server, behind its nginx | [deploy/proxied.md](deploy/proxied.md) |
 | Coolify, Dokploy, Portainer | [deploy/paas.md](deploy/paas.md) |
 | Your own region at AWS, Azure or Google Cloud: one machine, set up by a cloud-init file | [deploy/cloud.md](deploy/cloud.md) |
-| A container service plus a managed Neo4j AuraDB or Memgraph Cloud | [deploy/cloud-aura.md](deploy/cloud-aura.md) |
-| Backup and restore (portable between Neo4j and Memgraph) | [deploy/backup.md](deploy/backup.md) |
+| A container service plus a managed PostgreSQL and, in tier 3, a managed Neo4j AuraDB or Memgraph Cloud | [deploy/cloud-aura.md](deploy/cloud-aura.md) |
+| Backup and restore of PostgreSQL and the graph (portable between Neo4j and Memgraph) | [deploy/backup.md](deploy/backup.md) |
 
 `uv run opencde init --public-url https://cde.example.org` writes a production
-`.env` with fresh secrets; `opencde doctor` checks the result.
+`.env` with fresh secrets, PostgreSQL's password among them, for tier 2 (`bim-gis`)
+unless `--tier` says `documents` or `experimental`; `opencde doctor` checks the
+result. An installation from before, with the server's own data in the graph,
+moves to PostgreSQL with a backup and a restore
+([deploy/backup.md](deploy/backup.md#from-the-graph-to-postgresql)).
 
 ### Configuration
 
 Everything is read from environment variables with the prefix `OPENCDE_`, from
 `.env` or from Docker secrets in `/run/secrets/opencde_<name>`. The commented list
-is in [.env.example](../../.env.example). The defaults are safe: production
-refuses to start without a public `https` address and a database password, and
+is in [.env.example](../../.env.example). The server keeps its own data in
+PostgreSQL (`OPENCDE_STORE_URL`, without the password, which is
+`OPENCDE_STORE_PASSWORD`), and in tier 3 IFC-DB's models in a graph, Neo4j or
+Memgraph (`OPENCDE_GRAPH_URI`), which there also holds the server's own data when
+`OPENCDE_STORE_URL` is not set. The defaults are safe: production refuses to start
+without a public `https` address and the password of each database it uses, and
 nothing is open until it has been configured.
 
 ### For the technically skilled
@@ -186,22 +202,34 @@ nothing is open until it has been configured.
   Trivy and with an SBOM. The tags are `3.0.0` and `latest` for the 3 series,
   `3.0.0-gherkin` and `latest-gherkin` with buildingSMART's ifc-gherkin-rules,
   `2.0.0` and `1.0.0`; `OPENCDE_IMAGE_TAG` chooses in the compose files.
-- **Compose**: `docker/compose.yaml` plus overlays for development, production
-  with Caddy, behind an existing proxy, Memgraph, an external database, Bolt with
-  TLS, a tunnel, the local engine and the working copy. `COMPOSE_FILE` in `.env`
-  chooses them, so the commands go without `-f`.
+  `docker/Dockerfile` installs the extras `postgres` and `ifc-db`, and
+  `--build-arg OPENCDE_EXTRAS="--extra postgres"` builds a slimmer image without
+  IfcOpenShell.
+- **Compose**: `docker/compose.yaml` starts the server and PostgreSQL, and the
+  graph of tier 3 with `COMPOSE_PROFILES=graph`, plus overlays for development,
+  production with Caddy, behind an existing proxy, a tunnel and the local engine,
+  and for tier 3 Memgraph, an external graph database, Bolt with TLS, the working
+  copy and a small server. `COMPOSE_FILE` in `.env` chooses them, so the commands
+  go without `-f`. `OPENCDE_STACK_STORE_URL` names another PostgreSQL, such as a
+  managed one, and set but empty keeps the server's own data in the graph, in tier 3.
 - **Without a container**: Python 3.11 or later with uv (tested on 3.11, 3.13 and
-  3.14), `uv sync --extra ifc-db`, and Neo4j 5.26 or Memgraph 3.14 at `OPENCDE_GRAPH_URI`.
-- **The main settings**: `OPENCDE_APIS` chooses the APIs (all three by default,
-  `["documents"]` in 1.0.0); `OPENCDE_IFC_DB_ENABLED=true` turns on the graph and
-  everything in the 2 and 3 series that concerns models; `OPENCDE_ENVIRONMENT` is
-  `development`, `production` or `local` (the local engine, `opencde init --local`).
-- **Endpoints**: `/.well-known/dataregium` (the version and the extensions that are
-  on), `/foundation/versions`, `/openapi.json` and `/docs`, `/healthz` and `/readyz`,
-  `/admin/api` (administration) and `/manage/1.0` (project administration). The 3 series' extensions are under `/documents/1.0/` (the versions'
-  `ifc-queries`, `ifc-diff`, `ifc-changes` and `ifc-geometry`, the projects'
-  `ifc-precheck` and `ifc-clash`) and under a BCF 3.0 topic (`snippet` and
-  `ifc-proposal/approve`).
+  3.14), `uv sync --extra postgres --extra ifc-db`, PostgreSQL at
+  `OPENCDE_STORE_URL`, and in tier 3 Neo4j 5.26 or Memgraph 3.14 at
+  `OPENCDE_GRAPH_URI`.
+- **The main settings**: `OPENCDE_TIER` chooses the tier (`documents`, `bim-gis` or
+  `experimental`, the default); `OPENCDE_APIS` chooses the APIs within it (all three
+  by default, `["documents"]` in tier 1 and in 1.0.0); `OPENCDE_STORE_URL` names the
+  PostgreSQL that holds the server's own data, which tiers 1 and 2 require;
+  `OPENCDE_IFC_DB_ENABLED=true` turns on the graph, in tier 3, and everything in the
+  2 and 3 series that concerns models; `OPENCDE_ENVIRONMENT` is `development`,
+  `production` or `local` (the local engine, `opencde init --local`).
+- **Endpoints**: `/.well-known/dataregium` (the version, the tier and the extensions
+  that are on), `/foundation/versions`, `/openapi.json` and `/docs`, `/healthz`
+  and `/readyz`, `/admin/api` (administration) and `/manage/1.0` (project
+  administration). The 3 series' extensions are under `/documents/1.0/` (the
+  versions' `ifc-queries`, `ifc-diff`, `ifc-changes` and `ifc-geometry`, the
+  projects' `ifc-precheck` and `ifc-clash`) and under a BCF 3.0 topic (`snippet`
+  and `ifc-proposal/approve`).
 - **The command line**: `opencde serve`, `init`, `doctor`, `seed`, `backup`,
   `restore`, `revoke`, `cleanup` and the groups `user`, `project`, `client` and
   `ifcgraph`; `uv run opencde --help`.
@@ -216,12 +244,13 @@ the server yourself:
 
 - Windows, macOS or Linux with Docker (Desktop on Windows/macOS, Engine on Linux)
   or Podman 5, or Python 3.11 or later with [uv](https://docs.astral.sh/uv/) and a
-  Neo4j 5.26 or Memgraph 3.14 database of your own.
-- About 1 GB of memory for the database container (`NEO4J_HEAP` and
+  PostgreSQL 17 database of your own, and in tier 3 a Neo4j 5.26 or Memgraph 3.14
+  database too.
+- In tier 3, about 1 GB of memory for the graph's container (`NEO4J_HEAP` and
   `NEO4J_PAGECACHE` in `.env`), and more for large models with IFC-DB.
-- Locally: port 8000 for the server and 7484/7697 for the database, all bound to
-  `127.0.0.1`. In production: ports 80 and 443 reachable from the internet and a
-  DNS name for the server.
+- Locally: port 8000 for the server, 5442 for PostgreSQL and, in tier 3, 7484/7697
+  for the graph, all bound to `127.0.0.1`. In production: ports 80 and 443
+  reachable from the internet and a DNS name for the server.
 - Clients need an `https` address in production; locally `http://127.0.0.1` is
   accepted as a redirect URI, and `http://localhost` with `OPENCDE_ALLOW_LOCALHOST_REDIRECTS=true` (or, while the MCP endpoint is on, for a sign-in to it alone).
 
@@ -243,9 +272,13 @@ The words this README uses, in everyday language; the whole glossary is in
 - **API**: the way an app talks to the server, with set questions and answers.
 - **Server and client**: the server stores and shares the project's material; the
   client is the app you work in, such as Dataspatium.
-- **Database and graph**: the database is where the server keeps everything. A graph
-  database keeps things and the connections between them, such as a wall that
-  stands on a storey, and can therefore answer questions about how the parts fit together.
+- **Database and graph**: the database is where the server keeps its accounts,
+  projects, documents and topics; Dataregium's is PostgreSQL. A graph database keeps
+  things and the connections between them, such as a wall that stands on a storey,
+  and can therefore answer questions about how the parts fit together; in tier 3
+  the models are kept in one, Neo4j or Memgraph.
+- **Tier**: how much a server offers: Documents, BIM + GIS or Experimental, each
+  with everything the one before it has.
 - **Container**: a ready-packed program that runs apart on the computer; Docker and
   Podman start them.
 - **OAuth2**: the safe way to sign in from an app without the app getting your password.
@@ -257,6 +290,21 @@ The words this README uses, in everyday language; the whole glossary is in
 
 What works in one version also works in the next. Each version goes with the same
 version of Dataspatium.
+
+A server offers one of three tiers, which `OPENCDE_TIER` chooses, and each has
+everything the one before it has: **Documents** (`documents`) the Foundation API
+and the Documents API, **BIM + GIS** (`bim-gis`) also BCF API 3.0 and 2.1 and the
+MCP endpoint, and **Experimental** (`experimental`) also IFC-DB's graph in Neo4j or
+Memgraph. IFC-DB (`OPENCDE_IFC_DB_ENABLED`) belongs to tier 3, and with it the
+checks, queries, comparisons, clash checks, trials of change sets, merges and
+geometry below. A function can be off within its tier but never on above it: the
+server refuses to start when `OPENCDE_APIS`, `OPENCDE_MCP_ENABLED` or
+`OPENCDE_IFC_DB_ENABLED` asks for more than the tier offers, and names the
+setting, and what needs IFC-DB, such as the working copy and the clash check,
+stays off without it. Tiers 1 and 2 keep the server's own data in PostgreSQL
+alone. Unset, the tier is Experimental and nothing is held back. The
+capabilities document gives the tier as `tier`, and `opencde doctor` and the
+administration's overview show it.
 
 ### Version 1 (with Dataspatium 1)
 
@@ -282,9 +330,10 @@ version of Dataspatium.
 - **Topics about the model** (BCF API 3.0 and 2.1): questions and remarks with
   comments, pictures and views that point out building elements, with filters and an
   event log, validated against buildingSMART's schemas.
-- **The model as a graph** (the IFC-DB module, turned on with
-  `OPENCDE_IFC_DB_ENABLED`): an uploaded IFC model becomes a graph in the database,
-  linked to the building elements in the topics' views (see [IFC-DB](ifc-db.md)).
+- **The model as a graph** (the IFC-DB module of tier 3, turned on with
+  `OPENCDE_IFC_DB_ENABLED`): an uploaded IFC model becomes a graph in Neo4j or
+  Memgraph, linked to the building elements in the topics' views (see
+  [IFC-DB](ifc-db.md)).
 
 ### Also in version 3 (with Dataspatium 3)
 
@@ -363,10 +412,11 @@ through the Documents API. In the 3 series the app publishes versions with a bas
 version and a check beforehand, sends change sets that the server tests, lets the
 project manager approve them and settle clashes, compares versions in 3D and asks the
 graph named queries; an administrator can also query the graph with Cypher through
-the server's read-only endpoint. The app sends `X-Request-ID` on every call, so that
-the request log here and the log in the app show the same conversation, reads the
-server's capabilities document to see which extensions are on and acts on the error
-codes the server puts in its error bodies.
+the server's read-only endpoint while the server's own data is in the graph. The
+app sends `X-Request-ID` on every call, so that the request log here and the log in
+the app show the same conversation, reads the server's capabilities document to see
+which extensions are on and acts on the error codes the server puts in its error
+bodies.
 
 This is how they hang together:
 
@@ -428,14 +478,15 @@ number go together:
 - [graph-schema.md](graph-schema.md): the graph model.
 - [ifc-db.md](ifc-db.md): the IFC-DB module, the checks, the versions, the change sets, the geometry and examples of Cypher queries.
 - [mcp.md](mcp.md): the MCP endpoint, through which AI programs read the projects' models: turning it on, its tokens, the protocol, the tools, the AI policy and the limits.
-- Architecture decisions that stand: a graph database as the only store, opaque
-  tokens instead of JWT, portable Cypher for Neo4j and Memgraph, a web interface
-  without a framework, a backup at application level, BCF API 2.1 beside 3.0, a
-  lossless IFC graph that reads and writes STEP itself and is validated when written,
-  buildingSMART's rules in an environment of their own, IFC-DB as a library, a check
-  against the project's IDS, named queries for members, a clash check on the server
-  with IfcClash, versions as nodes with changes and a base, a local engine that only
-  answers on your own computer and a working copy in memory beside the archive.
+- Architecture decisions that stand: the server's own data in PostgreSQL and the
+  models in a graph database, opaque tokens instead of JWT, portable Cypher for
+  Neo4j and Memgraph, a web interface without a framework, a backup at application
+  level, BCF API 2.1 beside 3.0, a lossless IFC graph that reads and writes STEP
+  itself and is validated when written, buildingSMART's rules in an environment of
+  their own, IFC-DB as a library, a check against the project's IDS, named queries
+  for members, a clash check on the server with IfcClash, versions as nodes with
+  changes and a base, a local engine that only answers on your own computer and a
+  working copy in memory beside the archive.
 - [spec/SOURCES.md](../../spec/SOURCES.md): the exact specification versions the
   server is tested against.
 
@@ -456,15 +507,17 @@ The documentation is in this README's seven languages, each language under
 ## Limitations in brief
 
 - Everything that concerns models, in the 2 and 3 series, needs the IFC-DB module,
-  which is off until `OPENCDE_IFC_DB_ENABLED=true`. buildingSMART's rules only run
-  with the `-gherkin` image; without it the schema and IDS are checked.
+  which is off until `OPENCDE_IFC_DB_ENABLED=true` and belongs to tier 3
+  (`OPENCDE_TIER=experimental`). buildingSMART's rules only run with the
+  `-gherkin` image; without it the schema and IDS are checked.
 - The server implements BCF API 3.0 and 2.1, not 1.0, whose resources look different.
 - Exporting a project as BCFzip is left to the clients; the server stores topics,
   comments and viewpoints as the API defines them.
 - The community editions of Neo4j and Memgraph lack read-only database users, so an
   exposed Bolt port gives full access to whoever has the password. The port stays
   closed unless the administrator publishes it on purpose; the administration API's
-  read-only graph query (`OPENCDE_GRAPH_QUERY_ENABLED`) gives Cypher without the port.
+  read-only graph query (`OPENCDE_GRAPH_QUERY_ENABLED`) gives Cypher without the
+  port, and stays off when PostgreSQL holds the server's own data.
 - The IFC-DB import, the checks and the testing of change sets run in separate
   processes with memory and time limits (`OPENCDE_IFC_DB_*`); very large models are
   refused instead of being left half imported, or are handled by the local engine.

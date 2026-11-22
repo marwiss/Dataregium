@@ -17,8 +17,9 @@ server.
    TUNNEL_TOKEN=<token>
    ```
 
-   Produktionsläget kräver https-adressen, ett databaslösenord och en hemlig
-   nyckel; `opencde init --public-url https://cde.example.org` skriver dem.
+   Produktionsläget kräver https-adressen, en hemlig nyckel och PostgreSQL:s
+   lösenord (`OPENCDE_STORE_PASSWORD`, som även Compose kräver);
+   `opencde init --public-url https://cde.example.org` skriver dem.
 3. Starta:
 
    ```sh

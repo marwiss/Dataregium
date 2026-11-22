@@ -18,6 +18,11 @@ docker compose up -d --build
 docker compose exec api opencde seed
 ```
 
+`opencde init --dev` writes tier 2, BIM + GIS (`OPENCDE_TIER=bim-gis`):
+PostgreSQL holds the server's own data, and no graph starts. `--tier experimental`
+writes tier 3, Experimental, with IFC-DB on and Neo4j beside PostgreSQL
+(`COMPOSE_PROFILES=graph`), and `--tier documents` tier 1, Documents.
+
 `opencde seed` creates demonstration users (an administrator, a manager, an
 editor, a contributor and a viewer), two projects and a public OAuth2 client,
 and prints the passwords once.
@@ -27,12 +32,20 @@ and prints the passwords once.
 | API documentation | <http://127.0.0.1:8000/docs> |
 | Administration | <http://127.0.0.1:8000/admin> (sign in as the administrator) |
 | Readiness | <http://127.0.0.1:8000/readyz> |
-| Neo4j Browser | <http://127.0.0.1:7484> (Bolt `127.0.0.1:7697`) |
+| PostgreSQL | `postgresql://opencde@127.0.0.1:5442/opencde`, with `OPENCDE_STORE_PASSWORD` |
+| Neo4j Browser, in tier 3 | <http://127.0.0.1:7484> (Bolt `127.0.0.1:7697`) |
 | Server log | `docker compose logs -f api` |
 
-The development overlay publishes Neo4j on 7484/7697 rather than the default
-7474/7687, which another Neo4j on the same machine often holds. Change the
-ports with `OPENCDE_DEV_*` in `.env`. Two checkouts on one machine share the
+Without a graph, as in tiers 1 and 2, `/readyz` answers
+`{"status":"ready","graph":"none","store":"ok","workcopy":"none","store_dialect":"postgres"}`,
+and 503 `{"status":"not_ready","graph":"none","store":"unavailable"}` while
+PostgreSQL does not answer. In tier 3 `"graph"` is `"ok"` when the graph
+answers too.
+
+The development overlay publishes PostgreSQL on 5442 and, in tier 3, Neo4j on
+7484/7697, rather than the defaults 5432 and 7474/7687, which another PostgreSQL
+or Neo4j on the same machine often holds. Change the ports with `OPENCDE_DEV_*`
+in `.env`. Two checkouts on one machine share the
 Compose project name `dataregium` (`docker/compose.yaml` sets it); give the second one
 `COMPOSE_PROJECT_NAME=dataregium-2` and other ports in its `.env`.
 
@@ -42,10 +55,14 @@ in volumes named `kontroll_…`. It keeps them by setting
 `docker/compose.yaml`; without it, the next `up` starts a new project with empty
 volumes.
 
+An installation from before, with the server's own data in the graph, moves to
+PostgreSQL with a backup and a restore, as
+[From the graph to PostgreSQL](backup.md#from-the-graph-to-postgresql) says.
+
 ## Without Docker for the server
 
-Run the database in Docker (or Neo4j Desktop / Memgraph Lab) and the server
-from the checkout:
+Run the databases in Docker (or the graph in Neo4j Desktop / Memgraph Lab) and
+the server from the checkout:
 
 ```sh
 uv sync
@@ -53,8 +70,11 @@ uv run opencde doctor
 uv run opencde serve --reload
 ```
 
-`.env` written by `opencde init --dev` points at `bolt://127.0.0.1:7697`, the
-Bolt port of the development overlay.
+The server needs PostgreSQL, and in tier 3 the graph too; a server in tier 3
+without `OPENCDE_STORE_URL` keeps its own data in the graph, as before
+PostgreSQL, and needs only the graph. `.env` written by `opencde init --dev` points
+at `postgresql://opencde@127.0.0.1:5442/opencde` and, in tier 3, at
+`bolt://127.0.0.1:7697`: the ports of the development overlay.
 
 ## Memgraph instead of Neo4j
 
@@ -63,6 +83,8 @@ Bolt port of the development overlay.
 docker compose up -d --build
 ```
 
+Memgraph belongs to tier 3 like Neo4j: it starts with `COMPOSE_PROFILES=graph`
+in `.env`, which `opencde init --dev --tier experimental` writes.
 Set `OPENCDE_GRAPH_DIALECT=memgraph` and `OPENCDE_GRAPH_USER=memgraph` in `.env`
 when running the server outside Docker. Memgraph Lab (`memgraph/lab`) can be
 pointed at `127.0.0.1:7697`.
@@ -90,15 +112,18 @@ With `OPENCDE_DYNAMIC_CLIENT_REGISTRATION=true` in `.env` the app registers
 itself instead. CORS allows every origin by default, so no further setting is
 needed; `OPENCDE_REQUEST_LOG_ENABLED=true` lets `/admin/requests` show the
 server side of the app's calls.
-The [quick start](../quickstart.md) has the complete steps and a troubleshooting table.
+The [quick start](../quickstart.md) has the complete steps, in tier 3, and a
+troubleshooting table.
 
 ## The local engine
 
 Dataregium can run on a person's own computer as the engine behind Dataspatium
 for models larger than a browser tab holds (ADR 0023). `opencde init --local`
-writes a `.env` for that, and `OPENCDE_ENVIRONMENT=local` makes the server
-keep to it: the public URL must be the loopback, a database password and a
-secret key are required, the CORS origins must be named (`*` is refused), no
+writes a `.env` for that, always in tier 3: PostgreSQL for the server's own data,
+the graph beside it for the models, and IFC-DB and the MCP endpoint on.
+`OPENCDE_ENVIRONMENT=local` makes the server keep to it: the public URL must be
+the loopback, the databases' passwords and a secret key are required, the CORS
+origins must be named (`*` is refused), no
 database address may be published, and `opencde serve` refuses any interface
 but the loopback. A request whose `Host` is not `127.0.0.1`, `localhost` or
 `::1` is answered `421`, before anything else, so that a page on the internet
@@ -112,7 +137,7 @@ app runs from an http origin.
 
 ```sh
 uv run opencde init --local   # .env: OPENCDE_ENVIRONMENT=local, random passwords, the origins Dataspatium comes from
-docker compose up -d          # the API on http://127.0.0.1:8000 only; the database is never published
+docker compose up -d          # the API on http://127.0.0.1:8000 only; the databases are never published
 ```
 
 ## Podman
@@ -130,5 +155,5 @@ of CI.
 ## Clean slate
 
 ```sh
-docker compose down -v   # removes the volumes: database and files
+docker compose down -v   # removes the volumes: databases and files
 ```

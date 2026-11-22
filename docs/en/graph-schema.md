@@ -1,8 +1,14 @@
 # Graph schema
 
-The database is schemaless; `opencde/graph/schema.py` is the schema. This page
-explains the conventions and the labels, section by section in the order the
-stages of the plan added them.
+The graph database is schemaless; `opencde/graph/schema.py` is the schema. This
+page explains the conventions and the labels, section by section in the order
+the stages of the plan added them.
+
+In tier 3 the graph holds IFC-DB's models (`Model`, `Entity`, `StepBlock`). By
+default, and always in tiers 1 and 2, the server's own data, which the other
+labels here hold, is in PostgreSQL instead, in the tables that
+`opencde/postgres/migrations/` defines (ADR 0029). It is in a graph only in
+tier 3 without `OPENCDE_STORE_URL`, as before PostgreSQL.
 
 ## Conventions
 

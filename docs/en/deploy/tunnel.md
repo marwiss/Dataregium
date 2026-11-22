@@ -17,7 +17,8 @@ server.
    TUNNEL_TOKEN=<the token>
    ```
 
-   Production mode requires the https URL, a database password and a secret key;
+   Production mode requires the https URL, a secret key and PostgreSQL's
+   password (`OPENCDE_STORE_PASSWORD`, which Compose requires too);
    `opencde init --public-url https://cde.example.org` writes them.
 3. Start:
 

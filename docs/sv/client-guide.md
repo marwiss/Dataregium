@@ -21,11 +21,12 @@ i [examples/](../examples/) visar det i bruk.
 }
 ```
 
-En server kan ställas in så att den bara erbjuder några av dem (`OPENCDE_APIS`).
-Då innehåller listorna bara det den erbjuder, och ett API som den inte erbjuder
-svarar 404. En server för bara BCF API 2.1 har inget Foundation API: en klient
-hittar den genom `GET /bcf/versions` och loggar in genom `GET /bcf/2.1/auth`. En
-dokumentserver erbjuder Foundation API och Documents API men ingen BCF.
+En server kan ställas in så att den bara erbjuder några av dem (`OPENCDE_APIS`,
+inom sin nivå). Då innehåller listorna bara det den erbjuder, och ett API som den
+inte erbjuder svarar 404. En server för bara BCF API 2.1 har inget Foundation API:
+en klient hittar den genom `GET /bcf/versions` och loggar in genom
+`GET /bcf/2.1/auth`. En dokumentserver, som varje server i nivå 1, erbjuder
+Foundation API och Documents API men ingen BCF.
 
 ### Kapabilitetsdokumentet (tillägg)
 
@@ -37,6 +38,7 @@ anpassar sig i stället för att prova sig fram:
 ```json
 {
   "server": {"name": "Dataregium OpenCDE server", "version": "3.0.0", "public_url": "https://cde.example.org"},
+  "tier": "experimental",
   "apis": {"foundation": "1.0", "bcf": "3.0", "documents": "1.0"},
   "scopes": ["profile", "bcf", "documents", "project", "admin"],
   "extensions": {
@@ -65,11 +67,19 @@ anpassar sig i stället för att prova sig fram:
 }
 ```
 
+`tier` är serverns nivå: `documents` (nivå 1, Foundation API och Documents API),
+`bim-gis` (nivå 2, även BCF API 3.0 och 2.1 och MCP-ändpunkten) eller
+`experimental` (nivå 3, även IFC-DB:s graf). En funktion kan vara avstängd inom
+nivån men aldrig påslagen ovanför den, så en klient kan utelämna det som ligger
+ovanför serverns nivå, och läser `apis` och `extensions` för det som är på.
+
 Ett `404` betyder en server utan tillägg (en annan OpenCDE-server, eller en
 äldre Dataregium). Behandla okända nycklar som om de saknades. `ifcgraph.bolt`
 är satt bara när operatören avsiktligt har publicerat grafdatabasen
-(`OPENCDE_GRAPH_PUBLIC_BOLT_URL`); `graph_query` är på bara när operatören
-har satt `OPENCDE_GRAPH_QUERY_ENABLED` (§7); `links.dataspatium` bär
+(`OPENCDE_GRAPH_PUBLIC_BOLT_URL`), och en server utan graf (nivå 1 och 2) anger
+`"graph_store": null` och `"bolt": null` i `ifcgraph`; `graph_query` är på bara
+när operatören har satt `OPENCDE_GRAPH_QUERY_ENABLED` och serverns egna data
+finns i grafen (§7); `links.dataspatium` bär
 adressen till en Dataspatium-installation när operatören har satt
 `OPENCDE_DATASPATIUM_URL`. Ingenting i dokumentet är hemligt.
 
@@ -269,9 +279,9 @@ Din klient behöver en callback-URL som webbläsaren kan nå (en
 loopback-lyssnare för skrivbordsappar). Servern anropar aldrig den URL:en
 själv.
 
-När IFC-DB-modulen är på kontrolleras en IFC-fil som laddas upp som version mot
-IFC-schemat och, där servern har dem, buildingSMARTs ifc-gherkin-rules.
-Dess metadata har då `ifc_validation_status` och, när den är
+När IFC-DB-modulen är på (nivå 3) kontrolleras en IFC-fil som laddas upp som
+version mot IFC-schemat och, där servern har dem, buildingSMARTs
+ifc-gherkin-rules. Dess metadata har då `ifc_validation_status` och, när den är
 kontrollerad, de andra `ifc_validation_*`-posterna; `ifc_validation_report` är
 adressen till rapporten, ett tillägg som svarar på samma token. Se
 [ifc-db.md](ifc-db.md#kontroll-av-uppladdningar-mot-ifc-schemat).
@@ -364,7 +374,7 @@ servern inte kan läsa, som servern svarar, där FastAPI själv skulle ange `422
 | `upload_too_large` | 413 | En vald fil eller del överstiger uppladdningsgränsen (`max_size_in_bytes` i uppladdningsinstruktionerna) | Berätta gränsen för användaren |
 | `rate_limited` | 429 | För många begäranden från en adress; `Retry-After` säger när | Vänta och försök igen |
 | `internal_error` | 500 | Ett oväntat fel; `message` är alltid "Internal server error" | Rapportera med `X-Request-ID` |
-| `unavailable` | 503 | Grafdatabasen kan inte nås eller är full | Försök igen senare |
+| `unavailable` | 503 | PostgreSQL eller grafdatabasen kan inte nås ("The database is not available right now"), eller grafen är full | Försök igen senare |
 
 Listan är sluten: en kod du inte känner till behandlas som en saknad, och du
 visar `message`. Statusar som ramverket svarar med på egen hand (405, 415)
@@ -374,6 +384,12 @@ specifikationen kräver, så agera på `error` där (`invalid_request`,
 `invalid_client`, `invalid_grant`, `unauthorized_client`,
 `unsupported_grant_type`, `invalid_scope`, `invalid_target`). Kapabilitetsdokumentet (§1)
 serveras av varje server som skickar koder.
+
+`GET /readyz` talar om för en klient som väntar om serverns databaser svarar
+igen. En server utan graf (nivå 1 och 2) anger där `"graph": "none"`: den svarar
+`{"status":"ready","graph":"none","store":"ok","workcopy":"none","store_dialect":"postgres"}`,
+och `503` med `{"status":"not_ready","graph":"none","store":"unavailable"}`
+medan PostgreSQL inte svarar.
 
 ## 7. Administrations-API:t (tillägg)
 
@@ -387,7 +403,7 @@ fel använder kroppen i §6.
 
 | Endpoint | Returnerar |
 |---|---|
-| `GET /admin/api/overview` | `version`, `uptime_s`, `dialect`, `graph_ok`, antalen `users`, `projects`, `clients`, `sessions`, `topics`, `documents`, `models`, och `request_log` (`enabled`, `rows`) |
+| `GET /admin/api/overview` | `version`, `uptime_s`, `dialect` (var serverns egna data finns: `postgres`, `neo4j` eller `memgraph`), `graph_ok` (om den svarar), antalen `users`, `projects`, `clients`, `sessions`, `topics`, `documents`, `models`, och `request_log` (`enabled`, `rows`) |
 | `GET /admin/api/users?q=&limit=` | användare (`id`, `username`, `name`, `email`, `is_admin`, `disabled`, `must_change_password`, `created_at`, `last_sign_in_at`, `projects` som `[{project_id, role}]`); `q` söker i användarnamn, namn och e-post |
 | `GET /admin/api/users/{id}` | en användare; `projects` bär också projektets `name` |
 | `GET /admin/api/projects?q=` | projekt med `members` (`user_id`, `username`, `role`), antalen `topics`, `documents`, `models` och `ai_policy` |
@@ -430,7 +446,8 @@ klienten och anropets `X-Request-ID`.
 
 ### Graffråga (avstängd som standard)
 
-När operatören sätter `OPENCDE_GRAPH_QUERY_ENABLED=true` tillkännager
+När operatören sätter `OPENCDE_GRAPH_QUERY_ENABLED=true` och serverns egna data
+finns i grafen, inte i PostgreSQL (ADR 0029), tillkännager
 kapabilitetsdokumentet `graph_query` med `url`, `max_rows` och
 `timeout_seconds`, och administratörer med scopet `admin` får köra
 **läsande** Cypher mot hela grafen, IFC-grafen inräknad, utan att
@@ -535,7 +552,8 @@ utvecklingsstacken.
   `3eT96F_cnDsOufCEsotwtp` (GTIN 2) och `3k3LbXmTfDWODxdSuyCGYE` (GTIN 1),
   i egenskapssetet `Reuse`; samma fil är `tests/fixtures/three_walls_gtin.ifc`.
 - `docker compose up -d` ger dig en
-  server på `http://127.0.0.1:8000` med Neo4j Browser på `:7484`.
+  server på `http://127.0.0.1:8000` med PostgreSQL på `127.0.0.1:5442` och, i
+  nivå 3 (`COMPOSE_PROFILES=graph`), Neo4j Browser på `:7484`.
 - Registrera en klient för din app i admin-gränssnittet (`/admin` → Klienter)
   eller med
   `uv run opencde client create "My app" --redirect-uri http://127.0.0.1/callback --public`.

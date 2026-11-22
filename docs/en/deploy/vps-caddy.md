@@ -2,7 +2,7 @@
 
 One Linux host (2 vCPU, 4 GB RAM is plenty to start), Docker with the compose
 plugin, a DNS name pointing at it, ports 80 and 443 open. Caddy obtains and
-renews the TLS certificate; the API, the database and the backup job run on a
+renews the TLS certificate; the API, PostgreSQL and the backup job run on a
 private network.
 
 ## 1. Prepare
@@ -15,14 +15,30 @@ uv run opencde init --public-url https://cde.example.org
 
 Without `--public-url`, `opencde init` asks for the values and then prints the commands that come next, for the administrator and the first client too.
 
-`init` writes `.env` with `OPENCDE_ENVIRONMENT=production`, a secret key, a
-database password and `OPENCDE_DOMAIN`. Add `OPENCDE_ACME_EMAIL=you@example.org`
-so Let's Encrypt can reach you about certificates. Keep `.env` private (it is
-git-ignored); it is the only file with secrets.
+`init` writes `.env` with `OPENCDE_ENVIRONMENT=production`,
+`OPENCDE_TIER=bim-gis`, a secret key, the address of PostgreSQL in the stack
+(`OPENCDE_STORE_URL=postgresql://opencde@store:5432/opencde`), a random password
+for it (`OPENCDE_STORE_PASSWORD`, which Compose requires) and `OPENCDE_DOMAIN`.
+Add `OPENCDE_ACME_EMAIL=you@example.org` so Let's Encrypt can reach you about
+certificates. Keep `.env` private (it is git-ignored); it is the only file with
+secrets. Production refuses to start without PostgreSQL's password, and without
+the graph's (`OPENCDE_GRAPH_PASSWORD`) only when it uses a graph.
+
+The tier is what the server offers. Tier 1, Documents (`--tier documents`),
+offers the Foundation and Documents APIs; tier 2, BIM + GIS (`bim-gis`, which
+`init` writes unless told otherwise), adds BCF API 3.0 and 2.1 and the MCP
+endpoint. Both keep the server's own data in PostgreSQL and use no graph.
+Tier 3, Experimental (`--tier experimental`, or a yes to the guide's question
+about IFC models in a graph), adds IFC-DB's graph: `init` then also writes the
+graph's settings, `OPENCDE_IFC_DB_ENABLED=true` and `COMPOSE_PROFILES=graph`,
+which starts Neo4j beside PostgreSQL. A function can be off within the tier,
+never on above it: the server refuses to start, and names the setting, when the
+APIs, the MCP endpoint or IFC-DB ask for more than the tier offers.
+`opencde doctor` and the administration's overview show the tier.
 
 Without uv on the server: copy `.env.example` to `.env` and fill in the values
 by hand (`python3 -c "import secrets; print(secrets.token_urlsafe(48))"` for
-the secret key).
+the secret key and for PostgreSQL's password).
 
 ## 2. Start
 
@@ -37,24 +53,34 @@ The last command prints the administrator's password once. Sign in at
 `https://cde.example.org/signin`, open `/admin`, create projects, users and the
 OAuth2 clients your applications need.
 
+The API waits for PostgreSQL, the service `store`, as it starts; the graph
+starts only in tier 3. Without a graph, `/readyz` answers
+`{"status":"ready","graph":"none","store":"ok","workcopy":"none","store_dialect":"postgres"}`,
+and 503 with `{"status":"not_ready","graph":"none","store":"unavailable"}` while
+PostgreSQL does not answer.
+
 ## 3. Operate
 
 | Task | Command |
 |---|---|
 | Update to the latest image | `docker compose pull && docker compose up -d` |
 | Pin a version | `OPENCDE_IMAGE_TAG=3.0.0` in `.env` (tags follow the GitHub releases) |
-| Offer only some APIs | `OPENCDE_APIS=["bcf-2.1"]` in `.env` for a server for BCF API 2.1 alone, `["documents"]` for a document server; all three by default |
+| Offer only some APIs | `OPENCDE_APIS=["bcf-2.1"]` in `.env` for a server for BCF API 2.1 alone, `["documents"]` for a document server; all three by default, and the Documents API alone in tier 1 |
 | Logs | `docker compose logs -f api` (JSON lines) |
 | Health | `https://cde.example.org/readyz`; the admin UI's Settings page |
-| Backups | nightly into the `backups` volume by the `backup` service; see [backup.md](backup.md) |
+| Backups | nightly into the `backups` volume by the `backup` service: PostgreSQL, the stored files and, in tier 3, the graph's models; see [backup.md](backup.md) |
 | Revoke access in an incident | `docker compose ... exec api opencde revoke --all` (or `--user`, `--client`) |
+
+An installation from before PostgreSQL keeps the server's own data in the
+graph. It moves to PostgreSQL with a backup and a restore, see
+[From the graph to PostgreSQL](backup.md#from-the-graph-to-postgresql).
 
 ## 4. Hardening checklist
 
-- The database is not published; only Caddy listens on the host. Publishing
-  the Bolt port for graph clients is a deliberate step with its own overlay
-  and TLS, see [bolt.md](bolt.md); an open port gives full database access to
-  whoever has the password.
+- Neither PostgreSQL nor the graph is published; only Caddy listens on the
+  host. Publishing the graph's Bolt port in tier 3 for graph clients is a
+  deliberate step with its own overlay and TLS, see [bolt.md](bolt.md); an open
+  port gives full database access to whoever has the password.
 - The API container is read-only, non-root, without capabilities; storage is a
   named volume.
 - `OPENCDE_TRUSTED_PROXIES` covers the compose network so the client address in
@@ -79,14 +105,15 @@ OAuth2 clients your applications need.
 
 ## A small server
 
-With Memgraph on a machine with 4 GB of memory, add `docker/compose.small.yaml`
-after `docker/compose.memgraph.yaml`. It caps Memgraph and limits the graph and
-api containers, so that a model too large for the machine fails alone instead
-of taking the machine's memory. Choose Memgraph when you set the server up: it
-does not read Neo4j's data.
+In tier 3 with Memgraph as the graph, on a machine with 4 GB of memory, add
+`docker/compose.small.yaml` after `docker/compose.memgraph.yaml`. It caps
+Memgraph and limits the graph and api containers, so that a model too large for
+the machine fails alone instead of taking the machine's memory. Choose Memgraph
+when you set the server up: it does not read Neo4j's data.
 
 ```sh
 # .env: COMPOSE_FILE=docker/compose.yaml:docker/compose.prod.yaml:docker/compose.memgraph.yaml:docker/compose.small.yaml
+# .env: COMPOSE_PROFILES=graph
 docker compose up -d
 ```
 
@@ -95,7 +122,7 @@ docker compose up -d
 | Memgraph's cap: the graph and its queries | 1536 MiB | `OPENCDE_MEMGRAPH_MEMORY_MIB` |
 | The graph container | 2048 MiB | `OPENCDE_GRAPH_CONTAINER_MIB` |
 | The api container: the server and its IFC worker | 1024 MiB | `OPENCDE_API_CONTAINER_MIB` |
-| Left to the system, Caddy and the backup | about 1 GB | |
+| Left to the system, PostgreSQL, Caddy and the backup | about 1 GB | |
 
 To choose them for another machine:
 

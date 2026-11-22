@@ -13,27 +13,27 @@ sequenceDiagram
     participant C as Client application
     participant B as User's browser
     participant S as OpenCDE server
-    participant G as Graph database
+    participant D as Database
 
     C->>S: GET /foundation/1.0/auth
     S-->>C: oauth2_auth_url, oauth2_token_url, flows
     Note over C: Generate code_verifier, state;<br/>code_challenge = BASE64URL(SHA256(verifier))
     C->>B: Open oauth2_auth_url?response_type=code&client_id&redirect_uri&state&code_challenge&code_challenge_method=S256
     B->>S: GET /foundation/oauth2/auth
-    S->>G: Load client, check redirect_uri is registered
+    S->>D: Load client, check redirect_uri is registered
     S-->>B: Sign-in and consent page (signed form token)
     B->>S: POST /foundation/oauth2/auth (user name, password, decision)
-    S->>G: Verify password (Argon2id); store code hash bound to client, redirect_uri, challenge
+    S->>D: Verify password (Argon2id); store code hash bound to client, redirect_uri, challenge
     S-->>B: 302 redirect_uri?code=…&state=…&iss=…
     B->>C: Browser lands on the client's redirect URI
     C->>S: POST /foundation/oauth2/token grant_type=authorization_code, code, code_verifier (+ client auth)
-    S->>G: Match code hash, verify SHA256(verifier) = challenge, mark spent, store token hashes
+    S->>D: Match code hash, verify SHA256(verifier) = challenge, mark spent, store token hashes
     S-->>C: 201 access_token, refresh_token, expires_in, scope (Cache-Control: no-store)
     C->>S: GET /bcf/3.0/projects  Authorization: Bearer access_token
-    S->>G: Look up token hash, user, client, scope
+    S->>D: Look up token hash, user, client, scope
     S-->>C: 200 projects
     C->>S: POST /foundation/oauth2/token grant_type=refresh_token
-    S->>G: Mark old refresh token spent, issue a new pair in the same family
+    S->>D: Mark old refresh token spent, issue a new pair in the same family
     S-->>C: 201 new access_token and refresh_token
 ```
 

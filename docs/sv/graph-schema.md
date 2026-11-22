@@ -1,8 +1,14 @@
 # Grafschema
 
-Databasen är schemalös; `opencde/graph/schema.py` är schemat. Den här sidan
+Grafdatabasen är schemalös; `opencde/graph/schema.py` är schemat. Den här sidan
 förklarar konventionerna och etiketterna, avsnitt för avsnitt i den ordning
 planens etapper lade till dem.
+
+I nivå 3 håller grafen IFC-DB:s modeller (`Model`, `Entity`, `StepBlock`). Som
+standard, och alltid i nivå 1 och 2, finns serverns egna data, som de andra
+etiketterna här håller, i PostgreSQL i stället, i de tabeller som
+`opencde/postgres/migrations/` definierar (ADR 0029). De finns i en graf bara i
+nivå 3 utan `OPENCDE_STORE_URL`, som före PostgreSQL.
 
 ## Konventioner
 

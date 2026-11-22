@@ -6,11 +6,20 @@ point at, and so that questions about the model can be asked in Cypher next to
 the issues and documents.
 
 Turn it on with `OPENCDE_IFC_DB_ENABLED=true` and install the `ifc-db`
-extra (`uv sync --extra ifc-db`). The Docker image includes the extra by
-default (`ARG OPENCDE_EXTRAS` in the Dockerfile), which more than doubles its
-size (about 680 MB, or 1.1 GB with buildingSMART's rules, against 300 MB); build with
-`--build-arg OPENCDE_EXTRAS="--extra postgres"` for a slimmer image without IfcOpenShell when the module stays
-off.
+extra (`uv sync --extra ifc-db`). The module is tier 3
+(`OPENCDE_TIER=experimental`, or the tier unset): a server of a lower tier
+refuses to start with it on and names the setting. Its graph, Neo4j or
+Memgraph, holds the models, with PostgreSQL beside it for the server's own
+data by default ([below](#the-servers-own-data-apart-from-the-ifc-graph));
+docker compose starts the graph with `COMPOSE_PROFILES=graph` in `.env`.
+`opencde init` writes these lines and the graph's settings with
+`--tier experimental`, with a yes to its question about IFC-DB or the graph,
+and with `--local`. The Docker image includes the extra by default, beside
+`postgres` for PostgreSQL (`ARG OPENCDE_EXTRAS="--extra postgres --extra ifc-db"`
+in the Dockerfile); `ifc-db` more than doubles its size (about 680 MB, or
+1.1 GB with buildingSMART's rules, against 300 MB). Build with
+`--build-arg OPENCDE_EXTRAS="--extra postgres"` for a slimmer image without
+IfcOpenShell when the module stays off.
 
 Its settings are named `OPENCDE_IFC_DB_*`. Until November 2026 the module was
 named IFC-graph and then IFC-LPG: its settings `OPENCDE_IFCGRAPH_*` and then
@@ -859,8 +868,14 @@ versions, topics, comments and viewpoints, and its jobs: checks, prechecks,
 trials, clash checks, merges and conversions) apart from the IFC graph, which
 holds IFC-DB's models (`Model`, `Entity`, `StepBlock`); the two meet by values
 only, such as a conversion's `model_id` and a component's GlobalId (ADR 0027).
-By default both share the IFC graph's connection. `OPENCDE_STORE_GRAPH_URI`
-gives the server's own data a graph of its own, with
+By default the server's own data is in PostgreSQL (`OPENCDE_STORE_URL`,
+ADR 0029), which docker compose starts beside the graph, and the graph holds
+the models alone. The Cypher on this page that reaches projects, conversions,
+viewpoints, components or topics needs the server's own data in the IFC graph,
+as before PostgreSQL: without `OPENCDE_STORE_URL` (in docker compose,
+`OPENCDE_STACK_STORE_URL` set but empty) both share the IFC graph's connection.
+`OPENCDE_STORE_GRAPH_URI`, which excludes `OPENCDE_STORE_URL`, gives the
+server's own data a graph of its own instead, with
 `OPENCDE_STORE_GRAPH_DIALECT` (`neo4j` by default), `_USER`, `_PASSWORD` and
 `_DATABASE` beside it; production and the local environment want the password.
 The store and the IFC graph can be different databases of the same product,
@@ -870,18 +885,24 @@ database per server, so there two databases are two servers. The IFC-DB
 service writes the models to the IFC graph and its records to the store, and
 every other route reads and writes the store. The command line opens the store
 for what touches the server's own data and both for `seed`, `backup`,
-`restore`, `ifc-db prune` and `ifc-db export`; `opencde doctor` and the
-Settings page check both, and `/readyz` says in `store` whether the store is
-`shared`, `ok` or `unavailable`, and is ready only when both answer. A
-published Bolt port ([deploy/bolt.md](deploy/bolt.md)) and the administration's
-graph query reach one graph each: the port the IFC graph, the query the store.
-The server does not move what a database already holds: set the store on a
-new installation, or move the data with `opencde backup` and `opencde restore`
-([deploy/backup.md](deploy/backup.md)).
+`restore`, `ifc-db prune` and `ifc-db export`, and the last two refuse at once
+on a server without a graph; `opencde doctor` and the Settings page check both,
+and `/readyz` says in `store` whether the store is `shared`, `ok` or
+`unavailable`, with `"store_dialect": "postgres"` for PostgreSQL, and is ready
+only when both answer. Without a graph (tiers 1 and 2) it says `"graph": "none"`
+and is ready when PostgreSQL answers. A published Bolt port
+([deploy/bolt.md](deploy/bolt.md)) and the administration's graph query reach
+one graph each: the port the IFC graph, the query the store, which is why the
+query stays off with PostgreSQL (ADR 0029). The server does not move what a
+database already holds: set the store on a new installation, or move the data
+with `opencde backup` and `opencde restore`. A backup of a graph restores into
+PostgreSQL as rows; a backup of PostgreSQL does not restore into a graph
+([deploy/backup.md](deploy/backup.md#from-the-graph-to-postgresql)).
 
 ```sh
 # .env
-OPENCDE_STORE_GRAPH_URI=bolt://store:7687
+OPENCDE_STACK_STORE_URL=
+OPENCDE_STORE_GRAPH_URI=bolt://store-graph:7687
 OPENCDE_STORE_GRAPH_DIALECT=neo4j
 OPENCDE_STORE_GRAPH_USER=neo4j
 OPENCDE_STORE_GRAPH_PASSWORD=<a password of its own>
@@ -935,7 +956,8 @@ by `GlobalId`, the latest finished model per document); the queries live in
 Dataspatium's documentation (`docs/grafer.md`). A production server does not publish Bolt;
 the administration API's graph query (`OPENCDE_GRAPH_QUERY_ENABLED`,
 [client-guide.md §7](client-guide.md)) gives administrators read-only Cypher
-without the port. The app also draws the graph, in
+without the port, but stays off when PostgreSQL holds the server's own data
+(ADR 0029). The app also draws the graph, in
 its card IFC-DB, through that query or over Bolt.
 
 ## Limits and status
@@ -944,8 +966,8 @@ its card IFC-DB, through that query or over Bolt.
   entities) imports in about a second; a 200 MB architectural model takes
   minutes.
 - The `Conversion` carries `state`, `entities`, `relationships`,
-  `lossless`, `geometry`, `schema`, `ifc_project_guid`, timestamps and `error`. Administrators can
-  inspect it in Neo4j Browser or Memgraph Lab:
+  `lossless`, `geometry`, `schema`, `ifc_project_guid`, timestamps and `error`. Where a graph
+  holds the server's own data, administrators can inspect it in Neo4j Browser or Memgraph Lab:
   `MATCH (c:Conversion) RETURN c.file_name, c.state, c.entities, c.error`.
 - Deleting a project deletes its models' entities with it.
 - A model comes back identical from both databases at up to 224,496 instances and 19 MB, in

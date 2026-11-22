@@ -14,27 +14,27 @@ sequenceDiagram
     participant C as Klientapplikation
     participant B as Användarens webbläsare
     participant S as OpenCDE-server
-    participant G as Grafdatabas
+    participant D as Databas
 
     C->>S: GET /foundation/1.0/auth
     S-->>C: oauth2_auth_url, oauth2_token_url, flöden
     Note over C: Generera code_verifier, state;<br/>code_challenge = BASE64URL(SHA256(verifier))
     C->>B: Öppna oauth2_auth_url?response_type=code&client_id&redirect_uri&state&code_challenge&code_challenge_method=S256
     B->>S: GET /foundation/oauth2/auth
-    S->>G: Läs klienten, kontrollera att redirect_uri är registrerad
+    S->>D: Läs klienten, kontrollera att redirect_uri är registrerad
     S-->>B: Inloggnings- och samtyckessida (signerad formulärtoken)
     B->>S: POST /foundation/oauth2/auth (användarnamn, lösenord, beslut)
-    S->>G: Verifiera lösenordet (Argon2id); lagra kodens hash bunden till klient, redirect_uri, challenge
+    S->>D: Verifiera lösenordet (Argon2id); lagra kodens hash bunden till klient, redirect_uri, challenge
     S-->>B: 302 redirect_uri?code=…&state=…&iss=…
     B->>C: Webbläsaren landar på klientens redirect-URI
     C->>S: POST /foundation/oauth2/token grant_type=authorization_code, code, code_verifier (+ klientautentisering)
-    S->>G: Matcha kodens hash, verifiera SHA256(verifier) = challenge, markera förbrukad, lagra tokenhashar
+    S->>D: Matcha kodens hash, verifiera SHA256(verifier) = challenge, markera förbrukad, lagra tokenhashar
     S-->>C: 201 access_token, refresh_token, expires_in, scope (Cache-Control: no-store)
     C->>S: GET /bcf/3.0/projects  Authorization: Bearer access_token
-    S->>G: Slå upp tokenhash, användare, klient, scope
+    S->>D: Slå upp tokenhash, användare, klient, scope
     S-->>C: 200 projekt
     C->>S: POST /foundation/oauth2/token grant_type=refresh_token
-    S->>G: Markera den gamla refresh-tokenen förbrukad, utfärda ett nytt par i samma familj
+    S->>D: Markera den gamla refresh-tokenen förbrukad, utfärda ett nytt par i samma familj
     S-->>C: 201 ny access_token och refresh_token
 ```
 

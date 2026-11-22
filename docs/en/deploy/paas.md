@@ -27,15 +27,26 @@ and deploy `docker/compose.yaml docker/compose.prod.yaml docker/compose.paas.yam
 ## Environment
 
 Set the variables of `.env.example` in the platform's environment editor. The
-minimum for production:
+minimum for production in tier 2, the tier `opencde init` writes by default:
 
 ```
 OPENCDE_ENVIRONMENT=production
 OPENCDE_PUBLIC_URL=https://cde.example.org
+OPENCDE_TIER=bim-gis
 OPENCDE_SECRET_KEY=<48 random characters>
-OPENCDE_GRAPH_PASSWORD=<24 random characters>
+OPENCDE_STORE_PASSWORD=<24 random characters>
 OPENCDE_TRUSTED_PROXIES=["172.16.0.0/12", "10.0.0.0/8", "192.168.0.0/16"]
 ```
+
+The server's own data is in PostgreSQL, the stack's `store` service: Compose
+gives the API its address in `OPENCDE_STORE_URL`, and its password is
+`OPENCDE_STORE_PASSWORD`. `OPENCDE_STACK_STORE_URL` names another PostgreSQL,
+such as the platform's own, without the password. The image needs the
+`postgres` extra, which `docker/Dockerfile` installs by default
+(`OPENCDE_EXTRAS="--extra postgres --extra ifc-db"`); an image without
+IfcOpenShell is built with `--build-arg OPENCDE_EXTRAS="--extra postgres"`.
+`OPENCDE_GRAPH_PASSWORD` is needed only with a graph: in tier 3, where
+`COMPOSE_PROFILES=graph` starts Neo4j for IFC-DB's models.
 
 `OPENCDE_DOMAIN` is only needed by Caddy and can be omitted.
 
@@ -44,7 +55,8 @@ OPENCDE_TRUSTED_PROXIES=["172.16.0.0/12", "10.0.0.0/8", "192.168.0.0/16"]
 - Keep the platform itself patched: Coolify, for example, published fixes for
   serious vulnerabilities in January 2026. The platform's admin UI should not be
   reachable from the open internet.
-- The database volume and the storage volume are the data; include them in the
-  platform's backup, and keep the nightly `backup` service's volume as well.
+- PostgreSQL's volume and the storage volume are the data, and in tier 3 the
+  graph's volume too; include them in the platform's backup, and keep the
+  nightly `backup` service's volume as well.
 - First administrator: open a console on the `api` service and run
   `opencde user create admin --admin`.
