@@ -8,11 +8,13 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
+from opencde.admin import doctor
 from opencde.admin.doctor import (
     NTP_EPOCH_OFFSET,
     Check,
     clock_check,
     headers_check,
+    listen_check,
     ntp_offset_from_response,
     ntp_offset_seconds,
 )
@@ -115,3 +117,18 @@ def test_a_check_speaks_the_language_it_is_asked_for_and_english_elsewhere() -> 
     filled = Check("headers", True, "headers_present", {"url": "https://cde.example.org/healthz"})
     assert filled.detail_in("is") == "til staðar á https://cde.example.org/healthz"
     assert Check("version", True, value="2.5.0").detail_in("fi") == "2.5.0"
+
+
+def test_the_local_engine_is_told_where_it_listens(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """F77 a: on the loopback, on its container's own interfaces, or a failure for the setting outside a container,
+    which serve refuses."""
+    local = {"environment": "local", "public_url": "http://127.0.0.1:8000", "cors_origins": ["null"]}
+    monkeypatch.setattr(doctor, "in_a_container", lambda: False)
+    loopback = listen_check(settings_for_tests(tmp_path, **local, local_in_container=False))
+    assert loopback.ok and loopback.detail == "on the loopback only"
+    outside = listen_check(settings_for_tests(tmp_path, **local, local_in_container=True))
+    assert not outside.ok and "runs in no container" in outside.detail
+    monkeypatch.setattr(doctor, "in_a_container", lambda: True)
+    inside = listen_check(settings_for_tests(tmp_path, **local, local_in_container=True))
+    assert inside.ok and inside.detail.startswith("on its container's own interfaces")
+    assert outside.detail_in("sv").startswith("OPENCDE_LOCAL_IN_CONTAINER är satt")

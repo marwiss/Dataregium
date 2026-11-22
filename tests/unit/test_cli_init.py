@@ -4,6 +4,8 @@ server's own data, and the graph only in tier 3 (F58 a, F73 a, OB-46 b)."""
 
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -96,9 +98,26 @@ def test_the_local_engine_runs_on_the_computer_with_its_databases_in_compose(tmp
     assert (env["OPENCDE_LOCAL_POSTGRES_PORT"], env["OPENCDE_LOCAL_BOLT_PORT"]) == ("5442", "7697")
     assert env["OPENCDE_STORE_URL"] == "postgresql://opencde@127.0.0.1:5442/opencde"
     assert env["OPENCDE_ENVIRONMENT"] == "local" and "uv run opencde serve" in done.output
+    assert "uv sync --extra postgres --extra ifc-db" in done.output, "the engine on the computer needs both"
     assert Settings(_env_file=local).is_local  # type: ignore[call-arg]
     refused = CliRunner().invoke(app, ["init", "--dev", "--no-container", "--path", str(tmp_path / "d.env")])
     assert refused.exit_code != 0 and "--local" in refused.output
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows keeps a profile's files private by its ACL, not by modes")
+def test_the_env_with_the_passwords_is_its_owners_alone(tmp_path: Path) -> None:
+    """The .env holds the databases' passwords and the secret key, and the local engine without a container
+    publishes its databases on the loopback (F78 a): init writes the file readable by its owner alone, also when
+    --force overwrites one that others could read."""
+    local = tmp_path / "local.env"
+    local.write_text("OLD=1\n", encoding="utf-8")
+    local.chmod(0o644)
+    done = CliRunner().invoke(app, ["init", "--local", "--no-container", "--force", "--path", str(local)])
+    assert done.exit_code == 0, done.output
+    assert stat.S_IMODE(local.stat().st_mode) == 0o600
+    development = tmp_path / "development.env"
+    assert CliRunner().invoke(app, ["init", "--dev", "--path", str(development)]).exit_code == 0
+    assert stat.S_IMODE(development.stat().st_mode) == 0o600
 
 
 def test_without_a_terminal_it_says_what_to_give(tmp_path: Path) -> None:

@@ -15,7 +15,12 @@ from opencde import cli
 from opencde.cli import app
 from tests.conftest import test_settings as make_settings
 
-LOCAL = {"environment": "local", "public_url": "http://127.0.0.1:8000", "cors_origins": ["null"]}
+LOCAL = {
+    "environment": "local",
+    "public_url": "http://127.0.0.1:8000",
+    "cors_origins": ["null"],
+    "local_in_container": False,  # whatever the machine running the tests has in its environment
+}
 EVERY = "0.0.0.0"  # noqa: S104  # every interface: the address these tests are about
 
 
@@ -32,7 +37,7 @@ def started(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 def serve(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *args: str, contained: bool = False, **values: Any) -> Any:
     settings = make_settings(tmp_path, **{**LOCAL, **values})
     monkeypatch.setattr(cli, "_settings", lambda: settings)
-    monkeypatch.setattr(cli, "_in_a_container", lambda: contained)
+    monkeypatch.setattr(cli, "in_a_container", lambda: contained)
     return CliRunner().invoke(app, ["serve", *args])
 
 
@@ -48,14 +53,25 @@ def test_it_listens_on_every_interface_only_in_a_container_that_says_so(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, started: list[dict[str, Any]]
 ) -> None:
     refused = serve(monkeypatch, tmp_path, "--host", EVERY)
-    assert refused.exit_code != 0 and "loopback only" in refused.output
-    assert "OPENCDE_LOCAL_IN_CONTAINER" in refused.output, "the refusal names the way a container takes"
+    assert refused.exit_code != 0 and f"not on {EVERY}" in refused.output
+    assert "compose.local.yaml sets OPENCDE_LOCAL_IN_CONTAINER" in refused.output, "it names the way a container takes"
+    unasked = serve(monkeypatch, tmp_path, "--host", EVERY, contained=True)
+    assert unasked.exit_code != 0 and f"not on {EVERY}" in unasked.output, "a container opens nothing by itself"
     outside = serve(monkeypatch, tmp_path, "--host", EVERY, local_in_container=True)
     assert outside.exit_code != 0 and "runs in no container" in outside.output, "the setting opens nothing outside"
     assert not started
     inside = serve(monkeypatch, tmp_path, "--host", EVERY, contained=True, local_in_container=True)
     assert inside.exit_code == 0 and started[0]["host"] == EVERY
     assert "inside its container" in inside.output
+
+
+def test_the_setting_is_refused_outside_a_container_on_the_loopback_too(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, started: list[dict[str, Any]]
+) -> None:
+    """A .env written for the engine's container, read by the engine on the computer, is a mistake to name."""
+    refused = serve(monkeypatch, tmp_path, local_in_container=True)
+    assert refused.exit_code != 0 and "runs in no container" in refused.output
+    assert not started
 
 
 def test_a_server_that_is_not_the_local_engine_listens_where_it_is_told(

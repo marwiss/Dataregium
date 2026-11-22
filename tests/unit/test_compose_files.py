@@ -70,6 +70,7 @@ def test_the_local_engine_publishes_the_api_on_the_loopback_only(tmp_path: Path)
     services = _config(tmp_path, "compose.local.yaml", extra_env=GRAPH)  # opencde init --local names the graph
     assert services["api"]["environment"]["OPENCDE_ENVIRONMENT"] == "local"
     assert services["api"]["environment"]["OPENCDE_PUBLIC_URL"] == "http://127.0.0.1:8000"
+    assert services["api"]["environment"]["OPENCDE_LOCAL_IN_CONTAINER"] == "true", "serve listens in it (F77 a)"
     (published,) = services["api"]["ports"]
     assert published["host_ip"] == "127.0.0.1" and published["published"] == "8000"
     assert "ports" not in services["graph"] and "ports" not in services["store"], "the databases are never published"

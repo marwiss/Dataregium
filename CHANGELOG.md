@@ -45,9 +45,13 @@ the commit history.
   databases on the loopback in either way, and inside Compose the stack's own addresses replace them.
 - The local engine starts in its container (F77 a): `compose.local.yaml` sets `OPENCDE_LOCAL_IN_CONTAINER=true`,
   so that `opencde serve` listens on the container's own interfaces, which Compose publishes on the computer's
-  loopback alone; outside a container the server refuses the setting and keeps to the loopback, and
-  `opencde doctor` shows where the engine listens. Before, the engine's container never started, since `serve`
-  refused every interface but the loopback, which a container's port does not reach.
+  loopback alone; outside a container `opencde serve` refuses the setting on every interface, the loopback too,
+  and `opencde doctor` shows where the engine listens and fails on the setting outside a container. Before, the
+  engine's container never started, since `serve` refused every interface but the loopback, which a container's
+  port does not reach.
+- `opencde init` writes the `.env`, which holds the passwords and the secret key, readable by its owner alone
+  (mode 0600), also when `--force` overwrites one; without a container, the local engine's next steps begin with
+  `uv sync --extra postgres --extra ifc-db`.
 - A tool call of the MCP endpoint that cannot reach PostgreSQL answers 503 `unavailable`, as the API's routes
   do, instead of an internal error.
 - Compose keeps the server's own data in PostgreSQL by default (ADR 0029): `docker/compose.yaml` starts the service

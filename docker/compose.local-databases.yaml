@@ -1,3 +1,4 @@
+# This file was generated with the assistance of an AI coding tool.
 # The local engine on the computer itself, without a container (F78 a): Compose runs only its databases,
 # PostgreSQL and, in tier 3, the graph, published on the computer's loopback for `uv run opencde serve`
 # beside them, and the API's container stays off. Programs on the same computer reach the databases, with

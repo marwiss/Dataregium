@@ -446,6 +446,7 @@
   "check.detail.bim_without_extra": "on, but IfcOpenShell is missing: install the ifc-db extra",
   "check.detail.local_in_container": "on its container's own interfaces, which Compose publishes on the loopback alone",
   "check.detail.local_loopback": "on the loopback only",
+  "check.detail.local_not_in_container": "OPENCDE_LOCAL_IN_CONTAINER is set, but this process runs in no container, so serve refuses to start",
   "check.detail.not_checked_no_ntp": "not checked (no NTP server configured); now {now}",
   "check.detail.not_checked_ntp": "not checked ({server} did not answer on UDP {port}); now {now}",
   "check.detail.clock_offset": "offset {offset} s against {server}; now {now}",

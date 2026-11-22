@@ -94,6 +94,11 @@ MIN_PASSWORD_LENGTH = 12
 SECRET_KEY_FILE = "secret_key"  # a file name under the data directory, not a key  # noqa: S105  # nosec B105
 
 
+def in_a_container() -> bool:
+    """Whether this process runs in a container, by the file Docker or Podman puts in its root (F77 a)."""
+    return Path("/.dockerenv").exists() or Path("/run/.containerenv").exists()
+
+
 def _stored_secret_key(data_dir: Path) -> str:
     """A generated key kept in the data directory, so that restarts and worker processes share it.
 

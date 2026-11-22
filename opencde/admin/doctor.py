@@ -21,7 +21,7 @@ from opencde.graph.graph import Graph
 from opencde.graph.schema import KEYED
 from opencde.postgres.database import Postgres
 from opencde.postgres.schema import applied, migrations
-from opencde.settings import Settings
+from opencde.settings import Settings, in_a_container
 from opencde.storage import LocalStorage
 from opencde.timeutil import now_iso
 from opencde.ui.i18n import translate
@@ -165,6 +165,16 @@ async def headers_check(settings: Settings, transport: httpx.AsyncBaseTransport 
     return Check("headers", True, "headers_present", {"url": url})
 
 
+def listen_check(settings: Settings) -> Check:
+    """Where the local engine listens (ADR 0023, F77 a): on the loopback, or on its container's own interfaces;
+    the setting in a process outside a container fails, since serve refuses to start so."""
+    if not settings.local_in_container:
+        return Check("local_listen", True, "local_loopback")
+    if in_a_container():
+        return Check("local_listen", True, "local_in_container")
+    return Check("local_listen", False, "local_not_in_container")
+
+
 async def run_checks(
     settings: Settings,
     graph: Graph,
@@ -177,9 +187,8 @@ async def run_checks(
     ``postgres`` when it holds that data. Without IFC-DB a server with PostgreSQL uses no graph, and none is asked."""
     checks = [Check("version", True, value=__version__), Check("environment", True, value=settings.environment)]
     checks.append(Check("tier", True, value=settings.tier.value))
-    if settings.is_local:  # where the engine listens (ADR 0023, F77 a)
-        where = "local_in_container" if settings.local_in_container else "local_loopback"
-        checks.append(Check("local_listen", True, where))
+    if settings.is_local:
+        checks.append(listen_check(settings))
     checks.append(Check("apis", True, value=", ".join(settings.apis)))
     if settings.bim_on:  # the BIM functions run IfcOpenShell in their workers (F59)
         ready = importlib.util.find_spec("ifcopenshell") is not None

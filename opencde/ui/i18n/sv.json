@@ -446,6 +446,7 @@
   "check.detail.bim_without_extra": "på, men IfcOpenShell saknas: installera tillvalet ifc-db",
   "check.detail.local_in_container": "på containerns egna gränssnitt, som Compose publicerar bara på loopback",
   "check.detail.local_loopback": "bara på loopback",
+  "check.detail.local_not_in_container": "OPENCDE_LOCAL_IN_CONTAINER är satt, men processen körs inte i en container, så serve vägrar starta",
   "check.detail.not_checked_no_ntp": "inte kontrollerad (ingen NTP-server inställd); nu {now}",
   "check.detail.not_checked_ntp": "inte kontrollerad ({server} svarade inte på UDP {port}); nu {now}",
   "check.detail.clock_offset": "avvikelse {offset} s mot {server}; nu {now}",

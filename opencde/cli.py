@@ -14,6 +14,7 @@ opencde cleanup                 delete expired codes, tokens and sessions now
 from __future__ import annotations
 
 import asyncio
+import os
 import secrets
 import sys
 from collections.abc import Awaitable, Callable, Coroutine
@@ -24,7 +25,7 @@ from urllib.parse import urlsplit
 import typer
 
 from opencde import __version__
-from opencde.settings import LOOPBACK_HOSTS, Tier
+from opencde.settings import LOOPBACK_HOSTS, Tier, in_a_container
 
 app = typer.Typer(no_args_is_help=True, help="Dataregium OpenCDE server.", rich_markup_mode="markdown")
 user_app = typer.Typer(no_args_is_help=True, help="Manage users and their project roles.")
@@ -127,16 +128,16 @@ def serve(
     import uvicorn
 
     settings = _settings()  # fail fast on bad configuration, before the socket opens
+    if settings.is_local and settings.local_in_container and not in_a_container():
+        raise _fail(  # a .env written for the container, on any interface
+            "OPENCDE_LOCAL_IN_CONTAINER is set, but this process runs in no container: the local engine "
+            "listens on the loopback only (ADR 0023, F77 a)"
+        )
     if settings.is_local and host not in LOOPBACK_HOSTS:
         if not settings.local_in_container:
             raise _fail(
                 f"the local engine listens on the loopback only, not on {host} (ADR 0023); in a container, "
                 "compose.local.yaml sets OPENCDE_LOCAL_IN_CONTAINER=true"
-            )
-        if not _in_a_container():
-            raise _fail(
-                "OPENCDE_LOCAL_IN_CONTAINER is set, but this process runs in no container: the local engine "
-                "listens on the loopback only (ADR 0023, F77 a)"
             )
         typer.secho(
             f"NOTE    the local engine listens on {host} inside its container; Compose publishes it on the "
@@ -153,11 +154,6 @@ def serve(
         server_header=False,
         log_config=None,
     )
-
-
-def _in_a_container() -> bool:
-    """Whether this process runs in a container, by the file Docker or Podman puts in its root."""
-    return Path("/.dockerenv").exists() or Path("/run/.containerenv").exists()
 
 
 def _interactive() -> bool:
@@ -322,12 +318,21 @@ def init(
     # A value asked for replaces the line that says otherwise.
     names = {line.split("=", 1)[0] for line in extra}
     lines = [line for line in lines if line.split("=", 1)[0] not in names] + extra
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _write_private(path, "\n".join(lines) + "\n")
     typer.secho(f"OK      wrote {path}", fg=typer.colors.GREEN)
     if guided:
         _say_what_comes_next(url, dev=dev)
         return
     typer.echo("        next: docker compose up -d --build" if dev else "        next: see docs/en/deploy/vps-caddy.md")
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Write a .env, which holds the passwords and the secret key, readable by its owner alone, also when --force
+    overwrites one that others could read."""
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+        file.write(text)
+    path.chmod(0o600)
 
 
 def _write_local_env(path: Path, *, container: bool = True) -> None:
@@ -366,7 +371,7 @@ def _write_local_env(path: Path, *, container: bool = True) -> None:
         *(() if container else ("OPENCDE_LOCAL_POSTGRES_PORT=5442", "OPENCDE_LOCAL_BOLT_PORT=7697")),
         "COMPOSE_PROFILES=graph",
     ]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _write_private(path, "\n".join(lines) + "\n")
     typer.secho(f"OK      wrote {path}", fg=typer.colors.GREEN)
     if container:
         typer.echo(
@@ -374,8 +379,8 @@ def _write_local_env(path: Path, *, container: bool = True) -> None:
         )
         return
     typer.echo(
-        "        next: docker compose up -d (the databases), then uv run opencde serve, and add http://127.0.0.1:8000 "
-        "as a source in Dataspatium"
+        "        next: uv sync --extra postgres --extra ifc-db, docker compose up -d (the databases), then "
+        "uv run opencde serve, and add http://127.0.0.1:8000 as a source in Dataspatium"
     )
 
 
