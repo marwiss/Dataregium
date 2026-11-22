@@ -34,12 +34,18 @@ jobs:
       - run: uv run ty check opencde client/opencde_client
 
   test:
-    name: Tests (Python ${{ matrix.python }})
+    name: Tests (Python ${{ matrix.python }}${{ matrix.extras && ', IFC-DB' || '' }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python: ["3.11", "3.13", "3.14"]
+        extras: [""]
+        include:
+          # The tests of the IFC code itself (the copy of Dataspatium's change sets, the diff, the rooms, the
+          # clash check) need IfcOpenShell, which the server without the extra does without.
+          - python: "3.13"
+            extras: "--extra ifc-db"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,11 +54,28 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python }}
-      - run: uv sync
+      - run: uv sync $EXTRAS
+        env:
+          EXTRAS: ${{ matrix.extras }}
       - run: uv run pytest -m "not integration and not e2e and not ui"
 
+  postgres:
+    name: Tiers 1 and 2 (PostgreSQL without a graph)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+      - run: uv sync --extra ifc-db
+      # Every API test of both stores in its PostgreSQL variant, with the graph's address on a port where nothing
+      # listens (F69 b), and the tests of PostgreSQL itself; the graph job below runs the rest.
+      - run: uv run pytest -q -m "integration or e2e" -k postgres
+
   integration:
-    name: Integration tests (Neo4j in Docker)
+    name: Tier 3 (the graph, Neo4j in Docker)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,7 +87,7 @@ jobs:
       - run: uv sync --extra ifc-db
       # buildingSMART's ifc-gherkin-rules in an environment of their own, as the image has them (ADR 0012).
       - run: uv run python -m ifc_db.gherkin_install "$RUNNER_TEMP/gherkin"
-      - run: uv run pytest -q -m "integration or e2e"
+      - run: uv run pytest -q -m "integration or e2e" -k "not postgres"
         env:
           OPENCDE_TEST_GHERKIN_ENV: ${{ runner.temp }}/gherkin
       # IfcOpenShell's EXPRESS rules import pytest at run time. The image has it from the extra alone, without the dev group.
