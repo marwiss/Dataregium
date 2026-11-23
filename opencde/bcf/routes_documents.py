@@ -60,7 +60,7 @@ async def document_post(
     if await documents.exists(document_guid):
         raise HTTPException(409, "A document with this guid already exists")  # Foundation API 1.5.1
     filename = filename_from_content_disposition(request.headers.get("content-disposition")) or DEFAULT_FILENAME
-    key = make_key("bcf-documents", document_guid)
+    key = make_key("bcf-documents", new_id())  # the server's id, not the client's guid
     size = await receive_upload(request, storage, key, settings.max_upload_bytes)
     try:
         created = await documents.create(

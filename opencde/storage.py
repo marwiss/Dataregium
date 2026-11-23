@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import uuid
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import BinaryIO, Protocol
@@ -47,6 +48,21 @@ def make_key(category: str, object_id: str, suffix: str = "") -> str:
     if suffix and not _SUFFIX.match(suffix):
         raise ValueError(f"unsafe suffix {suffix!r}")
     return f"{category}/{object_id}" + (f".{suffix}" if suffix else "")
+
+
+#: The namespace of :func:`stable_key`'s UUIDs, fixed so that a scope always gives the same key.
+_STABLE = uuid.UUID("acb08ccd-be9e-4af0-974a-091bcb402565")
+
+
+def stable_key(category: str, scope: str, suffix: str = "") -> str:
+    """The key of a file each new write replaces, as a topic's snippet: a UUID the server derives from ``scope``
+    (version 5), so that the same scope gives the same key and nothing the client sent stands in the path."""
+    return make_key(category, str(uuid.uuid5(_STABLE, scope)), suffix)
+
+
+def snippet_key(project_id: str, topic_guid: str) -> str:
+    """The file of a topic's BIM snippet, which each upload replaces."""
+    return stable_key("snippets", f"{project_id}/{topic_guid}", "bin")
 
 
 class Storage(Protocol):
@@ -112,6 +128,10 @@ class LocalStorage:
 
     def delete(self, key: str) -> None:
         self.path(key).unlink(missing_ok=True)
+
+    def replace(self, source: str, target: str) -> None:
+        """Put the file at ``source`` in the place of ``target``, in one step."""
+        os.replace(self.path(source), self.path(target))
 
     def iter_keys(self, category: str) -> Iterator[str]:
         if category not in CATEGORIES:

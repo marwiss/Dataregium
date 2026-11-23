@@ -18,6 +18,7 @@ from opencde.bcf.access import ProjectContext
 from opencde.bcf.schemas import BimSnippet, TopicGET
 from opencde.bcf.topic_access import TopicContext, topic_context
 from opencde.documents.changes import SNIPPET_TYPE
+from opencde.storage import snippet_key
 from opencde.store.accounts.projects import Project
 from opencde.store.bcf.topic_links import link_repository
 from opencde.store.oauth2.tokens import Principal
@@ -32,13 +33,17 @@ CHANGE_SET = json.dumps(change_set()).encode("utf-8")
 
 
 class Links:
-    """Keeps what the route stores, where ``TopicLinkRepository.set_snippet`` would write it to the graph."""
+    """Keeps what the route stores, where ``TopicLinkRepository.set_snippet`` would write it to the graph, and
+    answers with the key the topic had before, as the stores do."""
 
     def __init__(self) -> None:
         self.stored: list[dict[str, Any]] = []
+        self.before: str | None = None
 
-    async def set_snippet(self, **fields: Any) -> None:
+    async def set_snippet(self, **fields: Any) -> str | None:
         self.stored.append(fields)
+        before, self.before = self.before, fields["storage_key"]
+        return before
 
 
 def topic(role: Role, snippet_type: str) -> TopicContext:
@@ -84,7 +89,7 @@ def test_below_an_editor_nobody_proposes_a_change_set(
             "Your role 'contributor' does not allow proposing a change set here; that takes the role editor or manager"
         ), "it says why"
     storage = client.app.state.storage  # type: ignore[attr-defined]
-    assert not links.stored and not storage.exists(f"snippets/{TOPIC}.bin"), "nothing was kept"
+    assert not links.stored and not list(storage.iter_keys("snippets")), "nothing was kept"
 
 
 @pytest.mark.parametrize("version", ["3.0", "2.1"])
@@ -99,3 +104,39 @@ def test_a_contributor_still_uploads_a_snippet_of_another_type(client: TestClien
     stored = put(client, "3.0", Role.CONTRIBUTOR, ".ifc", b"ISO-10303-21;")
     assert stored.status_code == 200, stored.text
     assert [entry["size"] for entry in links.stored] == [len(b"ISO-10303-21;")]
+
+
+def test_the_snippet_has_the_servers_key_and_each_upload_replaces_it(client: TestClient, links: Links) -> None:
+    """The file's key is one the server derives from the project and the topic: nothing the client sent stands in
+    the path, and a new upload takes the place of the one before."""
+    for body in (b"ISO-10303-21; first", b"ISO-10303-21; second"):
+        assert put(client, "3.0", Role.EDITOR, ".ifc", body).status_code == 200
+    key = snippet_key(PROJECT, TOPIC)
+    assert [entry["storage_key"] for entry in links.stored] == [key, key] and TOPIC not in key
+    storage = client.app.state.storage  # type: ignore[attr-defined]
+    assert list(storage.iter_keys("snippets")) == [key], "one file for the topic"
+    with storage.open_read(key) as handle:
+        assert handle.read() == b"ISO-10303-21; second"
+
+
+def test_a_refused_change_set_leaves_the_one_before(client: TestClient, links: Links) -> None:
+    """An upload is checked beside the topic's snippet, so that one the schema refuses leaves it as it was."""
+    assert put(client, "3.0", Role.EDITOR, SNIPPET_TYPE, CHANGE_SET).status_code == 200
+    refused = put(client, "3.0", Role.EDITOR, SNIPPET_TYPE, b'{"schema": "x"}')
+    assert refused.status_code == 400, refused.text
+    storage = client.app.state.storage  # type: ignore[attr-defined]
+    key = snippet_key(PROJECT, TOPIC)
+    assert list(storage.iter_keys("snippets")) == [key] and len(links.stored) == 1
+    with storage.open_read(key) as handle:
+        assert handle.read() == CHANGE_SET
+
+
+def test_a_snippet_kept_under_the_topics_guid_goes_with_the_next_upload(client: TestClient, links: Links) -> None:
+    """A topic whose snippet was kept under its own guid, before the server gave snippets keys of their own, gets the
+    server's key with its next upload, and the old file goes."""
+    storage = client.app.state.storage  # type: ignore[attr-defined]
+    old = f"snippets/{TOPIC}.bin"
+    storage.write_bytes(old, b"ISO-10303-21; old")
+    links.before = old
+    assert put(client, "3.0", Role.EDITOR, ".ifc", b"ISO-10303-21; new").status_code == 200
+    assert list(storage.iter_keys("snippets")) == [snippet_key(PROJECT, TOPIC)]

@@ -158,7 +158,8 @@ def test_viewpoint_lifecycle(client: TestClient, world: World) -> None:
     assert visibility == {"visibility": full_viewpoint()["components"]["visibility"]}
 
     storage = client.app.state.storage  # type: ignore[attr-defined]
-    assert storage.exists(f"snapshots/{guid}.png")
+    (snapshot_key,) = list(storage.iter_keys("snapshots"))
+    assert snapshot_key.endswith(".png") and guid not in snapshot_key, "the server's key, not the client's guid"
 
     # A comment that refers to the viewpoint blocks deletion (BCF 3.5.9) until it is updated.
     comments = f"/bcf/3.0/projects/{world.project_id}/topics/{topic['guid']}/comments"
@@ -175,7 +176,7 @@ def test_viewpoint_lifecycle(client: TestClient, world: World) -> None:
     assert client.delete(f"{base}/{guid}", headers=contributor.headers).status_code == 200
     assert client.get(f"{base}/{guid}", headers=contributor.headers).status_code == 404
     assert client.get(f"{base}/{guid}/snapshot", headers=contributor.headers).status_code == 404
-    assert not storage.exists(f"snapshots/{guid}.png"), "images are removed with the viewpoint"
+    assert not storage.exists(snapshot_key), "images are removed with the viewpoint"
 
 
 def test_viewpoint_rules_and_image_checks(client: TestClient, world: World) -> None:

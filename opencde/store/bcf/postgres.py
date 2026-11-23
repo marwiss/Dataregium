@@ -787,7 +787,7 @@ class PostgresViewpointRepository:
             data = decode_image(
                 body.snapshot.snapshot_data, body.snapshot.snapshot_type, self.max_image_bytes, "snapshot"
             )
-            snapshot = (make_key("snapshots", guid, body.snapshot.snapshot_type), data)
+            snapshot = (make_key("snapshots", new_id(), body.snapshot.snapshot_type), data)  # not the client's guid
         bitmap_rows: list[dict[str, Any]] = []
         bitmap_files: list[tuple[str, bytes]] = []
         for position, bitmap in enumerate(body.bitmaps or []):
@@ -972,7 +972,9 @@ UPDATE topics t
 SET snippet_storage_key = $3, snippet_is_external = false,
     snippet_reference = coalesce($4::text, t.snippet_reference), snippet_filename = $4::text, snippet_size = $5,
     modified_date = $6, modified_author = $7
-WHERE t.project_id = $1 AND t.guid = $2
+FROM topics before
+WHERE t.project_id = $1 AND t.guid = $2 AND before.project_id = t.project_id AND before.guid = t.guid
+RETURNING before.snippet_storage_key AS before
 """
 _HEADER_FILE_COLUMNS = (
     "id",
@@ -1088,9 +1090,13 @@ class PostgresTopicLinkRepository:
 
     async def set_snippet(
         self, *, project_id: str, topic_guid: str, author: str, storage_key: str, filename: str | None, size: int
-    ) -> None:
-        """Record an uploaded snippet file: the snippet becomes internal and its reference the file name (3.2.7)."""
-        await self.postgres.execute(SNIPPET_SET, project_id, topic_guid, storage_key, filename, size, now_iso(), author)
+    ) -> str | None:
+        """Record an uploaded snippet file: the snippet becomes internal and its reference the file name (3.2.7).
+        Returns the storage key the topic had before, for the caller to remove when it is another file."""
+        row = await self.postgres.one(
+            SNIPPET_SET, project_id, topic_guid, storage_key, filename, size, now_iso(), author
+        )
+        return str(row["before"]) if row and row["before"] else None
 
 
 # -- project documents (BCF 3.8) and the files information (3.3.1) ----------------------------------------------

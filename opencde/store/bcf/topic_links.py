@@ -254,15 +254,18 @@ class TopicLinkRepository:
 
     async def set_snippet(
         self, *, project_id: str, topic_guid: str, author: str, storage_key: str, filename: str | None, size: int
-    ) -> None:
-        """Record an uploaded snippet file: the snippet becomes internal and its reference the file name (3.2.7)."""
-        await self.graph.write(
+    ) -> str | None:
+        """Record an uploaded snippet file: the snippet becomes internal and its reference the file name (3.2.7).
+        Returns the storage key the topic had before, for the caller to remove when it is another file."""
+        rows = await self.graph.write(
             lambda tx: tx.run(
                 """
                 MATCH (:Project {project_id: $project_id})-[:HAS_TOPIC]->(t:Topic {guid: $topic_guid})
+                WITH t, t.snippet_storage_key AS before
                 SET t.snippet_storage_key = $storage_key, t.snippet_is_external = false,
                     t.snippet_reference = coalesce($filename, t.snippet_reference), t.snippet_filename = $filename,
                     t.snippet_size = $size, t.modified_date = $now, t.modified_author = $author
+                RETURN before
                 """,
                 project_id=project_id,
                 topic_guid=topic_guid,
@@ -273,6 +276,7 @@ class TopicLinkRepository:
                 author=author,
             )
         )
+        return str(rows[0]["before"]) if rows and rows[0]["before"] else None
 
 
 def link_repository(graph: GraphDep, postgres: PostgresDep, topics: TopicsDep) -> TopicLinkStore:

@@ -124,11 +124,12 @@ erDiagram
 | `Bitmap` | `guid` | `position`, `bitmap_type`, `storage_key`, `height`, `loc_*`, `nrm_*`, `up_*` | Image bytes in storage under `bitmaps/<guid>.<type>` |
 | `FileRef` | `id` | `position`, `ifc_project`, `ifc_spatial_structure_element`, `filename`, `date`, `reference` | The topic header's files (BCF 3.3) |
 | `DocumentReference` | `guid` | `document_guid` or `url`, `description`, `created_at` | Exactly one of the two targets |
-| `BcfDocument` | `guid` | `filename`, `storage_key`, `size`, `created_at`, `author` | A file uploaded through BCF 3.8; bytes under `bcf-documents/<guid>` |
+| `BcfDocument` | `guid` | `filename`, `storage_key`, `size`, `created_at`, `author` | A file uploaded through BCF 3.8; bytes under `bcf-documents/<id>`, a server id rather than the client's guid |
 | `RELATED_TO` (relationship Topic → Topic) | | | Directed; PUT replaces a topic's outgoing list |
 
 Topics keep their snippet file in `snippet_storage_key` (bytes under
-`snippets/<topic guid>.bin`). Deleting a topic deletes everything below it
+`snippets/<id>.bin`, an id the server derives from the project and the topic, so that each upload replaces the
+file and nothing the client sent stands in a path). Deleting a topic deletes everything below it
 and the storage keys collected from the nodes; events stay.
 
 ## Documents and browser sessions (stage 5)

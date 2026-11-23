@@ -775,23 +775,29 @@ async def what_a_topic_points_at(bcf: Bcf) -> None:
     )
     snippet_scope = scope | {"topic_guid": external.guid}
     assert await bcf.links.snippet(**snippet_scope) is None, "an external snippet has no file here"
-    await bcf.links.set_snippet(
-        project_id=w.project_id,
-        topic_guid=external.guid,
-        author="viewer",
-        storage_key="snippets/k",
-        filename=None,
-        size=4,
-    )
+    assert (
+        await bcf.links.set_snippet(
+            project_id=w.project_id,
+            topic_guid=external.guid,
+            author="viewer",
+            storage_key="snippets/k",
+            filename=None,
+            size=4,
+        )
+        is None
+    ), "no key before"
     assert await bcf.links.snippet(**snippet_scope) == {"storage_key": "snippets/k", "filename": "https://x.org/c"}
-    await bcf.links.set_snippet(
-        project_id=w.project_id,
-        topic_guid=external.guid,
-        author="viewer",
-        storage_key="snippets/k",
-        filename="change.json",
-        size=4,
-    )
+    assert (
+        await bcf.links.set_snippet(
+            project_id=w.project_id,
+            topic_guid=external.guid,
+            author="viewer",
+            storage_key="snippets/k",
+            filename="change.json",
+            size=4,
+        )
+        == "snippets/k"
+    ), "the key before, for the caller to remove when it is another"
     assert await bcf.links.snippet(**snippet_scope) == {"storage_key": "snippets/k", "filename": "change.json"}
     assert await bcf.links.snippet(**(snippet_scope | {"user_id": w.outsider})) is None
     internal = await bcf.topics.get(user_id=w.viewer, project_id=w.project_id, guid=external.guid)

@@ -10,6 +10,10 @@ the commit history.
 
 ## Unreleased
 
+- A topic's BIM snippet, a BCF project document and a viewpoint's snapshot are stored under keys the server makes,
+  never under the guid the client chose; a change set the schema refuses is checked beside the topic's snippet and
+  no longer removes the one before. A snippet stored under its topic's guid moves to the new key with its next
+  upload.
 - A check whose worker ends with an error, such as a MemoryError under `OPENCDE_IFC_DB_MEMORY_MB`, now stores
   that error instead of a JSON error about an empty answer: an exit code other than 0 counts as an answer only
   with something on stdout, as IFC-DB reads its own workers.

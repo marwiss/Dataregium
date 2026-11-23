@@ -11,6 +11,7 @@ The callers check the change set with ``changes.problems`` first, and the role o
 
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -18,7 +19,7 @@ from typing import Any
 from opencde.bcf.schemas import BimSnippet, TopicGET, TopicPOST
 from opencde.documents.changes import SCHEMA_PATH, SNIPPET_TYPE
 from opencde.ifcgraph.service import IfcGraphService
-from opencde.storage import LocalStorage, make_key
+from opencde.storage import LocalStorage, snippet_key
 from opencde.store.bcf.topics import validate_against_extensions
 from opencde.store.protocols import ProjectStore, TopicLinkStore, TopicStore
 
@@ -73,10 +74,10 @@ class Proposing:
     ) -> None:
         """``change_set`` as the topic's snippet, in place of the one before, and its trial queued in place of the
         one before."""
-        key = make_key("snippets", topic_guid, "bin")
+        key = snippet_key(project_id, topic_guid)
         data = json.dumps(change_set, separators=(",", ":")).encode("utf-8")
         self.storage.write_bytes(key, data)
-        await self.links.set_snippet(
+        before = await self.links.set_snippet(
             project_id=project_id,
             topic_guid=topic_guid,
             author=author,
@@ -84,6 +85,9 @@ class Proposing:
             filename=reference,
             size=len(data),
         )
+        if before and before != key:  # a key from before the topic's snippets had their own
+            with contextlib.suppress(ValueError, OSError):  # held open (Windows): it stays, as the cleanup does
+                self.storage.delete(before)
         await self.ifcgraph.schedule_proposal(
             project_id=project_id, topic_guid=topic_guid, snippet_key=key, author=author
         )

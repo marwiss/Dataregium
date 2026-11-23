@@ -2,7 +2,7 @@
 """Project documents of the BCF API (3.8) and the files information list (3.3.1).
 
 A ``BcfDocument`` is a binary file uploaded to a project through the BCF API.
-The bytes live in storage under ``bcf-documents/<guid>``; the node keeps the
+The bytes live in storage under ``bcf-documents/<id>``, a server id; the node keeps the
 client's file name (never used as a path) and who uploaded it when.
 """
 

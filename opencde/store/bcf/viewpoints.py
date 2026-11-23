@@ -260,7 +260,7 @@ class ViewpointRepository:
             data = decode_image(
                 body.snapshot.snapshot_data, body.snapshot.snapshot_type, self.max_image_bytes, "snapshot"
             )
-            snapshot = (make_key("snapshots", guid, body.snapshot.snapshot_type), data)
+            snapshot = (make_key("snapshots", new_id(), body.snapshot.snapshot_type), data)  # not the client's guid
         bitmap_rows: list[dict[str, Any]] = []
         bitmap_files: list[tuple[str, bytes]] = []
         for position, bitmap in enumerate(body.bitmaps or []):

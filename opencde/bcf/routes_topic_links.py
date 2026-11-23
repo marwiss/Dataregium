@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import Annotated, Any
 
@@ -24,9 +25,10 @@ from opencde.bcf.schemas import (
 from opencde.bcf.topic_access import TopicCtx
 from opencde.deps import SettingsDep, StorageDep
 from opencde.documents.changes import MAX_CHANGE_SET_BYTES, SNIPPET_TYPE, problems
+from opencde.ids import new_id
 from opencde.ifcgraph.service import IfcGraphDep
 from opencde.ratelimit import RATE_UPLOAD, limiter
-from opencde.storage import LocalStorage, make_key
+from opencde.storage import LocalStorage, make_key, snippet_key
 from opencde.store.bcf.topic_links import LinksDep
 
 router = APIRouter(prefix="/projects/{project_id}/topics/{topic_id}", tags=["BCF API"])
@@ -68,14 +70,21 @@ async def snippet_put(
         raise HTTPException(400, "Set bim_snippet on the topic before uploading the snippet file")
     if topic.topic.bim_snippet.snippet_type == SNIPPET_TYPE:
         topic.project.require_proposer()  # before a byte of it is kept
-    key = make_key("snippets", topic.guid, "bin")
-    size = await receive_upload(request, storage, key, settings.max_upload_bytes)
+    # Received beside the topic's snippet and checked there, so that a refused upload leaves the one before in place.
+    received = make_key("snippets", new_id(), "bin")
+    size = await receive_upload(request, storage, received, settings.max_upload_bytes)
     if topic.topic.bim_snippet.snippet_type == SNIPPET_TYPE:
-        found = await anyio.to_thread.run_sync(_change_set_problems, storage, key, size)
+        found = await anyio.to_thread.run_sync(_change_set_problems, storage, received, size)
         if found:
-            storage.delete(key)
+            storage.delete(received)
             raise HTTPException(400, "The snippet is not a change set: " + "; ".join(found))
-    await links.set_snippet(
+    key = snippet_key(topic.project_id, topic.guid)
+    try:
+        storage.replace(received, key)
+    except OSError:  # the topic's file held open (Windows): the upload goes, and the one before stays
+        storage.delete(received)
+        raise
+    before = await links.set_snippet(
         project_id=topic.project_id,
         topic_guid=topic.guid,
         author=topic.username,
@@ -83,6 +92,9 @@ async def snippet_put(
         filename=filename_from_content_disposition(request.headers.get("content-disposition")),
         size=size,
     )
+    if before and before != key:  # a key from before the topic's snippets had their own (snippets/<topic guid>.bin)
+        with contextlib.suppress(ValueError, OSError):  # held open (Windows): it stays, as the cleanup does
+            storage.delete(before)
     if ifcgraph is not None and topic.topic.bim_snippet.snippet_type == SNIPPET_TYPE:
         await ifcgraph.schedule_proposal(
             project_id=topic.project_id, topic_guid=topic.guid, snippet_key=key, author=topic.username

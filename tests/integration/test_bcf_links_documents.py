@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from opencde.main import create_app
 from opencde.settings import Settings
+from opencde.storage import snippet_key
 from tests.conformance.schemas import validate
 from tests.integration.conftest_accounts import World, build_world, login_as
 from tests.integration.helpers import Session
@@ -290,6 +291,7 @@ def test_bim_snippet_upload_and_download(client: TestClient, world: World) -> No
     assert 'filename="model.ifc"' in download.headers["content-disposition"]
 
     storage = client.app.state.storage  # type: ignore[attr-defined]
-    assert storage.exists(f"snippets/{snippet_topic['guid']}.bin")
+    key = snippet_key(world.project_id, snippet_topic["guid"])
+    assert storage.exists(key) and snippet_topic["guid"] not in key, "the server's key, not the client's guid"
     assert client.delete(f"{topics}/{snippet_topic['guid']}", headers=editor.headers).status_code == 200
-    assert not storage.exists(f"snippets/{snippet_topic['guid']}.bin"), "files go with the topic"
+    assert not storage.exists(key), "files go with the topic"

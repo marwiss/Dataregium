@@ -126,11 +126,12 @@ erDiagram
 | `Bitmap` | `guid` | `position`, `bitmap_type`, `storage_key`, `height`, `loc_*`, `nrm_*`, `up_*` | Bildbytes i lagringen under `bitmaps/<guid>.<typ>` |
 | `FileRef` | `id` | `position`, `ifc_project`, `ifc_spatial_structure_element`, `filename`, `date`, `reference` | Filerna i ärendets huvud (BCF 3.3) |
 | `DocumentReference` | `guid` | `document_guid` eller `url`, `description`, `created_at` | Exakt ett av de två målen |
-| `BcfDocument` | `guid` | `filename`, `storage_key`, `size`, `created_at`, `author` | En fil uppladdad genom BCF 3.8; bytes under `bcf-documents/<guid>` |
+| `BcfDocument` | `guid` | `filename`, `storage_key`, `size`, `created_at`, `author` | En fil uppladdad genom BCF 3.8; bytes under `bcf-documents/<id>`, serverns id och inte klientens guid |
 | `RELATED_TO` (relation Topic → Topic) | | | Riktad; PUT ersätter ett ärendes utgående lista |
 
 Ärenden håller sin snippet-fil i `snippet_storage_key` (bytes under
-`snippets/<ärende-guid>.bin`). Att ta bort ett ärende tar bort allt under det
+`snippets/<id>.bin`, ett id som servern härleder ur projektet och ärendet, så att varje uppladdning ersätter
+filen och inget klienten skickat står i en sökväg). Att ta bort ett ärende tar bort allt under det
 och de lagringsnycklar som samlats från noderna; händelserna finns kvar.
 
 ## Dokument och webbläsarsessioner (etapp 5)
