@@ -10,6 +10,9 @@ the commit history.
 
 ## Unreleased
 
+- A check whose worker ends with an error, such as a MemoryError under `OPENCDE_IFC_DB_MEMORY_MB`, now stores
+  that error instead of a JSON error about an empty answer: an exit code other than 0 counts as an answer only
+  with something on stdout, as IFC-DB reads its own workers.
 - IFC-DB is locked at bfb1c49 (was 34d7d45). Its workers tell a missing IfcOpenShell from one whose libraries do
   not load, as under a low `OPENCDE_IFC_DB_MEMORY_MB`: the conversion and `opencde ifc-db export` then name the
   ImportError where they said "IfcOpenShell is not installed", and `--verify` stops with it where it showed a

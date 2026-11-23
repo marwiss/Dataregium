@@ -1401,7 +1401,9 @@ class IfcGraphService:
         self, command: list[str], what: str, answers: tuple[int, ...] = (0,), seconds: float | None = None
     ) -> str:
         """Run a worker with the time limit, the module's or a shorter one. Returns what it wrote to stdout, for an
-        exit code that is an answer. It runs in IFC-DB's worker environment, as the library's own workers do:
+        exit code that is an answer; a code other than 0 is one only with something on stdout, since Python ends
+        with 1 on an uncaught error too, such as a MemoryError, as IFC-DB's ``run_worker`` reads it. It runs in
+        IFC-DB's worker environment, as the library's own workers do:
         OpenBLAS on one thread and glibc's malloc on two arenas unless set, since every thread and arena reserves
         address space that the worker's memory limit counts."""
         limit = self.settings.ifcgraph_timeout_seconds if seconds is None else seconds
@@ -1414,7 +1416,7 @@ class IfcGraphService:
             process.kill()
             await process.wait()
             raise RuntimeError(f"{what} exceeded {limit} s") from None
-        if process.returncode not in answers:
+        if process.returncode not in answers or (process.returncode and not stdout.strip()):
             message = stderr.decode("utf-8", "replace").strip().splitlines()
             detail = message[-1] if message else f"exit code {process.returncode}"
             with contextlib.suppress(ValueError):

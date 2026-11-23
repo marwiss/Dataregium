@@ -559,3 +559,16 @@ async def test_the_servers_workers_start_as_ifc_dbs_own_do(tmp_path: Path, monke
     shown = "import os; print(os.environ['OPENBLAS_NUM_THREADS'], os.environ['MALLOC_ARENA_MAX'])"
     printed = await service._in_a_process([sys.executable, "-c", shown], "the environment")
     assert printed.split() == ["1", "4"], "a value already set stays"
+
+
+async def test_an_answer_code_with_nothing_on_stdout_is_the_workers_error(tmp_path: Path) -> None:
+    """Python ends with 1 on an uncaught error, the code a check answers "issues found" with: with nothing on stdout
+    the error is the worker's, not a JSON error from the empty answer, as IFC-DB's run_worker reads it."""
+    service = IfcGraphService(Graph(), LocalStorage(tmp_path), make_settings(tmp_path, ifcgraph_enabled=True))
+    with pytest.raises(RuntimeError, match="MemoryError"):
+        await service._in_a_process([sys.executable, "-c", "raise MemoryError"], "the validation", answers=(0, 1))
+    answered = await service._in_a_process(
+        [sys.executable, "-c", "print('{}'); raise SystemExit(1)"], "a", answers=(0, 1)
+    )
+    assert answered.strip() == "{}", "an answer on stdout stands"
+    assert await service._in_a_process([sys.executable, "-c", "pass"], "the writer") == "", "0 needs nothing on stdout"
