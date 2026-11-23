@@ -323,8 +323,8 @@ class PostgresProjectRepository:
         return _project(row)
 
     async def model_ids(self, project_id: str) -> list[str]:
-        """The ids of the project's IFC models, by its conversions (the view ``project_models``). The models live in
-        the IFC graph, so the caller that has both deletes them first (``ifcgraph.maintenance.delete_project``)."""
+        """The ids of the project's IFC models, by its conversions and its merges (the view ``project_models``). The
+        models live in the IFC graph, so the caller that has both deletes them first (``ifcgraph.maintenance.delete_project``)."""
         rows = await self.postgres.run("SELECT model_id FROM project_models WHERE project_id = $1", project_id)
         return [str(row["model_id"]) for row in rows if row["model_id"]]
 

@@ -319,6 +319,14 @@ def test_the_jobs_migration_defines_the_views_the_other_areas_left_empty() -> No
     assert "FROM proposals" not in files, "a trial's file reaches project_files through bcf_files"
 
 
+def test_a_projects_models_take_its_merges_models_along() -> None:
+    """0007: a preparation's copy stays in the IFC graph for a day, and goes with its project."""
+    text = (schema.MIGRATIONS_DIR / "0007_project_models.sql").read_text(encoding="utf-8")
+    assert text.startswith("-- This file was generated with the assistance of an AI coding tool.")
+    view = text.split("CREATE OR REPLACE VIEW project_models (project_id, model_id) AS")[1].split(";")[0]
+    assert "FROM conversions" in view and "FROM merges m WHERE m.model_id IS NOT NULL" in view
+
+
 def test_every_job_state_the_code_writes_is_one_the_table_allows() -> None:
     from opencde.ifcgraph import merging, service
 

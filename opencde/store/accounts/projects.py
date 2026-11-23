@@ -222,10 +222,12 @@ class ProjectRepository:
         return _project(row["project"])
 
     async def model_ids(self, project_id: str) -> list[str]:
-        """The ids of the project's IFC models, by its conversions. The models live in the IFC graph, apart from the
-        store (ADR 0027), so the caller that has both deletes them first (``ifcgraph.maintenance.delete_project``)."""
+        """The ids of the project's IFC models, by its conversions and its merges (a preparation's copy stays a day).
+        The models live in the IFC graph, apart from the store (ADR 0027), so the caller that has both deletes them
+        first (``ifcgraph.maintenance.delete_project``)."""
         rows = await self.graph.run(
-            "MATCH (:Project {project_id: $id})-[:HAS_CONVERSION]->(c:Conversion) RETURN c.model_id AS id",
+            "MATCH (:Project {project_id: $id})-[:HAS_CONVERSION|HAS_MERGE]->(c) WHERE c.model_id IS NOT NULL "
+            "RETURN c.model_id AS id",
             id=project_id,
         )
         return [str(row["id"]) for row in rows if row["id"]]

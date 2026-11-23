@@ -10,6 +10,9 @@ the commit history.
 
 ## Unreleased
 
+- Deleting a project also takes its merges' models out of the IFC graph: a preparation's copy, kept a day after it
+  is done, stayed in the graph with no record left to find it. PostgreSQL gets migration 0007, which redefines the
+  view `project_models`.
 - A topic's BIM snippet, a BCF project document and a viewpoint's snapshot are stored under keys the server makes,
   never under the guid the client chose; a change set the schema refuses is checked beside the topic's snippet and
   no longer removes the one before. A snippet stored under its topic's guid moves to the new key with its next

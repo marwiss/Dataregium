@@ -519,6 +519,7 @@ async def merges_and_preparations(jobs: Jobs) -> None:
     await merges.set_state(merge, "done", version_index=2, report="packed")
     assert await merges.claim(prepare, model_id=prepared) is not None
     await merges.set_state(prepare, "done", expires_at=later_iso(3600), report="packed")
+    assert sorted(await jobs.projects.model_ids(pid)) == sorted([made, prepared]), "the merges' models go with it"
 
     assert await merges.prepared(user_id=member.id, project_id=pid, prepare_id=prepare) == {
         "model_id": prepared,

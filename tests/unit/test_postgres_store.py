@@ -200,6 +200,7 @@ def test_the_migrations_are_numbered_from_one_without_gaps(tmp_path: Path) -> No
         (4, "0004_bcf"),
         (5, "0005_jobs"),
         (6, "0006_logs"),
+        (7, "0007_project_models"),
     ], "every area's, in order"
     for names, words in ((["0001_a.sql", "0003_c.sql"], "without gaps"), (["1_a.sql"], "NNNN_name.sql")):
         folder = tmp_path / names[0]
