@@ -54,7 +54,7 @@ from opencde.ifcgraph.bsdd import BsddClient, BsddUnavailable
 from opencde.ifcgraph.bsdd import check as check_bsdd
 from opencde.ifcgraph.bsdd import ruleset as bsdd_ruleset
 from opencde.ifcgraph.gltf import LODS, build_glb
-from opencde.ifcgraph.maintenance import drop_partial
+from opencde.ifcgraph.maintenance import delete_geometry, drop_partial
 from opencde.logging import get_logger
 from opencde.postgres.database import Postgres
 from opencde.settings import Settings
@@ -371,6 +371,8 @@ class IfcGraphService:
                     source = await asyncio.to_thread(self._prepare_input, storage_key, file_name, workdir)
                     records = workdir / "records.jsonl"
                     header = await self._convert(source, records)
+                    if await self._gone(model_id):  # the project went while the worker ran: nothing to import
+                        return
                     counts = await import_records(self.models, model_id, records)
                     if self.workcopy is not None:
                         await self._copy_to_workcopy(model_id, header, records)
@@ -388,6 +390,11 @@ class IfcGraphService:
                 )
                 geometry = await self._add_spatial(model_id, source, workdir)
                 await self._graph_findings(model_id, geometry)
+            if await self._gone(model_id):  # the project went during the import, after it had taken its models out
+                await drop_partial(self.models, model_id)
+                with contextlib.suppress(OSError):
+                    delete_geometry(self.storage, model_id)
+                return
             # Viewpoints created before the model finished (or before it was uploaded) get their links now.
             try:
                 linked = await self._link_model(model_id)
@@ -395,6 +402,19 @@ class IfcGraphService:
                 log.warning("ifcgraph_link_failed", model_id=model_id, error=f"{type(exc).__name__}: {exc}"[:200])
                 linked = 0
             log.info("ifcgraph_imported", model_id=model_id, linked=linked, **counts)
+
+    async def _gone(self, model_id: str) -> bool:
+        """Whether the model's conversion has gone with its project while the job ran. Deleting a project takes its
+        models out of the IFC graph and their geometry from the storage first, so a model imported after that has
+        nothing left that names it, and the job takes it out again."""
+        try:
+            if await self.conversions.get(model_id) is not None:
+                return False
+        except Exception as exc:  # the store did not answer: the model stays, as before the check
+            log.warning("ifcgraph_gone_unknown", model_id=model_id, error=type(exc).__name__)
+            return False
+        log.info("ifcgraph_project_gone", model_id=model_id)
+        return True
 
     # -- where the products are, and the geometry (OB-37) ---------------------------------------------
 

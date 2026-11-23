@@ -104,8 +104,9 @@ def _start(service: IfcGraphService, merge_id: str) -> None:
     task.add_done_callback(service._tasks.discard)
 
 
-async def _set(service: IfcGraphService, merge_id: str, state: str, **fields: Any) -> None:
-    await service.merges.set_state(merge_id, state, **fields)
+async def _set(service: IfcGraphService, merge_id: str, state: str, **fields: Any) -> bool:
+    """The job's new state; False when its record has gone with its project."""
+    return await service.merges.set_state(merge_id, state, **fields)
 
 
 async def run(service: IfcGraphService, merge_id: str) -> None:
@@ -184,7 +185,13 @@ async def _prepare(service: IfcGraphService, merge_id: str, request: dict[str, A
         await _drop(service, model_id)
         return
     prepared.pop("model", None)
-    await _set(service, merge_id, STATE_DONE, expires_at=later_iso(PREPARED_SECONDS), report=pack_report([prepared]))
+    done = await _set(
+        service, merge_id, STATE_DONE, expires_at=later_iso(PREPARED_SECONDS), report=pack_report([prepared])
+    )
+    if not done:  # the project went while the copy was made, and nothing names the copy any more
+        log.info("ifc_merge_project_gone", merge_id=merge_id)
+        await _drop(service, model_id)
+        return
     log.info("ifc_merge_prepared", merge_id=merge_id)
 
 

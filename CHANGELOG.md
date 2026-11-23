@@ -10,6 +10,9 @@ the commit history.
 
 ## Unreleased
 
+- A conversion or a preparation whose project is deleted while it runs no longer leaves its model in the IFC graph and
+  its geometry in the storage: the job imports nothing once its record is gone, and takes out what it made when the
+  project went meanwhile.
 - Deleting a project also takes its merges' models out of the IFC graph: a preparation's copy, kept a day after it
   is done, stayed in the graph with no record left to find it. PostgreSQL gets migration 0007, which redefines the
   view `project_models`.

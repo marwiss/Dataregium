@@ -120,8 +120,17 @@ async def delete_project(projects: ProjectStore, graph: Graph | None, project_id
     """A project's models in the IFC graph ``graph``, in batches of their own (the entities of a model reach far beyond
     what the store's deletion follows, and they live in the other graph), and then the project, what it owns and its
     stored files in the store behind ``projects``. Returns whether the project was there. ``graph`` is None on a
-    server that uses no graph (tiers 1 and 2, F58 a): its records of models made before go with the project."""
-    if graph is not None:
-        for model_id in await projects.model_ids(project_id):
-            await delete_model(graph, model_id)
-    return await projects.delete_with_files(project_id, storage)
+    server that uses no graph (tiers 1 and 2, F58 a): its records of models made before go with the project.
+
+    The models are taken out once more after the project: a job still running may import between the two, and
+    once the records are gone the job takes out what it imports itself (``IfcGraphService._gone``,
+    ``merging._prepare``). A model already gone is nothing to delete."""
+    if graph is None:
+        return await projects.delete_with_files(project_id, storage)
+    model_ids = await projects.model_ids(project_id)
+    for model_id in model_ids:
+        await delete_model(graph, model_id)
+    deleted = await projects.delete_with_files(project_id, storage)
+    for model_id in model_ids:
+        await delete_model(graph, model_id)
+    return deleted

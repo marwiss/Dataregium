@@ -164,7 +164,10 @@ async def test_a_failed_conversion_tidies_the_ifc_graph_and_says_so_on_the_store
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     service, ifc, store = service_with(
-        tmp_path, monkeypatch, [("SET c.state = $running", [{"id": "claimed"}])], ifcgraph_validate_uploads=False
+        tmp_path,
+        monkeypatch,
+        [("SET c.state = $running", [{"id": "claimed"}]), ("RETURN properties(c) AS c", [{"c": {"id": "m"}}])],
+        ifcgraph_validate_uploads=False,
     )
 
     async def broken(graph: Any, model_id: str, records: Path) -> dict[str, int]:
@@ -177,6 +180,41 @@ async def test_a_failed_conversion_tidies_the_ifc_graph_and_says_so_on_the_store
     assert any(":Entity" in s for s in ifc.statements), "what came in is taken out of the IFC graph"
     assert any("SET c.state = $state" in s for s in store.statements), "the record says failed"
     assert_apart(ifc, store)
+
+
+@pytest.mark.parametrize("when", ["before the import", "during the import"])
+async def test_a_conversion_whose_project_went_meanwhile_leaves_no_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, when: str
+) -> None:
+    """Deleting a project takes its models out first, so a model a running job imports after that would be left with
+    nothing naming it: the job imports nothing once its conversion is gone, and takes out what it imported when the
+    conversion went during the import."""
+    service, ifc, _ = service_with(
+        tmp_path, monkeypatch, [("SET c.state = $running", [{"id": "claimed"}])], ifcgraph_validate_uploads=False
+    )
+    imported: list[str] = []
+    dropped: list[str] = []
+
+    async def importing(graph: Any, model_id: str, records: Path) -> dict[str, int]:
+        imported.append(model_id)
+        return {"nodes": 1}
+
+    answers = iter([False, True] if when == "during the import" else [True])
+
+    async def gone(model_id: str) -> bool:
+        return next(answers)
+
+    monkeypatch.setattr(service_module, "import_records", importing)
+    monkeypatch.setattr(service_module, "delete_geometry", lambda storage, model_id: dropped.append(model_id))
+    monkeypatch.setattr(service, "_gone", gone)
+    model_id = await service.schedule(project_id="project-1", storage_key="documents/model.ifc", file_name="model.ifc")
+    await service.wait_idle()
+
+    if when == "before the import":
+        assert imported == [] and dropped == [] and not any(":Entity" in s for s in ifc.statements)
+    else:
+        assert imported == [model_id] and dropped == [model_id], "its geometry goes too"
+        assert any(":Entity" in s for s in ifc.statements), "what came in is taken out of the IFC graph"
 
 
 async def test_a_precheck_and_its_report_live_on_the_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -397,9 +435,32 @@ async def test_a_project_goes_with_its_models_from_the_ifc_graph_and_the_rest_fr
     assert await delete_project(projects, ifc, "project-1", LocalStorage(tmp_path))  # type: ignore[arg-type]
 
     removed = [s for s in ifc.statements if s.startswith("MATCH (m:Model") and "DETACH DELETE m" in s]
-    assert len(removed) == 2, "both models leave the IFC graph"
+    assert len(removed) == 4, "both models leave the IFC graph, and again after the project for what a job made"
     assert any("DETACH DELETE p" in s for s in store.statements), "the project leaves the store"
     assert_apart(ifc, store)
+
+
+async def test_a_preparation_whose_project_went_meanwhile_takes_its_copy_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The copy stays a day only for a job that is still there: when its record went with the project while the copy
+    was made, nothing names the copy any more, and the job takes it out."""
+    dropped: list[str] = []
+
+    class Merges:
+        async def set_state(self, merge_id: str, state: str, **fields: Any) -> bool:
+            return False
+
+    async def prepare_other(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"model": args[2], "new_count": 0}
+
+    async def drop(service: Any, model_id: str) -> None:
+        dropped.append(model_id)
+
+    monkeypatch.setattr(merging, "prepare_other", prepare_other)
+    monkeypatch.setattr(merging, "limits_of", lambda service: None)
+    monkeypatch.setattr(merging, "_drop", drop)
+    request = {"base": {"model_id": "a"}, "other": {"model_id": "b"}}
+    await merging._prepare(SimpleNamespace(merges=Merges(), models=None), "prepare-1", request, "copy-1")  # type: ignore[arg-type]
+    assert dropped == ["copy-1"]
 
 
 async def test_the_project_repository_never_asks_the_ifc_graph(tmp_path: Path) -> None:

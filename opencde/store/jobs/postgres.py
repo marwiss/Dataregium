@@ -777,10 +777,11 @@ class PostgresMergeRepository:
     async def claim(self, merge_id: str, *, model_id: str) -> dict[str, Any] | None:
         return await self.postgres.one(MERGE_CLAIM, merge_id, STATE_QUEUED, STATE_RUNNING, now_iso(), model_id)
 
-    async def set_state(self, merge_id: str, state: str, **fields: Any) -> None:
+    async def set_state(self, merge_id: str, state: str, **fields: Any) -> bool:
         rest = {"finished_at": now_iso(), **fields}
         expires_at = rest.pop("expires_at", None)  # a preparation's day, which the job's round asks for
-        await self.postgres.execute(MERGE_STATE, merge_id, state, expires_at, _fields(rest, MERGE_COLUMNS))
+        changed = await self.postgres.execute(MERGE_STATE, merge_id, state, expires_at, _fields(rest, MERGE_COLUMNS))
+        return changed > 0
 
     async def prepared(self, *, user_id: str, project_id: str, prepare_id: str) -> dict[str, Any] | None:
         return await self.postgres.one(

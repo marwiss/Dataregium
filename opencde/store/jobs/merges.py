@@ -62,14 +62,16 @@ class MergeRepository:
             model_id=model_id,
         )
 
-    async def set_state(self, merge_id: str, state: str, **fields: Any) -> None:
-        """The job's new state, with ``finished_at`` and the fields of its result."""
-        await self.graph.run(
-            "MATCH (j:Merge {id: $id}) SET j.state = $state, j += $fields",
+    async def set_state(self, merge_id: str, state: str, **fields: Any) -> bool:
+        """The job's new state, with ``finished_at`` and the fields of its result; False when the job has gone
+        with its project."""
+        rows = await self.graph.run(
+            "MATCH (j:Merge {id: $id}) SET j.state = $state, j += $fields RETURN j.id AS id",
             id=merge_id,
             state=state,
             fields={"finished_at": now_iso(), **fields},
         )
+        return bool(rows)
 
     async def prepared(self, *, user_id: str, project_id: str, prepare_id: str) -> dict[str, Any] | None:
         """A preparation of a project the user is a member of that is done and has not expired: its model's id and
