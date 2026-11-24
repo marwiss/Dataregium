@@ -10,6 +10,10 @@ the commit history.
 
 ## Unreleased
 
+- A graph's backup holds the nodes without a unique key too, by the ids the server gave them: teams with their
+  members and responsible user, a version's publication, the components of viewpoints, the trials of change sets,
+  clash checks, merges and request log entries. A move from the graph to PostgreSQL makes them rows; write the
+  backup for it with this release, as one from an earlier release leaves them out.
 - A conversion or a preparation whose project is deleted while it runs no longer leaves its model in the IFC graph and
   its geometry in the storage: the job imports nothing once its record is gone, and takes out what it made when the
   project went meanwhile.

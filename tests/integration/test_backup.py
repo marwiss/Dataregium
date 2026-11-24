@@ -35,6 +35,15 @@ async def test_backup_round_trip(graph: Graph, tmp_path: Path) -> None:
     )
     key = make_key("bcf-documents", topic.guid)
     storage.write_bytes(key, b"document bytes")
+    # A team has no unique constraint: the backup keeps it by the id the server gave it (LD-64, SA-108).
+    await graph.run(
+        "MATCH (p:Project {project_id: $project}), (u:User {id: $user}) "
+        "CREATE (p)-[:HAS_TEAM]->(t:Team {id: $team, name: 'Facades', ids_document_id: 'd', created_at: '2026', "
+        "updated_at: '2026'}), (t)-[:RESPONSIBLE]->(u), (t)-[:HAS_MEMBER]->(u)",
+        project=project.project_id,
+        user=user.id,
+        team="team-1",
+    )
 
     folder = tmp_path / "backups" / "first"
     manifest = await backup.export(graph, storage, folder)
@@ -47,7 +56,7 @@ async def test_backup_round_trip(graph: Graph, tmp_path: Path) -> None:
     }
     with gzip.open(folder / "nodes.jsonl.gz", "rt") as handle:
         labels = {tuple(json.loads(line)["labels"]) for line in handle}
-    assert ("Topic",) in labels and ("User",) in labels and ("Event",) in labels
+    assert ("Topic",) in labels and ("User",) in labels and ("Event",) in labels and ("Team",) in labels
 
     await wipe(graph)
     storage.delete(key)
@@ -62,6 +71,11 @@ async def test_backup_round_trip(graph: Graph, tmp_path: Path) -> None:
     assert storage.exists(key) and storage.open_read(key).read() == b"document bytes"
     row = await graph.one("MATCH (:Project)-[:HAS_EVENT]->(e:Event) RETURN count(e) AS n")
     assert row and row["n"] == 1, "relationships came back"
+    team = await graph.one(
+        "MATCH (:Project)-[:HAS_TEAM]->(t:Team {id: 'team-1'})-[:RESPONSIBLE]->(u:User), (t)-[:HAS_MEMBER]->(u) "
+        "RETURN t.name AS name"
+    )
+    assert team == {"name": "Facades"}, "a node without a unique key came back with its relationships"
 
     (folder / "nodes.jsonl.gz").write_bytes(b"tampered")
     with pytest.raises(backup.BackupError, match="corrupt"):

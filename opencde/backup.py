@@ -3,7 +3,8 @@
 
 Neo4j Community can only dump a database that is stopped, and Memgraph has
 its own snapshot format, so the server exports its own data: every node and
-relationship as JSON lines (identified by the unique keys of the schema, never
+relationship as JSON lines (identified by the unique keys of the schema, and the
+nodes without a constraint by the ids the server gave them, ``BACKUP_ONLY``; never
 by database-internal ids) plus a tar archive of the storage directory. The
 result restores into either database. See ADR 0006.
 
@@ -39,7 +40,7 @@ from ifc_db.graph import UNIQUE as LIBRARY_UNIQUE
 
 from opencde import __version__
 from opencde.graph.graph import Graph
-from opencde.graph.schema import KEYED
+from opencde.graph.schema import BACKUP_ONLY, KEYED
 from opencde.storage import CATEGORIES, LocalStorage
 from opencde.timeutil import now_iso
 
@@ -51,7 +52,9 @@ FORMAT = 1
 BATCH = 1000
 MAX_BATCH_BYTES = 16 * 1024 * 1024
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_KEY_PROPS = sorted({prop for _, prop in KEYED})
+#: What the backup keys a node by: a label's unique key, or the id of a node without one.
+BACKUP_KEYED: tuple[tuple[str, str], ...] = (*KEYED, *BACKUP_ONLY)
+_KEY_PROPS = sorted({prop for _, prop in BACKUP_KEYED})
 _KEY_PROJECTION = "{" + ", ".join(f".{prop}" for prop in _KEY_PROPS) + "}"
 #: The labels of IFC-DB's nodes, which live in the IFC graph; every other node is the server's own (ADR 0027).
 MODEL_LABELS = frozenset(label for label, _ in LIBRARY_UNIQUE)
@@ -91,8 +94,8 @@ class Manifest:
 
 
 def node_key(labels: list[str], props: dict[str, Any]) -> tuple[str, str, Any] | None:
-    """``(label, property, value)`` identifying a node across databases, or None when it has no unique key."""
-    for label, prop in KEYED:
+    """``(label, property, value)`` identifying a node across databases, or None when it has no key."""
+    for label, prop in BACKUP_KEYED:
         if label in labels and props.get(prop) is not None:
             return label, prop, props[prop]
     return None
@@ -139,16 +142,16 @@ async def export(
         raise BackupError(f"PostgreSQL has tables this server does not know: {', '.join(strange)}")
     apart = store is not None and store is not graph
     if postgres is not None:
-        parts = [] if graph is None else [(graph, [k for k in KEYED if k[0] in MODEL_LABELS])]
+        parts = [] if graph is None else [(graph, [k for k in BACKUP_KEYED if k[0] in MODEL_LABELS])]
     elif graph is None:
         raise BackupError("a backup of a graph needs the graph")
     elif apart and store is not None:  # each graph its own kind of node, so that nothing is written twice
         parts = [
-            (store, [k for k in KEYED if k[0] not in MODEL_LABELS]),
-            (graph, [k for k in KEYED if k[0] in MODEL_LABELS]),
+            (store, [k for k in BACKUP_KEYED if k[0] not in MODEL_LABELS]),
+            (graph, [k for k in BACKUP_KEYED if k[0] in MODEL_LABELS]),
         ]
     else:
-        parts = [(graph, list(KEYED))]
+        parts = [(graph, list(BACKUP_KEYED))]
     # A command-line operation: nothing else runs on this event loop, so blocking file work is fine here.
     target_dir.mkdir(parents=True, exist_ok=False)  # noqa: ASYNC240
     nodes = relationships = skipped = 0

@@ -80,19 +80,25 @@ säkerhetskopiemapp in i containern `api` (eller montera den) och kör
 ## Från grafen till PostgreSQL
 
 En installation från före PostgreSQL har serverns egna data i grafen. Den
-flyttar till PostgreSQL med en säkerhetskopia och en återställning, som för med
-sig noderna med en unik nyckel: team, en versions publicering, viewpointernas
-komponenter och provningarna, krocktesterna och sammanslagningarna finns inte i
-en grafs säkerhetskopia och blir kvar, och säkerhetskopieringen säger hur många
-noder den lämnade (`WARN … nodes without a unique key were not exported`).
-Skriv, medan den gamla stacken körs, en säkerhetskopia till datavolymen, som den
-nya stacken behåller:
+flyttar till PostgreSQL med en säkerhetskopia och en återställning. En
+säkerhetskopia som den här utgåvan skriver för med sig alla noder i serverns
+egna data: de med en unik nyckel, och team, en versions publicering,
+viewpointernas komponenter, provningarna, krocktesterna, sammanslagningarna och
+anropsloggens poster efter de id servern gav dem. En säkerhetskopia från en
+tidigare utgåva lämnar de senare och säger hur många noder den lämnade (`WARN …
+nodes without a key were not exported`). Uppdatera därför först utcheckningen
+och bygg den här utgåvans image, och skriv sedan, med den gamla `.env` och den
+gamla stackens graf igång, säkerhetskopian till datavolymen, som den nya stacken
+behåller, med den här utgåvans `opencde backup`. Det kommandot behöver
+`OPENCDE_TIER=experimental`, eftersom den här utgåvan har serverns egna data i
+en graf bara i nivå 3:
 
 ```sh
-docker compose exec api opencde backup /data/migration
+docker compose build api
+docker compose run --rm -e OPENCDE_TIER=experimental api opencde backup /data/migration
 ```
 
-Uppdatera sedan utcheckningen, ta bort `OPENCDE_STORE_GRAPH_URI` ur `.env` om
+Ta sedan bort `OPENCDE_STORE_GRAPH_URI` ur `.env` om
 den är satt, och lägg till `OPENCDE_STORE_PASSWORD` (ett långt slumpat värde)
 och `OPENCDE_TIER` i `.env`, och `COMPOSE_PROFILES=graph` för att behålla
 IFC-DB:s modeller i nivå 3 (`OPENCDE_TIER=experimental`); eller flytta undan den

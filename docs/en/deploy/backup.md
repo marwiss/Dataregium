@@ -79,18 +79,24 @@ To restore on a fresh host, start the stack, copy a backup folder into the
 ## From the graph to PostgreSQL
 
 An installation from before PostgreSQL keeps the server's own data in the
-graph. It moves to PostgreSQL with a backup and a restore, which carry the nodes
-that have a unique key: teams, the publication of a version, the components of
-viewpoints and the trials, clash checks and merges are not in a graph's backup
-and stay behind, and the backup says how many nodes it left out (`WARN … nodes
-without a unique key were not exported`). With the old stack running, write a
-backup to the data volume, which the new stack keeps:
+graph. It moves to PostgreSQL with a backup and a restore. A backup written by
+this release carries every node of the server's own data: those with a unique key,
+and teams, the publication of a version, the components of viewpoints, the
+trials, clash checks, merges and request log entries by the ids the server gave
+them. A backup written by an earlier release leaves the latter out and says how
+many nodes it left (`WARN … nodes without a key were not exported`). So update
+the checkout and build this release's image first, and, with the old `.env` and
+the old stack's graph still running, write the backup to the data volume, which
+the new stack keeps, with this release's `opencde backup`. It needs
+`OPENCDE_TIER=experimental` for that command, since this release keeps the
+server's own data in a graph in tier 3 alone:
 
 ```sh
-docker compose exec api opencde backup /data/migration
+docker compose build api
+docker compose run --rm -e OPENCDE_TIER=experimental api opencde backup /data/migration
 ```
 
-Then update the checkout, remove `OPENCDE_STORE_GRAPH_URI` from `.env` if it is
+Then remove `OPENCDE_STORE_GRAPH_URI` from `.env` if it is
 set, and add `OPENCDE_STORE_PASSWORD` (a long random value) and `OPENCDE_TIER`
 to `.env`, and `COMPOSE_PROFILES=graph` to keep IFC-DB's models in tier 3
 (`OPENCDE_TIER=experimental`); or move the old `.env` aside, write a new one

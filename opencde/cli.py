@@ -458,7 +458,7 @@ def backup(
     if manifest.rows is not None:
         print(f"        {manifest.rows} rows of PostgreSQL, migration {manifest.store_migration:04d}")
     if manifest.skipped_nodes:
-        print(f"WARN    {manifest.skipped_nodes} nodes without a unique key were not exported")
+        print(f"WARN    {manifest.skipped_nodes} nodes without a key were not exported")
 
 
 @app.command()

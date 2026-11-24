@@ -1,7 +1,8 @@
 # This file was generated with the assistance of an AI coding tool.
 """A graph's backup as PostgreSQL's rows (ADR 0029): how a server whose own data was in a graph moves to PostgreSQL.
 
-A graph's backup (``opencde.backup``) holds the nodes that have a unique key and the relationships between them.
+A graph's backup (``opencde.backup``) holds the nodes that have a unique key, the nodes without one by the ids the server
+gave them (``graph.schema.BACKUP_ONLY``), and the relationships between them.
 ``Gathered`` takes the server's own (IFC-DB's models go to the IFC graph as they are) and ``Gathered.rows`` makes the
 tables' rows of them: a node's properties are the columns of the same names, what a relationship says (the project a
 topic is in, the user a token is for, a member's role) is a column or a row of its own, and what the graph keeps as
@@ -10,9 +11,8 @@ says again what a row holds already (``CREATED_BY``, ``DERIVED_FROM``, a BCF doc
 nothing. A job's properties that are not its table's columns are its ``fields``, as the jobs' repositories keep them.
 
 What has no place is refused rather than guessed, all of it in one message: a label without a table here, a relationship of
-another kind, a property no column holds, a row without a value its table requires. What a graph's backup never held,
-the nodes without a unique key (teams, a version's publication, a viewpoint's components, the trials of change sets,
-clash checks and merges), is not among the rows either.
+another kind, a property no column holds, a row without a value its table requires. A team's members are rows of their
+own, and its responsible user a column.
 """
 
 from __future__ import annotations
@@ -50,6 +50,13 @@ TABLE_OF = {
     "ChangeSetDraft": "change_set_drafts",
     "AuditEvent": "audit_events",
     "SignInThrottle": "sign_in_throttles",
+    "Team": "teams",
+    "Publication": "publications",
+    "Component": "components",
+    "Proposal": "proposals",
+    "Clash": "clashes",
+    "Merge": "merges",
+    "RequestLog": "request_log_entries",
 }
 #: A project's BCF extensions are its row's ``extensions``.
 EXTENSIONS = "Extensions"
@@ -72,6 +79,13 @@ PARENTS: dict[tuple[str, str, str], tuple[str, str]] = {
     ("HAS_VALIDATION", "DocumentVersion", "Validation"): ("b", "version_id"),
     ("HAS_PRECHECK", "Project", "Validation"): ("b", "project_id"),
     ("HAS_DRAFT", "Project", "ChangeSetDraft"): ("b", "project_id"),
+    ("HAS_TEAM", "Project", "Team"): ("b", "project_id"),
+    ("RESPONSIBLE", "Team", "User"): ("a", "responsible_user_id"),
+    ("HAS_PUBLICATION", "DocumentVersion", "Publication"): ("b", "version_id"),
+    ("HAS_COMPONENT", "Viewpoint", "Component"): ("b", "viewpoint_guid"),
+    ("HAS_PROPOSAL", "Topic", "Proposal"): ("b", "topic_guid"),
+    ("HAS_CLASH", "Project", "Clash"): ("b", "project_id"),
+    ("HAS_MERGE", "Project", "Merge"): ("b", "project_id"),
     ("FOR", "WebSession", "User"): ("a", "user_id"),
     ("FOR", "AuthorizationCode", "User"): ("a", "user_id"),
     ("FOR", "AccessToken", "User"): ("a", "user_id"),
@@ -92,6 +106,7 @@ REPEATS = frozenset(
     }
 )
 MEMBER_OF = ("MEMBER_OF", "User", "Project")
+TEAM_MEMBER = ("HAS_MEMBER", "Team", "User")
 RELATED_TO = ("RELATED_TO", "Topic", "Topic")
 #: What a row takes where the node has nothing, as the graph's readers take it.
 DEFAULTS: dict[str, dict[str, Any]] = {
@@ -115,7 +130,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "change_set_drafts": {"steps": "[]", "refs": 0},
 }
 #: The jobs whose properties beyond their columns are their ``fields``; a conversion's ``model_id`` is its id.
-WITH_FIELDS = frozenset({"conversions", "validations"})
+WITH_FIELDS = frozenset({"conversions", "validations", "proposals", "clashes", "merges"})
 DROPPED = {"conversions": frozenset({"model_id"})}
 
 Key = tuple[str, Any]  # a node's label and the value of its unique key
@@ -147,6 +162,8 @@ class Gathered:
         for shape, a, b, props in self.relationships:
             if shape == MEMBER_OF:
                 by_table["memberships"].append({**props, "user_id": a[1], "project_id": b[1]})
+            elif shape == TEAM_MEMBER:
+                by_table["team_members"].append({"team_id": a[1], "user_id": b[1]})
             elif shape == RELATED_TO:
                 by_table["related_topics"].append({**props, "topic_guid": a[1], "related_guid": b[1]})
             elif shape in PARENTS:

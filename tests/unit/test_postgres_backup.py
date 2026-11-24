@@ -317,6 +317,138 @@ def test_a_graphs_backup_becomes_the_rows_of_its_tables() -> None:
     assert (precheck.get("version_id"), precheck["project_id"], precheck["expires_at"]) == (None, "p1", T)
 
 
+def test_the_nodes_without_a_unique_key_are_kept_by_their_ids_and_become_rows() -> None:
+    """A team with its members and responsible user, a version's publication, a viewpoint's component, a change
+    set's trial, a clash check, a merge and a request's log entry: the backup keys them by the ids the server gave
+    them (LD-64, SA-108), and a move to PostgreSQL makes them rows."""
+    version = {
+        "id": "v1",
+        "version_index": 1,
+        "version_number": "1",
+        "creation_date": T,
+        "title": "Model",
+        "file_name": "a.ifc",
+        "size_in_bytes": 3,
+        "sha256": "s",
+        "storage_key": "documents/a",
+        "author": "anna",
+        "metadata": "[]",
+    }
+    topic = {"guid": "t1", "title": "T", "server_assigned_id": "ISSUE-1", "creation_date": T, "creation_author": "anna"}
+    viewpoint = {"guid": "vp1", "index": 0, "author": "anna", "creation_date": T, "camera_kind": "perspective"}
+    nodes = [
+        USER,
+        PROJECT,
+        (["Document"], {"document_id": "d1", "title": "Model", "created_at": T, "latest_index": 1}),
+        (["DocumentVersion"], version),
+        (["Topic"], topic),
+        (["Viewpoint"], viewpoint),
+        (["Team"], {"id": "team1", "name": "Facades", "ids_document_id": "d1", "created_at": T, "updated_at": T}),
+        (
+            ["Publication"],
+            {
+                "id": "pub1",
+                "storage_key": "published/x.zip",
+                "file_name": "x.zip",
+                "size_in_bytes": 9,
+                "sha256": "h",
+                "published_at": T,
+                "published_by": "anna",
+            },
+        ),
+        (
+            ["Component"],
+            {"id": "c1", "role": "selection", "group_index": 0, "position": 0, "ifc_guid": "2O2Fr$t4X7Zf8NOew3FLOH"},
+        ),
+        (
+            ["Proposal"],
+            {
+                "id": "pr1",
+                "project_id": "p1",
+                "topic_guid": "t1",
+                "snippet_key": "snippets/k.bin",
+                "author": "anna",
+                "state": "clean",
+                "created_at": T,
+                "report": "packed",
+            },
+        ),
+        (
+            ["Clash"],
+            {
+                "id": "cl1",
+                "project_id": "p1",
+                "state": "done",
+                "request": "{}",
+                "author": "anna",
+                "created_at": T,
+                "report": "r",
+            },
+        ),
+        (
+            ["Merge"],
+            {
+                "id": "m1",
+                "kind": "prepare",
+                "state": "done",
+                "request": "{}",
+                "author": "anna",
+                "created_at": T,
+                "model_id": "x",
+                "version_index": 2,
+            },
+        ),
+        (
+            ["RequestLog"],
+            {
+                "id": "r1",
+                "at": T,
+                "method": "GET",
+                "path": "/health",
+                "status": 200,
+                "duration_ms": 1.5,
+                "bytes_in": 0,
+                "bytes_out": 2,
+                "expires_at": T,
+            },
+        ),
+    ]
+    relationships = [
+        ("HAS_DOCUMENT", ["Project", "project_id", "p1"], ["Document", "document_id", "d1"]),
+        ("HAS_VERSION", ["Document", "document_id", "d1"], ["DocumentVersion", "id", "v1"]),
+        ("HAS_TOPIC", ["Project", "project_id", "p1"], ["Topic", "guid", "t1"]),
+        ("HAS_VIEWPOINT", ["Topic", "guid", "t1"], ["Viewpoint", "guid", "vp1"]),
+        ("HAS_TEAM", ["Project", "project_id", "p1"], ["Team", "id", "team1"]),
+        ("RESPONSIBLE", ["Team", "id", "team1"], ["User", "id", "u1"]),
+        ("HAS_MEMBER", ["Team", "id", "team1"], ["User", "id", "u1"]),
+        ("HAS_PUBLICATION", ["DocumentVersion", "id", "v1"], ["Publication", "id", "pub1"]),
+        ("HAS_COMPONENT", ["Viewpoint", "guid", "vp1"], ["Component", "id", "c1"]),
+        ("HAS_PROPOSAL", ["Topic", "guid", "t1"], ["Proposal", "id", "pr1"]),
+        ("HAS_CLASH", ["Project", "project_id", "p1"], ["Clash", "id", "cl1"]),
+        ("HAS_MERGE", ["Project", "project_id", "p1"], ["Merge", "id", "m1"]),
+    ]
+    rows: dict[str, list[dict[str, Any]]] = {}
+    for table, row in gathered(nodes, relationships).rows(migration_columns()):
+        rows.setdefault(table, []).append(row)
+    assert rows["teams"] == [
+        {
+            "id": "team1",
+            "name": "Facades",
+            "ids_document_id": "d1",
+            "created_at": T,
+            "updated_at": T,
+            "project_id": "p1",
+            "responsible_user_id": "u1",
+        }
+    ]
+    assert rows["team_members"] == [{"team_id": "team1", "user_id": "u1"}]
+    assert rows["publications"][0]["version_id"] == "v1" and rows["components"][0]["viewpoint_guid"] == "vp1"
+    assert rows["proposals"][0]["fields"] == {"report": "packed"} and rows["proposals"][0]["topic_guid"] == "t1"
+    assert rows["clashes"][0]["fields"] == {"report": "r"}
+    assert rows["merges"][0]["fields"] == {"version_index": 2} and rows["merges"][0]["project_id"] == "p1"
+    assert rows["request_log_entries"][0]["path"] == "/health"
+
+
 def test_what_has_no_place_in_postgresql_is_refused_all_at_once() -> None:
     nodes = [
         (["User"], {**USER[1], "favourite_colour": "green"}),
@@ -350,14 +482,14 @@ def test_what_has_no_place_in_postgresql_is_refused_all_at_once() -> None:
 
 def test_every_label_of_the_servers_own_data_has_its_table_or_its_reason() -> None:
     """A label of the graph's schema either becomes rows, or is named in the module's docstring as refused."""
-    from opencde.graph.schema import UNIQUE
+    from opencde.graph.schema import BACKUP_ONLY, UNIQUE
 
     order = {t.name for t in tables.TABLES}
     assert set(from_graph.TABLE_OF.values()) <= order and set(from_graph.DEFAULTS) <= order
     columns = migration_columns()
     for table, defaults in from_graph.DEFAULTS.items():
         assert set(defaults) <= set(columns[table]), table
-    for label in {label for label, _ in UNIQUE} - set(from_graph.TABLE_OF) - {from_graph.EXTENSIONS}:
+    for label in {label for label, _ in (*UNIQUE, *BACKUP_ONLY)} - set(from_graph.TABLE_OF) - {from_graph.EXTENSIONS}:
         assert f"``{label}``" in (from_graph.__doc__ or ""), f"{label} is neither mapped nor said to be refused"
 
 

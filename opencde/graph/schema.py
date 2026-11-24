@@ -54,6 +54,20 @@ UNIQUE: tuple[tuple[str, str], ...] = (
 #: the doctor counts. The library makes its own constraints and indexes (``ensure_schema``).
 KEYED: tuple[tuple[str, str], ...] = (*UNIQUE, *LIBRARY_UNIQUE)
 
+#: The labels without a unique constraint whose nodes carry an ``id`` the server made (``new_id``): a team, a
+#: version's publication, a viewpoint's component, a change set's trial, a clash check, a merge and a request's log
+#: entry. The backup keys them by it too, so that a graph's backup holds them and a move to PostgreSQL brings them
+#: along (LD-64, SA-108). The example data's ``Building`` and ``Reviewer`` are not among them.
+BACKUP_ONLY: tuple[tuple[str, str], ...] = (
+    ("Team", "id"),
+    ("Publication", "id"),
+    ("Component", "id"),
+    ("Proposal", "id"),
+    ("Clash", "id"),
+    ("Merge", "id"),
+    ("RequestLog", "id"),
+)
+
 # Additional lookup and sort indexes.
 INDEXES: tuple[tuple[str, str], ...] = (
     ("User", "email"),
