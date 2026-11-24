@@ -34,7 +34,7 @@ klient som følgjer spesifikasjonane, kan kople seg til.
 - [Lær meir](#lær-meir)
 - [Avgrensingar i korte trekk](#avgrensingar-i-korte-trekk)
 - [Personopplysningar](#personopplysningar)
-- [Det neste i 3-serien](#det-neste-i-3-serien)
+- [Det neste i serien](#det-neste-i-serien)
 - [Feil og framlegg](#feil-og-framlegg)
 - [Utvikling](#utvikling)
 - [Lisens](#lisens)
@@ -55,7 +55,7 @@ og Podman er program som startar containerar. Snøggstarten startar to: serveren
 databasen hans.
 
 1. **Last ned.** Hent koden med git, eller som ZIP-fil under *Code > Download ZIP* på
-   GitHub. Greina `main` er 3-serien; `release-2` og `release-1` er 2- og 1-serien.
+   GitHub. Greina `main` er serien, i beta, og taggen `v0.1.0` er den første utgåva.
 
    ```sh
    git clone https://github.com/marwiss/Dataregium.git
@@ -181,8 +181,8 @@ før det er konfigurert.
 ### For den teknisk kunnige
 
 - **Image**: `ghcr.io/marwiss/opencdeserver` for amd64 og arm64, skanna med Trivy og
-  med SBOM. Taggane er `3.0.0` og `latest` for 3-serien, `3.0.0-gherkin` og
-  `latest-gherkin` med ifc-gherkin-rules frå buildingSMART, `2.0.0` og `1.0.0`;
+  med SBOM. Taggane er `0.1.0`, `0.1` og `latest`, og med ifc-gherkin-rules frå
+  buildingSMART `0.1.0-gherkin`, `0.1-gherkin` og `latest-gherkin`;
   `OPENCDE_IMAGE_TAG` vel i compose-filene.
 - **Compose**: `docker/compose.yaml` pluss overlagringar for utvikling, produksjon med
   Caddy, bak ein eksisterande proxy, Memgraph, ein ekstern database, Bolt med TLS, ein
@@ -253,10 +253,11 @@ Orda denne README-en bruker, i kvardagsspråk; heile ordlista finst i
 
 ## Kva du kan gjere
 
-Det som verkar i éin versjon, verkar òg i den neste. Kvar versjon høyrer saman med den
-same versjonen av Dataspatium.
+Kvart nivå har alt det førre nivået har, og Dataspatium og Dataregium på same nivå
+verkar saman; [den engelske README-en](../en/README.md#what-you-can-do) skildrar
+nivåa.
 
-### Versjon 1 (med Dataspatium 1)
+### Nivå 1, Dokument
 
 - **Dokument på éin stad** (Documents API 1.0): velje, laste opp og hente dokument og
   versjonane deira gjennom sidene til serveren, frå ein app som Dataspatium.
@@ -275,7 +276,7 @@ same versjonen av Dataspatium.
   fjernar medlemmer, byter rollene deira og gjev prosjektet nytt namn, utan å vere
   serveradministrator.
 
-### Òg i versjon 2 (med Dataspatium 2)
+### Òg i nivå 2, BIM og GIS
 
 - **Saker om modellen** (BCF API 3.0 og 2.1): spørsmål og merknader med kommentarar,
   bilete og visingar som peikar ut bygningsdelar, med filter og ein hendingslogg,
@@ -284,7 +285,7 @@ same versjonen av Dataspatium.
   opplasta IFC-modell blir ein graf i databasen, knytt til bygningsdelane i visingane
   til sakene (sjå [IFC-DB](ifc-db.md)).
 
-### Òg i versjon 3 (med Dataspatium 3)
+### Òg i nivå 3, Eksperimentell
 
 - **Ein tapsfri modell**: grafen kjem frå biblioteket IFC-DB og held alt i fila,
   slik at ho kan skrivast tilbake slik ho kom.
@@ -347,9 +348,10 @@ ein klient.
 
 Dataspatium er appen du arbeider i, og Dataregium er serveren der det felles
 grunnlaget til prosjektet ligg. [Dataspatium](https://github.com/marwiss/Dataspatium)
-køyrer heilt i nettlesaren, og dei to er utvikla for å verke saman. Det same
-utgåvenummeret tyder at dei verkar saman: Dataspatium 3.0.0 verkar med Dataregium 3.0.0
-([snøggstart](quickstart.md)).
+køyrer heilt i nettlesaren, og dei to er utvikla for å verke saman. Det same nivået,
+ikkje det same utgåvenummeret, tyder at dei verkar saman; sjå
+[den engelske README-en](../en/README.md#one-series-in-beta-from-010) og
+[snøggstarten](quickstart.md).
 
 Dataspatium legg til ein Dataregium-server som kjelde: appen oppdagar API-a gjennom
 `/foundation/versions`, loggar inn med OAuth2 authorization code og PKCE og
@@ -400,16 +402,11 @@ produkta blir installerte kvar for seg: dette repoet pakkar ikkje med Dataspatiu
 (lisensane er ulike, AGPL her og PolyForm Strict der), og README-en til Dataspatium
 skildrar korleis appen blir henta og brukt.
 
-### Utgåvene 1, 2 og 3
+### Éin serie, i beta frå 0.1.0
 
-Det finst éi utgåve per hovudnummer, og ho blir gjeven ut på nytt når ho veks; berre
-den siste i kvar serie blir retta. Dataregium og Dataspatium med same nummer høyrer saman:
-
-| Dataregium | Kva ho har | Image | Høyrer saman med |
-|---|---|---|---|
-| 1.0.0 | Ein dokumentserver: Foundation API og Documents API, nettadministrasjonen på sju språk, prosjektadministrasjonen for den prosjektansvarlege og førespurnadsloggen. Ho er 2.0.0-koden med berre Documents API slått på (`OPENCDE_APIS`) | `1.0.0` | Dataspatium 1.0.0 |
-| 2.0.0 | Òg BCF API 3.0 og 2.1 på dei same dataa og IFC-DB-modulen som lagar ein graf av kvar opplasta IFC-fil | `2.0.0` | Dataspatium 2.0.0 |
-| 3.0.0 | Òg den tapsfrie grafen frå biblioteket IFC-DB, kontrollen av kvar opplasting, spørjingane, samanlikningane og kollisjonskontrollen, versjonar med endringsframlegg som blir prøvde, godkjende og slått saman, publiseringa av ein versjon, ein bygning frå éin modell inn i ein annan, geometrien som glTF, den lokale motoren og oppskriftene for skya og nginx | `3.0.0`, `latest`, `3.0.0-gherkin` | Dataspatium 3.0.0 |
+Dataregium kjem ut i éin serie frå greina `main`, i beta frå 0.1.0; seriane 1, 2 og 3
+er trekte tilbake. Serien er skildra i
+[den engelske README-en](../en/README.md#one-series-in-beta-from-010).
 
 ## Lær meir
 
@@ -489,10 +486,10 @@ og versjonane personen skreiv, til dei blir sletta. Revisjonsloggen blir eksport
 CSV, BCF- og dokumentdata gjennom API-a og heile databasen med `opencde backup`. Kva
 Dataspatium lagrar i nettlesaren, står i den eigne dokumentasjonen til appen.
 
-## Det neste i 3-serien
+## Det neste i serien
 
-3.0.0 er den einaste utgåva i 3-serien og blir gjeven ut på nytt når ho veks; det ho
-har i dag, står under [Kva du kan gjere](#kva-du-kan-gjere). Dei offisielle
+0.1.0 er den første utgåva i serien, i beta, og den avgjorde lista slik ho står no,
+finst i [den engelske README-en](../en/README.md#decided). Dei offisielle
 OpenCDE-API-a blir verande slik buildingSMART definerer dei; det serien legg til, er
 utvidingar til dei, under eigne namn og med ein eigen OpenAPI. Dette avsnittet seier kva
 som er avgjort, for den, menneske eller AI-agent, som fører ein del av det vidare.

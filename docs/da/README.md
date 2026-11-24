@@ -34,7 +34,7 @@ der følger specifikationerne, kan forbinde sig.
 - [Lær mere](#lær-mere)
 - [Begrænsninger i korte træk](#begrænsninger-i-korte-træk)
 - [Personoplysninger](#personoplysninger)
-- [Det næste i 3-serien](#det-næste-i-3-serien)
+- [Det næste i serien](#det-næste-i-serien)
 - [Fejl og forslag](#fejl-og-forslag)
 - [Udvikling](#udvikling)
 - [Licens](#licens)
@@ -55,8 +55,8 @@ Docker og Podman er programmer, der starter containere. Den hurtige start starte
 to: serveren og dens database.
 
 1. **Download.** Hent koden med git, eller som ZIP-fil under *Code > Download ZIP*
-   på GitHub. Grenen `main` er 3-serien; `release-2` og `release-1` er 2- og
-   1-serien.
+   på GitHub. Grenen `main` er serien, i beta, og mærket `v0.1.0` er dens første
+   udgivelse.
 
    ```sh
    git clone https://github.com/marwiss/Dataregium.git
@@ -182,8 +182,8 @@ at starte uden en offentlig `https`-adresse og en databaseadgangskode, og intet 
 ### For den teknisk kyndige
 
 - **Image**: `ghcr.io/marwiss/opencdeserver` til amd64 og arm64, scannet med Trivy
-  og med SBOM. Taggene er `3.0.0` og `latest` for 3-serien, `3.0.0-gherkin` og
-  `latest-gherkin` med buildingSMARTs ifc-gherkin-rules, `2.0.0` og `1.0.0`;
+  og med SBOM. Taggene er `0.1.0`, `0.1` og `latest`, og med buildingSMARTs
+  ifc-gherkin-rules `0.1.0-gherkin`, `0.1-gherkin` og `latest-gherkin`;
   `OPENCDE_IMAGE_TAG` vælger i compose-filerne.
 - **Compose**: `docker/compose.yaml` plus overlejringer til udvikling, produktion
   med Caddy, bag en eksisterende proxy, Memgraph, en ekstern database, Bolt med TLS,
@@ -254,10 +254,11 @@ De ord, denne README bruger, på almindeligt dansk; hele ordlisten findes i
 
 ## Hvad du kan
 
-Det, der virker i én version, virker også i den næste. Hver version hører sammen
-med den samme version af Dataspatium.
+Hvert niveau har alt, hvad niveauet før det har, og Dataspatium og Dataregium på samme
+niveau virker sammen; [den engelske README](../en/README.md#what-you-can-do) beskriver
+niveauerne.
 
-### Version 1 (med Dataspatium 1)
+### Niveau 1, Dokumenter
 
 - **Dokumenter ét sted** (Documents API 1.0): vælge, uploade og hente dokumenter og
   deres versioner gennem serverens sider, fra en app som Dataspatium.
@@ -276,7 +277,7 @@ med den samme version af Dataspatium.
   medlemmer, skifter deres roller og omdøber projektet, uden at være
   serveradministrator.
 
-### Også i version 2 (med Dataspatium 2)
+### Også i niveau 2, BIM og GIS
 
 - **Sager om modellen** (BCF API 3.0 og 2.1): spørgsmål og bemærkninger med
   kommentarer, billeder og visninger, der udpeger bygningsdele, med filtre og en
@@ -285,7 +286,7 @@ med den samme version af Dataspatium.
   en uploadet IFC-model bliver til en graf i databasen, knyttet til bygningsdelene i
   sagernes visninger (se [IFC-DB](ifc-db.md)).
 
-### Også i version 3 (med Dataspatium 3)
+### Også i niveau 3, Eksperimentel
 
 - **En tabsfri model**: grafen kommer fra biblioteket IFC-DB og rummer alt i filen,
   så den kan skrives tilbage, som den kom.
@@ -348,9 +349,10 @@ bygger en klient.
 
 Dataspatium er den app, du arbejder i, og Dataregium er den server, hvor projektets
 fælles grundlag ligger. [Dataspatium](https://github.com/marwiss/Dataspatium) kører
-helt i browseren, og de to er udviklet til at arbejde sammen. Det samme
-udgivelsesnummer betyder, at de virker sammen: Dataspatium 3.0.0 virker med
-Dataregium 3.0.0 ([hurtig start](quickstart.md)).
+helt i browseren, og de to er udviklet til at arbejde sammen. Det samme niveau, ikke
+det samme udgivelsesnummer, betyder, at de virker sammen; se
+[den engelske README](../en/README.md#one-series-in-beta-from-010) og
+[den hurtige start](quickstart.md).
 
 Dataspatium tilføjer en Dataregium-server som kilde: appen opdager API'erne gennem
 `/foundation/versions`, logger ind med OAuth2 authorization code og PKCE og
@@ -401,16 +403,11 @@ De to produkter installeres hver for sig: dette repository samler ikke Dataspati
 (licenserne er forskellige, AGPL her og PolyForm Strict der), og Dataspatiums README
 beskriver, hvordan appen hentes og bruges.
 
-### Udgivelserne 1, 2 og 3
+### Én serie, i beta fra 0.1.0
 
-Der er én udgivelse pr. hovednummer, og den udgives igen, når den vokser; kun den
-seneste i hver serie rettes. Dataregium og Dataspatium med det samme nummer hører sammen:
-
-| Dataregium | Hvad den har | Image | Hører sammen med |
-|---|---|---|---|
-| 1.0.0 | En dokumentserver: Foundation API og Documents API, webadministrationen på syv sprog, projektadministrationen for den projektansvarlige og forespørgselsloggen. Den er 2.0.0-koden med kun Documents API slået til (`OPENCDE_APIS`) | `1.0.0` | Dataspatium 1.0.0 |
-| 2.0.0 | Også BCF API 3.0 og 2.1 på de samme data og IFC-DB-modulet, der laver en graf af hver uploadet IFC-fil | `2.0.0` | Dataspatium 2.0.0 |
-| 3.0.0 | Også den tabsfri graf fra biblioteket IFC-DB, kontrollen af hver upload, forespørgslerne, sammenligningerne og kollisionskontrollen, versioner med ændringsforslag, der prøves, godkendes og flettes, publiceringen af en version, en bygning fra én model ind i en anden, geometrien som glTF, den lokale motor og opskrifterne til skyen og nginx | `3.0.0`, `latest`, `3.0.0-gherkin` | Dataspatium 3.0.0 |
+Dataregium udgives i én serie fra grenen `main`, i beta fra 0.1.0; serierne 1, 2 og 3
+er trukket tilbage. Serien er beskrevet i
+[den engelske README](../en/README.md#one-series-in-beta-from-010).
 
 ## Lær mere
 
@@ -492,14 +489,15 @@ Revisionsloggen eksporteres som CSV, BCF- og dokumentdata gennem API'erne og hel
 databasen med `opencde backup`. Hvad Dataspatium gemmer i browseren, står i appens
 egen dokumentation.
 
-## Det næste i 3-serien
+## Det næste i serien
 
-3.0.0 er 3-seriens eneste udgivelse og udgives igen, når den vokser; det, den har i
-dag, står under [Hvad du kan](#hvad-du-kan). De officielle OpenCDE-API'er forbliver,
-som buildingSMART definerer dem; det, serien tilføjer, er udvidelser til dem, under
-egne navne og med en egen OpenAPI. Dette afsnit siger, hvad der er besluttet, for den,
-menneske eller AI-agent, der fører en del af det videre. Arbejdsgangene står i
-[CONTRIBUTING.md](../../CONTRIBUTING.md) og IFC-grafen i [ifc-db.md](ifc-db.md).
+0.1.0 er seriens første udgivelse, i beta, og den besluttede liste, som den står nu,
+findes i [den engelske README](../en/README.md#decided). De officielle OpenCDE-API'er
+forbliver, som buildingSMART definerer dem; det, serien tilføjer, er udvidelser til
+dem, under egne navne og med en egen OpenAPI. Dette afsnit siger, hvad der er
+besluttet, for den, menneske eller AI-agent, der fører en del af det videre.
+Arbejdsgangene står i [CONTRIBUTING.md](../../CONTRIBUTING.md) og IFC-grafen i
+[ifc-db.md](ifc-db.md).
 
 ### Besluttet
 

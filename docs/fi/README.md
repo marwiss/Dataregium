@@ -35,7 +35,7 @@ yhteyden.
 - [Lue lisää](#lue-lisää)
 - [Rajoitukset lyhyesti](#rajoitukset-lyhyesti)
 - [Henkilötiedot](#henkilötiedot)
-- [Seuraavaksi 3-sarjassa](#seuraavaksi-3-sarjassa)
+- [Seuraavaksi sarjassa](#seuraavaksi-sarjassa)
 - [Virheet ja ehdotukset](#virheet-ja-ehdotukset)
 - [Kehitys](#kehitys)
 - [Lisenssi](#lisenssi)
@@ -56,7 +56,7 @@ Docker ja Podman ovat ohjelmia, jotka käynnistävät kontteja. Pika-aloitus kä
 kaksi: palvelimen ja sen tietokannan.
 
 1. **Lataa.** Hae koodi gitillä tai ZIP-tiedostona GitHubin kohdasta *Code > Download
-   ZIP*. Haara `main` on 3-sarja; `release-2` ja `release-1` ovat 2- ja 1-sarja.
+   ZIP*. Haara `main` on sarja beetana, ja tagi `v0.1.0` on sen ensimmäinen julkaisu.
 
    ```sh
    git clone https://github.com/marwiss/Dataregium.git
@@ -183,9 +183,9 @@ tietokannan salasanaa, eikä mikään ole auki ennen kuin se on määritetty.
 ### Teknisesti osaavalle
 
 - **Image**: `ghcr.io/marwiss/opencdeserver` amd64:lle ja arm64:lle, Trivyllä
-  skannattu ja SBOM:n kanssa. Tagit ovat `3.0.0` ja `latest` 3-sarjalle,
-  `3.0.0-gherkin` ja `latest-gherkin` buildingSMARTin ifc-gherkin-rules-sääntöjen
-  kanssa, `2.0.0` ja `1.0.0`; `OPENCDE_IMAGE_TAG` valitsee compose-tiedostoissa.
+  skannattu ja SBOM:n kanssa. Tagit ovat `0.1.0`, `0.1` ja `latest`, ja
+  buildingSMARTin ifc-gherkin-rules-sääntöjen kanssa `0.1.0-gherkin`, `0.1-gherkin`
+  ja `latest-gherkin`; `OPENCDE_IMAGE_TAG` valitsee compose-tiedostoissa.
 - **Compose**: `docker/compose.yaml` sekä lisäkerrokset kehitykseen, tuotantoon
   Caddyn kanssa, olemassa olevan välityspalvelimen taakse, Memgraphille, ulkoiselle
   tietokannalle, Boltille TLS:n kanssa, tunnelille, paikalliselle moottorille ja
@@ -263,10 +263,11 @@ Tämän README:n käyttämät sanat arkikielellä; koko sanasto on sivulla
 
 ## Mitä voit tehdä
 
-Mikä toimii yhdessä versiossa, toimii myös seuraavassa. Jokainen versio kuuluu yhteen
-saman Dataspatium-version kanssa.
+Jokaisella tasolla on kaikki, mitä edellisellä tasolla on, ja Dataspatium ja Dataregium
+toimivat yhdessä samalla tasolla;
+[englanninkielinen README](../en/README.md#what-you-can-do) kuvaa tasot.
 
-### Versio 1 (Dataspatium 1:n kanssa)
+### Taso 1, Asiakirjat
 
 - **Asiakirjat yhdessä paikassa** (Documents API 1.0): asiakirjojen ja niiden
   versioiden valitseminen, lataaminen ja hakeminen palvelimen sivujen kautta
@@ -287,7 +288,7 @@ saman Dataspatium-version kanssa.
   jäseniä, vaihtaa heidän roolejaan ja nimeää projektin uudelleen olematta palvelimen
   ylläpitäjä.
 
-### Lisäksi versiossa 2 (Dataspatium 2:n kanssa)
+### Lisäksi tasolla 2, BIM ja GIS
 
 - **Mallia koskevat asiat** (BCF API 3.0 ja 2.1): kysymykset ja huomautukset
   kommentteineen, kuvineen ja näkymineen, jotka osoittavat rakennusosia, suodattimineen
@@ -296,7 +297,7 @@ saman Dataspatium-version kanssa.
   `OPENCDE_IFC_DB_ENABLED`): ladatusta IFC-mallista tulee graafi tietokantaan,
   yhdistettynä asioiden näkymien rakennusosiin (katso [IFC-DB](ifc-db.md)).
 
-### Lisäksi versiossa 3 (Dataspatium 3:n kanssa)
+### Lisäksi tasolla 3, Kokeellinen
 
 - **Häviötön malli**: graafi tulee IFC-DB-kirjastosta ja sisältää kaiken tiedostossa
   olevan, joten sen voi kirjoittaa takaisin sellaisena kuin se tuli.
@@ -362,9 +363,10 @@ ajettu. Jos kokeilet jotakin asiakasta, kerro, miten kävi, kohdassa
 
 Dataspatium on sovellus, jossa työskentelet, ja Dataregium on palvelin, jossa projektin
 yhteinen aineisto on. [Dataspatium](https://github.com/marwiss/Dataspatium) toimii
-kokonaan selaimessa, ja nämä kaksi on kehitetty toimimaan yhdessä. Sama julkaisunumero
-tarkoittaa, että ne toimivat yhdessä: Dataspatium 3.0.0 toimii Dataregium 3.0.0:n kanssa
-([pika-aloitus](quickstart.md)).
+kokonaan selaimessa, ja nämä kaksi on kehitetty toimimaan yhdessä. Sama taso, ei sama
+julkaisunumero, tarkoittaa, että ne toimivat yhdessä; katso
+[englanninkielinen README](../en/README.md#one-series-in-beta-from-010) ja
+[pika-aloitus](quickstart.md).
 
 Dataspatium lisää Dataregium-palvelimen lähteeksi: sovellus löytää rajapinnat polun
 `/foundation/versions` kautta, kirjautuu OAuth2 authorization code -kululla ja PKCE:llä
@@ -417,17 +419,11 @@ Tuotteet asennetaan erikseen: tämä repositorio ei sisällä Dataspatiumia (lis
 eroavat, täällä AGPL ja siellä PolyForm Strict), ja Dataspatiumin README kertoo, miten
 sovellus haetaan ja miten sitä käytetään.
 
-### Julkaisut 1, 2 ja 3
+### Yksi sarja, beetana versiosta 0.1.0 alkaen
 
-Jokaista pääversionumeroa kohti on yksi julkaisu, ja se julkaistaan uudelleen, kun se
-kasvaa; vain kunkin sarjan uusinta korjataan. Saman numeron Dataregium ja Dataspatium
-kuuluvat yhteen:
-
-| Dataregium | Mitä siinä on | Image | Kuuluu yhteen |
-|---|---|---|---|
-| 1.0.0 | Asiakirjapalvelin: Foundation API ja Documents API, verkkoylläpito seitsemällä kielellä, projektin ylläpito projektin vastuuhenkilölle ja pyyntöloki. Se on 2.0.0:n koodi, jossa vain Documents API on käytössä (`OPENCDE_APIS`) | `1.0.0` | Dataspatium 1.0.0 |
-| 2.0.0 | Lisäksi BCF API 3.0 ja 2.1 samoilla tiedoilla ja IFC-DB-moduuli, joka tekee graafin jokaisesta ladatusta IFC-tiedostosta | `2.0.0` | Dataspatium 2.0.0 |
-| 3.0.0 | Lisäksi häviötön graafi IFC-DB-kirjastosta, jokaisen latauksen tarkistus, kyselyt, vertailut ja törmäystarkastus, versiot muutosehdotuksineen, jotka kokeillaan, hyväksytään ja yhdistetään, version julkaisu, yhden mallin rakennus toiseen malliin, geometria glTF:nä, paikallinen moottori ja ohjeet pilveen ja nginxille | `3.0.0`, `latest`, `3.0.0-gherkin` | Dataspatium 3.0.0 |
+Dataregium julkaistaan yhtenä sarjana `main`-haarasta, beetana versiosta 0.1.0 alkaen;
+sarjat 1, 2 ja 3 on vedetty pois. Sarja kuvataan
+[englanninkielisessä README-tiedostossa](../en/README.md#one-series-in-beta-from-010).
 
 ## Lue lisää
 
@@ -511,10 +507,11 @@ kunnes ne poistetaan. Tarkastusloki viedään CSV-muodossa, BCF- ja asiakirjatie
 rajapintojen kautta ja koko tietokanta komennolla `opencde backup`. Se, mitä
 Dataspatium tallentaa selaimeen, kerrotaan sovelluksen omassa dokumentaatiossa.
 
-## Seuraavaksi 3-sarjassa
+## Seuraavaksi sarjassa
 
-3.0.0 on 3-sarjan ainoa julkaisu, ja se julkaistaan uudelleen, kun se kasvaa; mitä
-siinä on nyt, on kohdassa [Mitä voit tehdä](#mitä-voit-tehdä). Viralliset
+0.1.0 on sarjan ensimmäinen julkaisu, beetaversio, ja luettelo siitä, mitä on
+päätetty, on nykyisessä muodossaan
+[englanninkielisessä README-tiedostossa](../en/README.md#decided). Viralliset
 OpenCDE-rajapinnat pysyvät sellaisina kuin buildingSMART ne määrittelee; mitä sarja
 lisää, ovat niiden laajennuksia omilla nimillään ja omalla OpenAPI:llaan. Tämä osio
 kertoo, mitä on päätetty, sille, ihmiselle tai tekoälyagentille, joka vie osan siitä

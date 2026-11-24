@@ -34,7 +34,7 @@ forskriftunum getur tengst.
 - [Lærðu meira](#lærðu-meira)
 - [Takmarkanir í stuttu máli](#takmarkanir-í-stuttu-máli)
 - [Persónuupplýsingar](#persónuupplýsingar)
-- [Næst í 3-röðinni](#næst-í-3-röðinni)
+- [Næst í röðinni](#næst-í-röðinni)
 - [Villur og tillögur](#villur-og-tillögur)
 - [Þróun](#þróun)
 - [Leyfi](#leyfi)
@@ -54,7 +54,7 @@ Gámur er fullpakkað forrit sem keyrir aðskilið á tölvunni, og Docker og Po
 forrit sem ræsa gáma. Fljótlega byrjunin ræsir tvo: þjóninn og gagnagrunn hans.
 
 1. **Sækja.** Sæktu kóðann með git, eða sem ZIP-skrá undir *Code > Download ZIP* á
-   GitHub. Greinin `main` er 3-röðin; `release-2` og `release-1` eru 2- og 1-röðin.
+   GitHub. Greinin `main` er röðin, á betastigi, og merkið `v0.1.0` er fyrsta útgáfa hennar.
 
    ```sh
    git clone https://github.com/marwiss/Dataregium.git
@@ -180,8 +180,8 @@ en það hefur verið stillt.
 ### Fyrir þau sem kunna tæknina
 
 - **Mynd (image)**: `ghcr.io/marwiss/opencdeserver` fyrir amd64 og arm64, skönnuð með
-  Trivy og með SBOM. Merkin eru `3.0.0` og `latest` fyrir 3-röðina, `3.0.0-gherkin` og
-  `latest-gherkin` með ifc-gherkin-rules frá buildingSMART, `2.0.0` og `1.0.0`;
+  Trivy og með SBOM. Merkin eru `0.1.0`, `0.1` og `latest`, og með ifc-gherkin-rules
+  frá buildingSMART `0.1.0-gherkin`, `0.1-gherkin` og `latest-gherkin`;
   `OPENCDE_IMAGE_TAG` velur í compose-skránum.
 - **Compose**: `docker/compose.yaml` auk laga fyrir þróun, rekstur með Caddy, á bak við
   fyrirliggjandi proxy, Memgraph, ytri gagnagrunn, Bolt með TLS, göng, staðbundnu
@@ -250,10 +250,11 @@ Orðin sem þessi README notar, á daglegu máli; allur orðalistinn er í
 
 ## Hvað þú getur gert
 
-Það sem virkar í einni útgáfu virkar líka í þeirri næstu. Hver útgáfa á við sömu
-útgáfu af Dataspatium.
+Hvert þrep hefur allt sem þrepið á undan hefur, og Dataspatium og Dataregium á sama
+þrepi virka saman; [enska README-skjalið](../en/README.md#what-you-can-do) lýsir
+þrepunum.
 
-### Útgáfa 1 (með Dataspatium 1)
+### Þrep 1, Skjöl
 
 - **Skjöl á einum stað** (Documents API 1.0): að velja, hlaða upp og sækja skjöl og
   útgáfur þeirra í gegnum síður þjónsins, úr forriti eins og Dataspatium.
@@ -271,7 +272,7 @@ Orðin sem þessi README notar, á daglegu máli; allur orðalistinn er í
   meðlimi, breytir hlutverkum þeirra og endurnefnir verkefnið, án þess að vera
   stjórnandi þjónsins.
 
-### Einnig í útgáfu 2 (með Dataspatium 2)
+### Einnig á þrepi 2, BIM og GIS
 
 - **Mál um líkanið** (BCF API 3.0 og 2.1): spurningar og athugasemdir með ummælum,
   myndum og sjónarhornum sem benda á byggingarhluta, með síum og atburðaannál,
@@ -280,7 +281,7 @@ Orðin sem þessi README notar, á daglegu máli; allur orðalistinn er í
   upphlaðið IFC-líkan verður að neti í gagnagrunninum, tengt byggingarhlutunum í
   sjónarhornum málanna (sjá [IFC-DB](ifc-db.md)).
 
-### Einnig í útgáfu 3 (með Dataspatium 3)
+### Einnig á þrepi 3, Tilraunastig
 
 - **Taplaust líkan**: netið kemur úr safninu IFC-DB og geymir allt í skránni, svo
   hægt sé að skrifa hana til baka eins og hún kom.
@@ -342,9 +343,10 @@ segðu frá hvernig gekk undir [Villur og tillögur](#villur-og-tillögur). Þeg
 
 Dataspatium er forritið sem þú vinnur í, og Dataregium er þjónninn þar sem
 sameiginleg gögn verkefnisins eru geymd. [Dataspatium](https://github.com/marwiss/Dataspatium)
-keyrir alfarið í vafranum, og þau tvö eru þróuð til að vinna saman. Sama útgáfunúmer
-þýðir að þau virka saman: Dataspatium 3.0.0 virkar með Dataregium 3.0.0
-([fljótleg byrjun](quickstart.md)).
+keyrir alfarið í vafranum, og þau tvö eru þróuð til að vinna saman. Sama þrep, ekki
+sama útgáfunúmer, þýðir að þau virka saman; sjá
+[enska README-skjalið](../en/README.md#one-series-in-beta-from-010) og
+[fljótlega byrjun](quickstart.md).
 
 Dataspatium bætir Dataregium-þjóni við sem gagnalind: forritið finnur forritaskilin í
 gegnum `/foundation/versions`, skráir sig inn með OAuth2 authorization code og PKCE og
@@ -395,17 +397,11 @@ Vörurnar tvær eru settar upp hvor fyrir sig: þessi geymsla inniheldur ekki Da
 (leyfin eru ólík, AGPL hér og PolyForm Strict þar), og README Dataspatium lýsir því
 hvernig forritið er sótt og notað.
 
-### Útgáfurnar 1, 2 og 3
+### Ein röð, á betastigi frá 0.1.0
 
-Það er ein útgáfa fyrir hvert aðalnúmer, og hún er gefin út aftur þegar hún stækkar;
-aðeins sú nýjasta í hverri röð er lagfærð. Dataregium og Dataspatium með sama númeri
-eiga saman:
-
-| Dataregium | Hvað hún hefur | Mynd | Á við |
-|---|---|---|---|
-| 1.0.0 | Skjalaþjónn: Foundation API og Documents API, vefstjórnunin á sjö tungumálum, verkefnastjórnunin fyrir verkefnastjórann og beiðnaannállinn. Hún er kóði 2.0.0 með aðeins Documents API virkt (`OPENCDE_APIS`) | `1.0.0` | Dataspatium 1.0.0 |
-| 2.0.0 | Einnig BCF API 3.0 og 2.1 á sömu gögnum og IFC-DB-eininguna sem gerir net úr hverri upphlaðinni IFC-skrá | `2.0.0` | Dataspatium 2.0.0 |
-| 3.0.0 | Einnig taplausa netið úr safninu IFC-DB, prófun hverrar upphleðslu, fyrirspurnirnar, samanburðinn og árekstrarprófunina, útgáfur með breytingatillögum sem eru prófaðar, samþykktar og sameinaðar, birtingu útgáfu, byggingu úr einu líkani inn í annað, rúmfræðina sem glTF, staðbundnu vélina og uppskriftirnar fyrir skýið og nginx | `3.0.0`, `latest`, `3.0.0-gherkin` | Dataspatium 3.0.0 |
+Dataregium kemur út í einni röð frá greininni `main`, á betastigi frá 0.1.0; raðirnar
+1, 2 og 3 hafa verið dregnar til baka. Röðinni er lýst í
+[enska README-skjalinu](../en/README.md#one-series-in-beta-from-010).
 
 ## Lærðu meira
 
@@ -484,10 +480,10 @@ eytt. Endurskoðunarannállinn er fluttur út sem CSV, BCF- og skjalagögn í ge
 forritaskilin og allur gagnagrunnurinn með `opencde backup`. Hvað Dataspatium geymir í
 vafranum kemur fram í eigin skjölun forritsins.
 
-## Næst í 3-röðinni
+## Næst í röðinni
 
-3.0.0 er eina útgáfa 3-raðarinnar og er gefin út aftur þegar hún stækkar; það sem hún
-hefur í dag er undir [Hvað þú getur gert](#hvað-þú-getur-gert). Opinberu
+0.1.0 er fyrsta útgáfa raðarinnar, á betastigi, og núgildandi listi yfir það sem hefur
+verið ákveðið er í [enska README-skjalinu](../en/README.md#decided). Opinberu
 OpenCDE-forritaskilin haldast eins og buildingSMART skilgreinir þau; það sem röðin
 bætir við eru viðbætur við þau, undir eigin nöfnum og með eigin OpenAPI. Þessi hluti
 segir hvað hefur verið ákveðið, fyrir þann, mann eða gervigreindarfulltrúa, sem ber
