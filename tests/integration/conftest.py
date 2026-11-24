@@ -84,6 +84,13 @@ def _targets() -> list[str]:
     return targets
 
 
+def _host(container: DockerContainer) -> str:
+    """Where the test reaches the container, over IPv4: through Podman on Windows ``localhost`` is tried as ::1
+    first, which can wait long before the client goes on to 127.0.0.1."""
+    host = container.get_container_host_ip()
+    return "127.0.0.1" if host == "localhost" else host
+
+
 @pytest.fixture(scope="session", params=_targets())
 def graph_target(request: pytest.FixtureRequest) -> Iterator[GraphTarget]:
     if request.param == "neo4j":
@@ -97,9 +104,7 @@ def graph_target(request: pytest.FixtureRequest) -> Iterator[GraphTarget]:
         )
         with container:
             port = container.get_exposed_port(7687)
-            yield GraphTarget(
-                GraphDialect.NEO4J, f"bolt://{container.get_container_host_ip()}:{port}", "neo4j", NEO4J_PASSWORD
-            )
+            yield GraphTarget(GraphDialect.NEO4J, f"bolt://{_host(container)}:{port}", "neo4j", NEO4J_PASSWORD)
     else:
         container = (
             DockerContainer(MEMGRAPH_IMAGE)
@@ -109,7 +114,7 @@ def graph_target(request: pytest.FixtureRequest) -> Iterator[GraphTarget]:
         )
         with container:
             port = container.get_exposed_port(7687)
-            yield GraphTarget(GraphDialect.MEMGRAPH, f"bolt://{container.get_container_host_ip()}:{port}", "", "")
+            yield GraphTarget(GraphDialect.MEMGRAPH, f"bolt://{_host(container)}:{port}", "", "")
 
 
 #: Where the graph would be for a test whose server keeps nothing in one: a port nothing listens on, so that any
@@ -213,7 +218,7 @@ class PostgresTarget:
 @pytest.fixture(scope="session")
 def postgres_target() -> Iterator[PostgresTarget]:
     with PostgresContainer(POSTGRES_IMAGE, driver=None) as container:
-        host, port = container.get_container_host_ip(), container.get_exposed_port(5432)
+        host, port = _host(container), container.get_exposed_port(5432)
         yield PostgresTarget(f"postgresql://{container.username}@{host}:{port}/{container.dbname}", container.password)
 
 
