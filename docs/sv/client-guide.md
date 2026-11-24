@@ -37,7 +37,7 @@ anpassar sig i stället för att prova sig fram:
 
 ```json
 {
-  "server": {"name": "Dataregium OpenCDE server", "version": "3.0.0", "public_url": "https://cde.example.org"},
+  "server": {"name": "Dataregium OpenCDE server", "version": "0.1.0", "public_url": "https://cde.example.org"},
   "tier": "experimental",
   "apis": {"foundation": "1.0", "bcf": "3.0", "documents": "1.0"},
   "scopes": ["profile", "bcf", "documents", "project", "admin"],

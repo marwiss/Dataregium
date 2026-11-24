@@ -157,7 +157,7 @@ Python-paketen med sina hashar. Två små filer från IFC-DB ersätter
 regeluppsättningens Django-delar, som bara skriver resultat till
 valideringstjänstens databas.
 Den publicerade avbilden utelämnar dem, eftersom de lägger till omkring 425 MB.
-Avbilden med taggen `-gherkin`, som `latest-gherkin` eller `3.0.0-gherkin`, har
+Avbilden med taggen `-gherkin`, som `latest-gherkin` eller `0.1.0-gherkin`, har
 miljön i `/opt/gherkin` och låter `OPENCDE_IFC_DB_GHERKIN_ENV` peka på den,
 liksom en avbild byggd med `--build-arg OPENCDE_GHERKIN=1`. Med docker compose
 väljer `OPENCDE_IMAGE_TAG` eller `OPENCDE_GHERKIN=1` i `.env`.

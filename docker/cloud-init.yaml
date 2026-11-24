@@ -20,7 +20,7 @@ write_files:
     content: |
       DATAREGIUM_DOMAIN=
       DATAREGIUM_ACME_EMAIL=
-      DATAREGIUM_VERSION=3.0.0
+      DATAREGIUM_VERSION=0.1.0
   - path: /usr/local/sbin/dataregium-setup
     permissions: "0700"
     content: |
@@ -31,7 +31,7 @@ write_files:
       umask 077
       # shellcheck source=/dev/null
       . /etc/dataregium/settings
-      version="${DATAREGIUM_VERSION:-3.0.0}"
+      version="${DATAREGIUM_VERSION:-0.1.0}"
 
       public_ip() {
         # The machine's public IPv4 address from the cloud's own metadata service: AWS (IMDSv2), Azure, Google Cloud.

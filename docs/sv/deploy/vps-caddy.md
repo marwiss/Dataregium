@@ -67,7 +67,7 @@ PostgreSQL inte svarar.
 | Uppgift | Kommando |
 |---|---|
 | Uppdatera till senaste image | `docker compose pull && docker compose up -d` |
-| Lås en version | `OPENCDE_IMAGE_TAG=3.0.0` i `.env` (taggarna följer GitHub-releaserna) |
+| Lås en version | `OPENCDE_IMAGE_TAG=0.1.0` i `.env` (taggarna följer GitHub-releaserna) |
 | Erbjud bara några API:er | `OPENCDE_APIS=["bcf-2.1"]` i `.env` för en server för bara BCF API 2.1, `["documents"]` för en dokumentserver; alla tre som standard, och bara Documents API i nivå 1 |
 | Loggar | `docker compose logs -f api` (JSON-rader) |
 | Hälsa | `https://cde.example.org/readyz`; sidan Inställningar i administrationen |

@@ -26,9 +26,9 @@ Ett DNS-namn för servern, här `cde.example.org`, pekar på maskinen.
 ## 2. Starta Dataregium
 
 ```sh
-sudo git clone --depth 1 --branch v3.0.0 https://github.com/marwiss/Dataregium.git /opt/dataregium
+sudo git clone --depth 1 --branch v0.1.0 https://github.com/marwiss/Dataregium.git /opt/dataregium
 cd /opt/dataregium
-sudo docker run --rm --user 0:0 -v /opt/dataregium:/work -w /work ghcr.io/marwiss/opencdeserver:3.0.0 \
+sudo docker run --rm --user 0:0 -v /opt/dataregium:/work -w /work ghcr.io/marwiss/opencdeserver:0.1.0 \
   init --public-url https://cde.example.org --path /work/.env
 sudo sed -i 's#^COMPOSE_FILE=.*#COMPOSE_FILE=docker/compose.yaml:docker/compose.prod.yaml:docker/compose.proxied.yaml#' .env
 echo "COMPOSE_PROJECT_NAME=dataregium" | sudo tee -a .env

@@ -155,7 +155,7 @@ IfcOpenShell's build of 0.8.6 for the platform, and the Python packages with
 their hashes. Two small files of IFC-DB's own replace the rule set's Django
 parts, which only write results into the validation service's database.
 The published image leaves them out, since they add about 425 MB. The image
-tagged `-gherkin`, such as `latest-gherkin` or `3.0.0-gherkin`, has the
+tagged `-gherkin`, such as `latest-gherkin` or `0.1.0-gherkin`, has the
 environment in `/opt/gherkin` and points `OPENCDE_IFC_DB_GHERKIN_ENV` at it,
 as does an image built with `--build-arg OPENCDE_GHERKIN=1`. With docker
 compose, `OPENCDE_IMAGE_TAG` or `OPENCDE_GHERKIN=1` in `.env` makes the choice.

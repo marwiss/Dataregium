@@ -39,14 +39,14 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           # latest only by the rule below: a semver tag makes the action add latest of itself, so that a 2.x
-          # released after 3.0.0 took latest away from it on 2026-11-10.
+          # released after 3.0.0 took latest away from it on 2026-11-10. latest follows the one series, 0.x (F57 b).
           flavor: |
             latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref_name, 'v3.') }}
-      # The same image with buildingSMART's ifc-gherkin-rules (ADR 0012), for those who choose them: 3.0.0-gherkin.
+            type=raw,value=latest,enable=${{ startsWith(github.ref_name, 'v0.') }}
+      # The same image with buildingSMART's ifc-gherkin-rules (ADR 0012), for those who choose them: 0.1.0-gherkin.
       - id: meta-gherkin
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
@@ -57,7 +57,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref_name, 'v3.') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref_name, 'v0.') }}
 
       # Build for the host platform first so the image can be scanned before anything is published.
       - name: Build for scanning
@@ -154,9 +154,13 @@ jobs:
           # zlib1g's CVE-2026-76844 and CVE-2026-85091 in the first build of 2.0.0. The builder stage stays cached.
           no-cache-filters: runtime
 
-      # The runner's own gh CLI creates the release (zizmor: no third-party action needed for this).
+      # The runner's own gh CLI creates the release (zizmor: no third-party action needed for this), with the notes
+      # of the release's section of CHANGELOG.md (F86 a); a tag without one is refused rather than released bare.
       - name: GitHub release with SBOM and scan report
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes sbom.spdx.json trivy.sarif
+        run: |
+          awk -v version="${TAG#v}" '$0 ~ "^## " version " " { found = 1; next } found && /^## / { exit } found' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no section for $TAG"; exit 1; }
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --notes-file notes.md sbom.spdx.json trivy.sarif

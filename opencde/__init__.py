@@ -6,4 +6,4 @@ Documents API 1.0) with its own data in PostgreSQL or a graph database, and
 IFC-DB's models in the graph. See ``docs/`` for the architecture.
 """
 
-__version__ = "3.0.0"  # the same release numbers as Dataspatium: the same number means they work together
+__version__ = "0.1.0"  # one series with Dataspatium, in beta: the same tier works together, not the same number

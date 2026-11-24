@@ -15,12 +15,12 @@ the server decides who may sign in and what each person may do in each project.
 
 Technically, Dataregium is a server for buildingSMART's open **OpenCDE APIs**
 (Foundation API 1.0, BCF API 3.0 and 2.1, and Documents API 1.0), built on the
-database PostgreSQL. In the 3 series every uploaded IFC model becomes a lossless
-graph in Neo4j or Memgraph through the [IFC-DB](https://github.com/marwiss/IFC-DB)
-library, with versions, checks and proposed changes; the graph comes with the
-third of the server's [three tiers](#what-you-can-do). The server was rewritten
-from scratch out of a research prototype from 2023, with security as the first
-requirement, and any client that follows the specifications can connect.
+database PostgreSQL. In the third of the server's [three tiers](#what-you-can-do)
+every uploaded IFC model becomes a lossless graph in Neo4j or Memgraph through the
+[IFC-DB](https://github.com/marwiss/IFC-DB) library, with versions, checks and
+proposed changes. The server was rewritten from scratch out of a research
+prototype from 2023, with security as the first requirement, and any client that
+follows the specifications can connect.
 
 ![The administration overview of a Dataregium server: the numbers of users, projects, clients, topics and documents, the state of the database and the latest audit events](../images/admin-overview.png)
 
@@ -35,7 +35,7 @@ requirement, and any client that follows the specifications can connect.
 - [Learn more](#learn-more)
 - [Limitations in brief](#limitations-in-brief)
 - [Personal data](#personal-data)
-- [Next in the 3 series](#next-in-the-3-series)
+- [Next in the series](#next-in-the-series)
 - [Bugs and suggestions](#bugs-and-suggestions)
 - [Development](#development)
 - [Licence](#licence)
@@ -57,8 +57,8 @@ server and its database, PostgreSQL. With models, in tier 3, it also starts the
 graph database Neo4j.
 
 1. **Download.** Get the code with git, or as a ZIP file under *Code > Download
-   ZIP* on GitHub. The `main` branch is the 3 series; `release-2` and `release-1`
-   are the 2 and 1 series.
+   ZIP* on GitHub. The `main` branch is the series, in beta, and the tag `v0.1.0`
+   is its first release.
 
    ```sh
    git clone https://github.com/marwiss/Dataregium.git
@@ -199,9 +199,9 @@ nothing is open until it has been configured.
 ### For the technically skilled
 
 - **Image**: `ghcr.io/marwiss/opencdeserver` for amd64 and arm64, scanned with
-  Trivy and with an SBOM. The tags are `3.0.0` and `latest` for the 3 series,
-  `3.0.0-gherkin` and `latest-gherkin` with buildingSMART's ifc-gherkin-rules,
-  `2.0.0` and `1.0.0`; `OPENCDE_IMAGE_TAG` chooses in the compose files.
+  Trivy and with an SBOM. The tags are `0.1.0`, `0.1` and `latest`, and with
+  buildingSMART's ifc-gherkin-rules `0.1.0-gherkin`, `0.1-gherkin` and
+  `latest-gherkin`; `OPENCDE_IMAGE_TAG` chooses in the compose files.
   `docker/Dockerfile` installs the extras `postgres` and `ifc-db`, and
   `--build-arg OPENCDE_EXTRAS="--extra postgres"` builds a slimmer image without
   IfcOpenShell.
@@ -218,16 +218,16 @@ nothing is open until it has been configured.
   `OPENCDE_GRAPH_URI`.
 - **The main settings**: `OPENCDE_TIER` chooses the tier (`documents`, `bim-gis`, the
   default, or `experimental`); `OPENCDE_APIS` chooses the APIs within it (all three
-  by default, `["documents"]` in tier 1 and in 1.0.0); `OPENCDE_STORE_URL` names the
+  by default, `["documents"]` in tier 1); `OPENCDE_STORE_URL` names the
   PostgreSQL that holds the server's own data, which tiers 1 and 2 require;
   `OPENCDE_BIM_ENABLED=true` turns on the BIM functions on the files, in tier 2, and
-  `OPENCDE_IFC_DB_ENABLED=true` the graph, in tier 3, with everything in the 2 and 3
-  series that concerns models; `OPENCDE_ENVIRONMENT` is `development`,
-  `production` or `local` (the local engine, `opencde init --local`).
+  `OPENCDE_IFC_DB_ENABLED=true` the graph, in tier 3, with what only the graph
+  answers; `OPENCDE_ENVIRONMENT` is `development`, `production` or `local` (the
+  local engine, `opencde init --local`).
 - **Endpoints**: `/.well-known/dataregium` (the version, the tier and the extensions
   that are on), `/foundation/versions`, `/openapi.json` and `/docs`, `/healthz`
   and `/readyz`, `/admin/api` (administration) and `/manage/1.0` (project
-  administration). The 3 series' extensions are under `/documents/1.0/` (the
+  administration). The extensions for the models are under `/documents/1.0/` (the
   versions' `ifc-queries`, `ifc-diff`, `ifc-changes` and `ifc-geometry`, the
   projects' `ifc-precheck` and `ifc-clash`) and under a BCF 3.0 topic (`snippet`
   and `ifc-proposal/approve`).
@@ -289,8 +289,7 @@ The words this README uses, in everyday language; the whole glossary is in
 
 ## What you can do
 
-What works in one version also works in the next. Each version goes with the same
-version of Dataspatium.
+Dataspatium and Dataregium of the same tier work together.
 
 A server offers one of three tiers, which `OPENCDE_TIER` chooses, and each has
 everything the one before it has: **Documents** (`documents`) the Foundation API
@@ -310,7 +309,7 @@ IFC-DB or with its own data in a graph sets `OPENCDE_TIER=experimental`. The
 capabilities document gives the tier as `tier`, and `opencde doctor` and the
 administration's overview show it.
 
-### Version 1 (with Dataspatium 1)
+### Tier 1, Documents
 
 - **Documents in one place** (Documents API 1.0): choosing, uploading and fetching
   documents and their versions through the server's pages, from an app such as Dataspatium.
@@ -328,42 +327,43 @@ administration's overview show it.
 - **Project managers administer their project**: a `manager` adds and removes
   members, changes their roles and renames the project, without being a server
   administrator.
+- **A region of your own**: ready recipes for a machine of your own at AWS, Azure or
+  Google Cloud or beside an existing nginx.
 
-### Also in version 2 (with Dataspatium 2)
+### Also in tier 2, BIM + GIS
 
 - **Topics about the model** (BCF API 3.0 and 2.1): questions and remarks with
   comments, pictures and views that point out building elements, with filters and an
   event log, validated against buildingSMART's schemas.
-- **The model as a graph** (the IFC-DB module of tier 3, turned on with
-  `OPENCDE_IFC_DB_ENABLED`): an uploaded IFC model becomes a graph in Neo4j or
-  Memgraph, linked to the building elements in the topics' views (see
-  [IFC-DB](ifc-db.md)).
-
-### Also in version 3 (with Dataspatium 3)
-
-- **A lossless model**: the graph comes from the IFC-DB library and holds
-  everything in the file, so that it can be written back as it came.
 - **A check of every upload** against the IFC schema, buildingSMART's rules and the
   project's IDS requirements; a project can refuse files with errors, and a file can
   be checked beforehand without being stored.
-- **Queries and comparisons**: named queries for members, what changed since a
-  version, a comparison of two versions (also on a page on the server) and a clash
-  check whose clashes can become topics.
+- **Comparisons**: what changed since a version, a comparison of two versions (also
+  on a page on the server) and a clash check whose clashes can become topics.
 - **Changes as proposals**: every new version names its base, and a change set in a
   BCF topic is tested and approved by a `manager` into the next version, merged per
   instance with what came in between; a real clash shows the value of the base, of
   the latest version and of the proposal.
 - **Publishing**: a `manager` publishes a version whose check found no errors, and the
   server keeps it as one whole `.ifczip` that everyone in the project can download.
+
+### Also in tier 3, Experimental
+
+- **The model as a graph** (the IFC-DB module, turned on with
+  `OPENCDE_IFC_DB_ENABLED`): an uploaded IFC model becomes a graph in Neo4j or
+  Memgraph, linked to the building elements in the topics' views (see
+  [IFC-DB](ifc-db.md)).
+- **A lossless model**: the graph comes from the IFC-DB library and holds
+  everything in the file, so that it can be written back as it came.
+- **Queries**: named queries for members, which the graph answers.
 - **A building into another model**: the building of one model comes into another
   project's model as its next version, with a report first of what comes along and
   a choice for each object both have in different forms; a `manager` makes it.
 - **The geometry as glTF**: every version as binary glTF with shared meshes and one
   node per building element, and a box per building element in the graph for
   questions about what is near.
-- **A local engine and a region of your own**: Dataregium on your own computer behind
-  Dataspatium, with a working copy in memory for large models, and ready recipes for
-  a machine of your own at AWS, Azure or Google Cloud or beside an existing nginx.
+- **A local engine**: Dataregium on your own computer behind Dataspatium, with a
+  working copy in memory for large models.
 
 <img src="../images/upload.png" alt="The upload page, where the user gives the file a title and a version" width="340">
 
@@ -404,23 +404,23 @@ who build a client.
 Dataspatium is the app you work in, and Dataregium is the server where the
 project's shared material is kept. [Dataspatium](https://github.com/marwiss/Dataspatium)
 runs wholly in the browser, and the two are developed to work together. The same
-release number means that they work together: Dataspatium 3.0.0 works with
-Dataregium 3.0.0 ([quick start](quickstart.md)).
+tier, not the same release number, means that they work together: Dataspatium
+0.1.0 works with Dataregium 0.1.0 at the same tier ([quick start](quickstart.md)).
 
 Dataspatium adds a Dataregium server as a source: the app discovers the APIs through
 `/foundation/versions`, signs in with OAuth2 authorization code and PKCE and
 registers itself as a public client when dynamic registration is on, lists the
 project's models and documents, reads and writes BCF topics with comments and
 viewpoints taken from its 3D view and uploads datasets, files and workspace packages
-through the Documents API. In the 3 series the app publishes versions with a base
+through the Documents API. In tiers 2 and 3 the app publishes versions with a base
 version and a check beforehand, sends change sets that the server tests, lets the
-project manager approve them and settle clashes, compares versions in 3D and asks the
-graph named queries; an administrator can also query the graph with Cypher through
-the server's read-only endpoint while the server's own data is in the graph. The
-app sends `X-Request-ID` on every call, so that the request log here and the log in
-the app show the same conversation, reads the server's capabilities document to see
-which extensions are on and acts on the error codes the server puts in its error
-bodies.
+project manager approve them and settle clashes and compares versions in 3D, and in
+tier 3 it asks the graph named queries; an administrator can also query the graph
+with Cypher through the server's read-only endpoint while the server's own data is
+in the graph. The app sends `X-Request-ID` on every call, so that the request log
+here and the log in the app show the same conversation, reads the server's
+capabilities document to see which extensions are on and acts on the error codes
+the server puts in its error bodies.
 
 This is how they hang together:
 
@@ -457,25 +457,29 @@ The two products are installed separately: this repository does not bundle
 Dataspatium (the licences differ, AGPL here and PolyForm Strict there), and
 Dataspatium's README describes how to get and use the app.
 
-### The releases 1, 2 and 3
+### One series, in beta from 0.1.0
 
-There is one release per major number, and it is released again when it grows; only
-the latest in each series is corrected. Dataregium and Dataspatium with the same
-number go together:
+Dataregium is released in one series from the `main` branch, in beta from 0.1.0, and
+on the same day as Dataspatium. The three tiers are the same release and the same
+image, and `OPENCDE_TIER` chooses the tier. This is what 0.1.0 has in each tier:
 
-| Dataregium | What it has | Image | Goes with |
-|---|---|---|---|
-| 1.0.0 | A document server: the Foundation API and the Documents API, the web administration in seven languages, the project administration for the project manager and the request log. It is the 2.0.0 code with only the Documents API on (`OPENCDE_APIS`) | `1.0.0` | Dataspatium 1.0.0 |
-| 2.0.0 | Also BCF API 3.0 and 2.1 on the same data and the IFC-DB module that makes a graph of every uploaded IFC file | `2.0.0` | Dataspatium 2.0.0 |
-| 3.0.0 | Also the lossless graph from the IFC-DB library, the check of every upload, the queries, the comparisons and the clash check, versions with change proposals that are tested, approved and merged, the publication of a version, a building of one model brought into another, the geometry as glTF, the local engine and the recipes for the cloud and nginx | `3.0.0`, `latest`, `3.0.0-gherkin` | Dataspatium 3.0.0 |
+| Tier | What 0.1.0 has |
+|---|---|
+| 1, Documents (`documents`) | A document server: the Foundation API and the Documents API, the web administration, the project administration for the project manager, the request log and the recipes for the cloud and nginx |
+| 2, BIM + GIS (`bim-gis`), the default | Also BCF API 3.0 and 2.1 on the same data, the MCP endpoint and, with `OPENCDE_BIM_ENABLED`, the check of every upload, the comparisons, the clash check and the rooms, versions with change proposals that are tested, approved and merged, and the publication of a version |
+| 3, Experimental (`experimental`) | Also the IFC-DB module, which makes a lossless graph in Neo4j or Memgraph of every uploaded IFC file, the named queries, a building of one model brought into another, the geometry as glTF and the local engine with a working copy in memory |
+
+The series 1, 2 and 3 are withdrawn: the releases 1.0.0, 2.0.0 and 3.0.0, their
+tags and images and the branches `release-1`, `release-2` and `release-3` are
+deleted, and the guides point to 0.1.0.
 
 ## Learn more
 
 - [quickstart.md](quickstart.md): Dataregium and Dataspatium together in twenty
   minutes, from an empty computer to a topic made in the 3D view.
 - [client-guide.md](client-guide.md) and [docs/examples/](../examples/): how to build
-  a client, the capabilities document, the error codes, the 3 series' extensions and
-  runnable examples with the Python library in [client/](../../client/).
+  a client, the capabilities document, the error codes, the extensions for the
+  models and runnable examples with the Python library in [client/](../../client/).
 - [architecture.md](architecture.md): how the parts hang together, what happens to a call and where everything is in the code.
 - [glossary.md](glossary.md): the words the documentation uses.
 - [flows/](flows/): sequence diagrams of the OAuth2, Documents API and BCF viewpoint flows.
@@ -510,8 +514,9 @@ The documentation is in this README's seven languages, each language under
 
 ## Limitations in brief
 
-- Everything that concerns models, in the 2 and 3 series, needs the IFC-DB module,
-  which is off until `OPENCDE_IFC_DB_ENABLED=true` and belongs to tier 3
+- The BIM functions on the files run in tier 2 with `OPENCDE_BIM_ENABLED=true`, and
+  what only the graph answers needs the IFC-DB module, which is off until
+  `OPENCDE_IFC_DB_ENABLED=true` and belongs to tier 3
   (`OPENCDE_TIER=experimental`). buildingSMART's rules only run with the
   `-gherkin` image; without it the schema and IDS are checked.
 - The server implements BCF API 3.0 and 2.1, not 1.0, whose resources look different.
@@ -549,9 +554,9 @@ and versions the person wrote until they are deleted. The audit log is exported 
 CSV, BCF and document data through the APIs and the whole database with
 `opencde backup`. What Dataspatium keeps in the browser is in the app's own documentation.
 
-## Next in the 3 series
+## Next in the series
 
-3.0.0 is the 3 series' only release and is released again when it grows; what it has
+0.1.0 is the series' first release, in beta, and what it has
 today is under [What you can do](#what-you-can-do). The official OpenCDE APIs stay as
 buildingSMART defines them; what the series adds are extensions to them, under names
 of their own and with an OpenAPI of their own. This section says what is decided, for
@@ -560,15 +565,15 @@ whoever, human or AI agent, carries a part of it further. The ways of working ar
 
 ### Decided
 
-- **Editing models in Native IFC.** Create is the upload, Read the named queries,
+- **Editing models in Native IFC** in tier 3. Create is the upload, Read the named queries,
   Update and Delete a change set (setting, adding, removing and copying instances)
   that is tested and approved, and Export writing STEP back. The data keeps to IFC,
   ifc-gherkin-rules and the project's IDS, on import and after every change.
-- **Version history in the database, not in git**, in the same spirit as Bruno
-  Postle's [ifcmerge](https://github.com/brunopostle/ifcmerge). Every approved version
-  is a node with its parent, author, approver and changes; the graph holds the latest
-  version, and any version is written out on request. A change goes in when the file
-  written from it has no remark that the version before it lacked.
+- **Versions in git in tier 2.** Every version of a text file, such as an IFC file in
+  STEP, becomes a commit in a git repository per project on the server, and Bruno
+  Postle's [ifcmerge](https://github.com/brunopostle/ifcmerge) does all merging: an
+  upload against an older base is merged, and a proposal becomes a branch. GitHub and
+  other forges can be the repository's remote, and a deleted STEP id never comes back.
 - **BIM snippets as a working demonstration.** A proposed change travels as a
   `bim_snippet` in a BCF 3.0 topic, with a published schema behind its
   `reference_schema`, so that the change, the discussion and the decision are in one
@@ -584,11 +589,10 @@ whoever, human or AI agent, carries a part of it further. The ways of working ar
   changes to that part; a change across several teams' parts goes to a `manager`.
 - **A clash check in both places**: on the server with IfcOpenShell's IfcClash and in
   Dataspatium with its own core in JavaScript.
-- **Next**: an endpoint for AI tools (MCP) on your own computer, where AI proposes
-  and a human approves; a check of classifications and properties against bSDD; a new
-  check of the versions when the project's IDS changes, with buildingSMART's findings
-  linked to building elements; proprietary formats through the source programs' IFC
-  export; and a test suite against prompt injection in snippets and MCP.
+- **Next**: AI in tier 2 through IfcMCP behind the MCP endpoint, where AI proposes and
+  a human approves; a geodata server with OGC API – Features and Tiles on PostGIS;
+  buildingSMART's findings linked to building elements; and proprietary formats
+  through the source programs' IFC export.
 
 ## Bugs and suggestions
 

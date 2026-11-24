@@ -66,7 +66,7 @@ PostgreSQL does not answer.
 | Task | Command |
 |---|---|
 | Update to the latest image | `docker compose pull && docker compose up -d` |
-| Pin a version | `OPENCDE_IMAGE_TAG=3.0.0` in `.env` (tags follow the GitHub releases) |
+| Pin a version | `OPENCDE_IMAGE_TAG=0.1.0` in `.env` (tags follow the GitHub releases) |
 | Offer only some APIs | `OPENCDE_APIS=["bcf-2.1"]` in `.env` for a server for BCF API 2.1 alone, `["documents"]` for a document server; all three by default, and the Documents API alone in tier 1 |
 | Logs | `docker compose logs -f api` (JSON lines) |
 | Health | `https://cde.example.org/readyz`; the admin UI's Settings page |

@@ -1,14 +1,17 @@
 # Changelog
 
-Dataregium takes the same release numbers as [Dataspatium](https://github.com/marwiss/Dataspatium):
-the same number on both means they work together. Each major number has one
-release, numbered X.0.0: 2.0.0 for the 2 series and 3.0.0 for the 3 series.
-A change to a series is released again under the same number; the release
-before it is withdrawn (its commits remain) and its notes are folded into the
-new one. Every release lists what a client can see; internal changes are in
-the commit history.
+Dataregium and [Dataspatium](https://github.com/marwiss/Dataspatium) are one
+series from main, in beta from 0.1.0: a client and a server of the same tier
+work together, not the same number, and the two are released the same day,
+Dataspatium first. The releases 1.0.0, 2.0.0 and 3.0.0 are withdrawn; their
+notes stay below. Every release lists what a client can see; internal changes
+are in the commit history.
 
-## Unreleased
+## 0.1.0 — 2026-11-24
+
+The first beta of the one series: what 3.0.0 had, in three tiers chosen with
+`OPENCDE_TIER` (documents, bim-gis as the default, experimental with IFC-DB's
+graph), with the server's own data in PostgreSQL in tiers 1 and 2.
 
 - A graph's backup holds the nodes without a unique key too, by the ids the server gave them: teams with their
   members and responsible user, a version's publication, the components of viewpoints, the trials of change sets,

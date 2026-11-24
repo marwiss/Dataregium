@@ -16,11 +16,10 @@ varje projekt.
 
 Tekniskt är Dataregium en server för buildingSMARTs öppna **OpenCDE-API:er**
 (Foundation API 1.0, BCF API 3.0 och 2.1 samt Documents API 1.0), byggd på
-databasen PostgreSQL. I 3-serien blir varje uppladdad IFC-modell en förlustfri
-graf i Neo4j eller Memgraph genom biblioteket
-[IFC-DB](https://github.com/marwiss/IFC-DB), med versioner, kontroller och
-ändringsförslag; grafen kommer med den tredje av serverns [tre
-nivåer](#vad-du-kan-göra). Servern skrevs om från grunden ur en
+databasen PostgreSQL. I den tredje av serverns [tre nivåer](#vad-du-kan-göra)
+blir varje uppladdad IFC-modell en förlustfri graf i Neo4j eller Memgraph genom
+biblioteket [IFC-DB](https://github.com/marwiss/IFC-DB), med versioner,
+kontroller och ändringsförslag. Servern skrevs om från grunden ur en
 forskningsprototyp från 2023, med säkerhet som första krav, och varje klient som
 följer specifikationerna kan ansluta.
 
@@ -37,7 +36,7 @@ följer specifikationerna kan ansluta.
 - [Lär dig mer](#lär-dig-mer)
 - [Begränsningar i korthet](#begränsningar-i-korthet)
 - [Personuppgifter](#personuppgifter)
-- [Nästa i 3-serien](#nästa-i-3-serien)
+- [Nästa i serien](#nästa-i-serien)
 - [Fel och förslag](#fel-och-förslag)
 - [Utveckling](#utveckling)
 - [Licens](#licens)
@@ -59,8 +58,8 @@ och dess databas, PostgreSQL. Med modeller, i nivå 3, startar den också
 grafdatabasen Neo4j.
 
 1. **Ladda ned.** Hämta koden med git, eller som ZIP-fil under *Code > Download
-   ZIP* på GitHub. Grenen `main` är 3-serien; `release-2` och `release-1` är 2-
-   och 1-serien.
+   ZIP* på GitHub. Grenen `main` är serien, i beta, och taggen `v0.1.0` är dess
+   första utgåva.
 
    ```sh
    git clone https://github.com/marwiss/Dataregium.git
@@ -202,9 +201,9 @@ använder, och inget är öppet förrän det har konfigurerats.
 ### För den tekniskt kunnige
 
 - **Image**: `ghcr.io/marwiss/opencdeserver` för amd64 och arm64, skannad med
-  Trivy och med SBOM. Taggarna är `3.0.0` och `latest` för 3-serien,
-  `3.0.0-gherkin` och `latest-gherkin` med buildingSMARTs ifc-gherkin-rules,
-  `2.0.0` och `1.0.0`; `OPENCDE_IMAGE_TAG` väljer i compose-filerna.
+  Trivy och med SBOM. Taggarna är `0.1.0`, `0.1` och `latest`, och med
+  buildingSMARTs ifc-gherkin-rules `0.1.0-gherkin`, `0.1-gherkin` och
+  `latest-gherkin`; `OPENCDE_IMAGE_TAG` väljer i compose-filerna.
   `docker/Dockerfile` installerar extrapaketen `postgres` och `ifc-db`, och
   `--build-arg OPENCDE_EXTRAS="--extra postgres"` bygger en slankare image utan
   IfcOpenShell.
@@ -221,16 +220,16 @@ använder, och inget är öppet förrän det har konfigurerats.
   `OPENCDE_GRAPH_URI`.
 - **De viktigaste inställningarna**: `OPENCDE_TIER` väljer nivån (`documents`,
   `bim-gis`, som är standard, eller `experimental`); `OPENCDE_APIS` väljer API:erna
-  inom den (alla tre som standard, `["documents"]` i nivå 1 och i 1.0.0);
+  inom den (alla tre som standard, `["documents"]` i nivå 1);
   `OPENCDE_STORE_URL`, som nivå 1 och 2 kräver, anger den PostgreSQL som håller
   serverns egna data; `OPENCDE_BIM_ENABLED=true` slår på BIM-funktionerna på filerna,
-  i nivå 2, och `OPENCDE_IFC_DB_ENABLED=true` grafen, i nivå 3, och
-  allt i 2- och 3-serien som rör modeller; `OPENCDE_ENVIRONMENT` är
+  i nivå 2, och `OPENCDE_IFC_DB_ENABLED=true` grafen, i nivå 3, med
+  det som bara grafen svarar på; `OPENCDE_ENVIRONMENT` är
   `development`, `production` eller `local` (den lokala motorn, `opencde init --local`).
 - **Ändpunkter**: `/.well-known/dataregium` (version, nivå och påslagna tillägg),
   `/foundation/versions`, `/openapi.json` och `/docs`, `/healthz` och `/readyz`,
   `/admin/api` (administration) och `/manage/1.0` (projektadministration).
-  3-seriens tillägg ligger under `/documents/1.0/` (versionernas `ifc-queries`,
+  Tilläggen för modellerna ligger under `/documents/1.0/` (versionernas `ifc-queries`,
   `ifc-diff`, `ifc-changes` och `ifc-geometry`, projektens `ifc-precheck` och
   `ifc-clash`) och under ett BCF 3.0-ärende (`snippet` och `ifc-proposal/approve`).
 - **Kommandoraden**: `opencde serve`, `init`, `doctor`, `seed`, `backup`,
@@ -291,8 +290,7 @@ Orden README använder, i vardagligt språk; hela ordlistan finns i
 
 ## Vad du kan göra
 
-Det som går i en version går också i nästa. Varje version hör ihop med samma
-version av Dataspatium.
+Dataspatium och Dataregium med samma nivå fungerar ihop.
 
 En server erbjuder en av tre nivåer, som `OPENCDE_TIER` väljer, och var och en har
 allt som nivån före den har: **Dokument** (`documents`) Foundation API och
@@ -312,7 +310,7 @@ som `opencde init` skriver, så en server med IFC-DB eller med sina egna data i 
 graf sätter `OPENCDE_TIER=experimental`. Kapabilitetsdokumentet anger nivån som `tier`, och
 `opencde doctor` och administrationens översikt visar den.
 
-### Version 1 (med Dataspatium 1)
+### Nivå 1, Dokument
 
 - **Dokument på ett ställe** (Documents API 1.0): välja, ladda upp och hämta
   dokument och deras versioner genom serverns sidor, från en app som Dataspatium.
@@ -330,41 +328,43 @@ graf sätter `OPENCDE_TIER=experimental`. Kapabilitetsdokumentet anger nivån so
 - **Projektansvariga administrerar sitt projekt**: en `manager` lägger till och
   tar bort medlemmar, byter deras roller och byter namn på projektet, utan att
   vara serveradministratör.
+- **En egen molnregion**: färdiga recept för en egen maskin hos AWS, Azure eller
+  Google Cloud eller bredvid en befintlig nginx.
 
-### Också i version 2 (med Dataspatium 2)
+### Också i nivå 2, BIM och GIS
 
 - **Ärenden om modellen** (BCF API 3.0 och 2.1): frågor och anmärkningar med
   kommentarer, bilder och vyer som pekar ut byggdelar, med filter och
   händelselogg, validerade mot buildingSMARTs scheman.
-- **Modellen som graf** (IFC-DB-modulen i nivå 3, påslagen med
-  `OPENCDE_IFC_DB_ENABLED`): en uppladdad IFC-modell blir en graf i Neo4j eller
-  Memgraph, kopplad till byggdelarna i ärendenas vyer (se
-  [IFC-DB](docs/sv/ifc-db.md)).
-
-### Också i version 3 (med Dataspatium 3)
-
-- **En förlustfri modell**: grafen kommer ur biblioteket IFC-DB och håller allt i
-  filen, så att den kan skrivas tillbaka som den kom.
 - **Kontroll av varje uppladdning** mot IFC-schemat, buildingSMARTs regler och
   projektets IDS-krav; ett projekt kan avvisa filer med fel, och en fil kan
   förhandskontrolleras utan att sparas.
-- **Frågor och jämförelser**: namngivna frågor för medlemmar, vad som ändrats
-  sedan en version, jämförelse mellan två versioner (också på en sida på
-  servern) och krocktest vars krockar kan bli ärenden.
+- **Jämförelser**: vad som ändrats sedan en version, jämförelse mellan två
+  versioner (också på en sida på servern) och krocktest vars krockar kan bli
+  ärenden.
 - **Ändringar som förslag**: varje ny version anger sin bas, och ett ändringsset
   i ett BCF-ärende prövas och godkänns av en `manager` till nästa version,
   sammanfogat per instans med det som kom emellan; en verklig krock visar basens,
   den senaste versionens och förslagets värde.
 - **Publicering**: en `manager` publicerar en version vars kontroll inte hittade några
   fel, och servern sparar den som en hel `.ifczip` som alla i projektet kan ladda ned.
+
+### Också i nivå 3, Experimentell
+
+- **Modellen som graf** (IFC-DB-modulen, påslagen med
+  `OPENCDE_IFC_DB_ENABLED`): en uppladdad IFC-modell blir en graf i Neo4j eller
+  Memgraph, kopplad till byggdelarna i ärendenas vyer (se
+  [IFC-DB](docs/sv/ifc-db.md)).
+- **En förlustfri modell**: grafen kommer ur biblioteket IFC-DB och håller allt i
+  filen, så att den kan skrivas tillbaka som den kom.
+- **Frågor**: namngivna frågor för medlemmar, som grafen svarar på.
 - **En byggnad in i en annan modell**: byggnaden ur en modell kommer in i ett annat
   projekts modell som dess nästa version, med en rapport först om vad som följer med
   och ett val för varje objekt som båda har i olika form; en `manager` gör det.
 - **Geometrin som glTF**: varje version som binär glTF med delade mesher och en
   nod per byggdel, och en låda per byggdel i grafen för frågor om vad som är nära.
-- **En lokal motor och en egen molnregion**: Dataregium på den egna datorn bakom
-  Dataspatium, med en arbetskopia i minnet för stora modeller, och färdiga recept
-  för en egen maskin hos AWS, Azure eller Google Cloud eller bredvid en befintlig nginx.
+- **En lokal motor**: Dataregium på den egna datorn bakom Dataspatium, med en
+  arbetskopia i minnet för stora modeller.
 
 <img src="docs/images/upload.png" alt="Uppladdningssidan, där användaren ger filen titel och version" width="340">
 
@@ -404,23 +404,24 @@ en klient.
 Dataspatium är appen du arbetar i, och Dataregium är servern där projektets
 gemensamma underlag ligger. [Dataspatium](https://github.com/marwiss/Dataspatium)
 körs helt i webbläsaren, och de två är utvecklade för att fungera tillsammans.
-Samma utgåvenummer betyder att de fungerar ihop: Dataspatium 3.0.0 fungerar med
-Dataregium 3.0.0 ([snabbstart](docs/sv/quickstart.md)).
+Samma nivå, inte samma utgåvenummer, betyder att de fungerar ihop: Dataspatium
+0.1.0 fungerar med Dataregium 0.1.0 i samma nivå ([snabbstart](docs/sv/quickstart.md)).
 
 Dataspatium lägger till en Dataregium-server som källa: appen upptäcker
 API:erna genom `/foundation/versions`, loggar in med OAuth2 authorization
 code och PKCE och registrerar sig själv som publik klient när dynamisk
 registrering är påslagen, listar projektets modeller och dokument, läser och
 skriver BCF-ärenden med kommentarer och viewpoints tagna ur sin 3D-vy och laddar
-upp datamängder, filer och arbetsytepaket genom Documents API. I 3-serien
+upp datamängder, filer och arbetsytepaket genom Documents API. I nivå 2 och 3
 publicerar appen versioner med basversion och förhandskontroll, skickar
 ändringsset som servern prövar, låter den projektansvarige godkänna dem och
-avgöra krockar, jämför versioner i 3D och ställer namngivna frågor till grafen;
-en administratör kan också fråga grafen med Cypher genom serverns läsande
-ändpunkt medan serverns egna data ligger i grafen. Appen skickar `X-Request-ID`
-på varje anrop, så att begärandeloggen här och loggen i appen visar samma samtal,
-läser serverns kapabilitetsdokument för att se vilka tillägg som är påslagna och
-reagerar på de felkoder servern lägger i sina felkroppar.
+avgöra krockar och jämför versioner i 3D, och i nivå 3 ställer den namngivna
+frågor till grafen; en administratör kan också fråga grafen med Cypher genom
+serverns läsande ändpunkt medan serverns egna data ligger i grafen. Appen
+skickar `X-Request-ID` på varje anrop, så att begärandeloggen här och loggen i
+appen visar samma samtal, läser serverns kapabilitetsdokument för att se vilka
+tillägg som är påslagna och reagerar på de felkoder servern lägger i sina
+felkroppar.
 
 Så här hänger de ihop:
 
@@ -457,24 +458,29 @@ installeras var för sig: det här repot buntar inte Dataspatium (licenserna
 skiljer sig, AGPL här och PolyForm Strict där), och Dataspatiums README
 beskriver hur appen hämtas och används.
 
-### Utgåvorna 1, 2 och 3
+### En serie, i beta från 0.1.0
 
-Det finns en utgåva per huvudnummer, och den ges ut igen när den växer; bara den
-senaste i varje serie rättas. Dataregium och Dataspatium med samma nummer hör ihop:
+Dataregium ges ut i en enda serie från grenen `main`, i beta från 0.1.0, och
+samma dag som Dataspatium. De tre nivåerna är samma utgåva och samma image, och
+`OPENCDE_TIER` väljer nivån. Det här har 0.1.0 i varje nivå:
 
-| Dataregium | Vad den har | Image | Hör ihop med |
-|---|---|---|---|
-| 1.0.0 | En dokumentserver: Foundation API och Documents API, webbadministrationen på sju språk, projektadministrationen för den projektansvarige och begärandeloggen. Den är 2.0.0-koden med bara Documents API påslaget (`OPENCDE_APIS`) | `1.0.0` | Dataspatium 1.0.0 |
-| 2.0.0 | Också BCF API 3.0 och 2.1 på samma data och IFC-DB-modulen som gör en graf av varje uppladdad IFC-fil | `2.0.0` | Dataspatium 2.0.0 |
-| 3.0.0 | Också den förlustfria grafen ur biblioteket IFC-DB, kontrollen av varje uppladdning, frågorna, jämförelserna och krocktestet, versioner med ändringsförslag som prövas, godkänns och sammanfogas, publiceringen av en version, en byggnad ur en modell in i en annan, geometrin som glTF, den lokala motorn och recepten för molnet och nginx | `3.0.0`, `latest`, `3.0.0-gherkin` | Dataspatium 3.0.0 |
+| Nivå | Vad 0.1.0 har |
+|---|---|
+| 1, Dokument (`documents`) | En dokumentserver: Foundation API och Documents API, webbadministrationen, projektadministrationen för den projektansvarige, begärandeloggen och recepten för molnet och nginx |
+| 2, BIM och GIS (`bim-gis`), standard | Också BCF API 3.0 och 2.1 på samma data, MCP-ändpunkten och, med `OPENCDE_BIM_ENABLED`, kontrollen av varje uppladdning, jämförelserna, krocktestet och rummen, versioner med ändringsförslag som prövas, godkänns och sammanfogas, och publiceringen av en version |
+| 3, Experimentell (`experimental`) | Också IFC-DB-modulen, som gör en förlustfri graf i Neo4j eller Memgraph av varje uppladdad IFC-fil, de namngivna frågorna, en byggnad ur en modell in i en annan, geometrin som glTF och den lokala motorn med en arbetskopia i minnet |
+
+Serierna 1, 2 och 3 är indragna: utgåvorna 1.0.0, 2.0.0 och 3.0.0, deras
+taggar och images och grenarna `release-1`, `release-2` och `release-3` är
+borttagna, och guiderna pekar på 0.1.0.
 
 ## Lär dig mer
 
 - [docs/sv/quickstart.md](docs/sv/quickstart.md): Dataregium och Dataspatium tillsammans på
   tjugo minuter, från tom dator till ett ärende skapat i 3D-vyn.
 - [docs/sv/client-guide.md](docs/sv/client-guide.md) och [docs/examples/](docs/examples/):
-  hur man bygger en klient, kapabilitetsdokumentet, felkoderna, 3-seriens tillägg
-  och körbara exempel med Python-biblioteket i [client/](client/).
+  hur man bygger en klient, kapabilitetsdokumentet, felkoderna, tilläggen för
+  modellerna och körbara exempel med Python-biblioteket i [client/](client/).
 - [docs/sv/architecture.md](docs/sv/architecture.md): hur delarna hänger ihop, vad som händer med ett anrop och var allt finns i koden.
 - [docs/sv/glossary.md](docs/sv/glossary.md): orden som dokumentationen använder.
 - [docs/sv/flows/](docs/sv/flows/): sekvensdiagram för OAuth2-, Documents API- och BCF-viewpoint-flödena.
@@ -509,8 +515,9 @@ Dokumentationen finns på den här README-filens sju språk, varje språk under
 
 ## Begränsningar i korthet
 
-- Allt som rör modeller, i 2- och 3-serien, kräver IFC-DB-modulen, som är
-  avstängd tills `OPENCDE_IFC_DB_ENABLED=true` och hör till nivå 3
+- BIM-funktionerna på filerna körs i nivå 2 med `OPENCDE_BIM_ENABLED=true`, och
+  det som bara grafen svarar på kräver IFC-DB-modulen, som är avstängd tills
+  `OPENCDE_IFC_DB_ENABLED=true` och hör till nivå 3
   (`OPENCDE_TIER=experimental`). buildingSMARTs regler körs bara med imagen
   `-gherkin`; utan den kontrolleras schemat och IDS.
 - Servern implementerar BCF API 3.0 och 2.1, inte 1.0, vars resurser ser annorlunda ut.
@@ -551,9 +558,9 @@ versioner personen skrev tills de tas bort. Granskningsloggen exporteras som CSV
 BCF- och dokumentdata genom API:erna och hela databasen med `opencde backup`. Vad
 Dataspatium sparar i webbläsaren står i appens egen dokumentation.
 
-## Nästa i 3-serien
+## Nästa i serien
 
-3.0.0 är 3-seriens enda utgåva och ges ut igen när den växer; det den har i dag
+0.1.0 är seriens första utgåva, i beta, och det den har i dag
 står under [Vad du kan göra](#vad-du-kan-göra). De officiella OpenCDE-API:erna
 förblir som buildingSMART definierar dem; det serien lägger till är tillägg till
 dem, under egna namn och med en egen OpenAPI. Det här avsnittet säger vad som är
@@ -563,17 +570,16 @@ Arbetssätten står i [CONTRIBUTING.md](CONTRIBUTING.md) och IFC-grafen i
 
 ### Beslutat
 
-- **Redigering av modeller i Native IFC.** Create är uppladdningen, Read de
+- **Redigering av modeller i Native IFC** i nivå 3. Create är uppladdningen, Read de
   namngivna frågorna, Update och Delete ett ändringsset (sätta, lägga till, ta
   bort och kopiera instanser) som prövas och godkänns, och Export att skriva STEP
   tillbaka. Datan håller sig till IFC, ifc-gherkin-rules och projektets IDS, vid
   import och efter varje ändring.
-- **Versionshistorik i databasen, inte i git**, i samma anda som Bruno Postles
-  [ifcmerge](https://github.com/brunopostle/ifcmerge). Varje godkänd version är en
-  nod med sin förälder, författare, godkännare och ändringar; grafen håller den
-  senaste versionen, och vilken version som helst skrivs ut på begäran. En ändring
-  förs in när filen som skrivs från den inte har någon anmärkning som versionen
-  före den saknade.
+- **Versioner i git i nivå 2.** Varje version av en textfil, som en IFC-fil i STEP,
+  blir en commit i ett git-repo per projekt på servern, och Bruno Postles
+  [ifcmerge](https://github.com/brunopostle/ifcmerge) gör all sammanfogning: en
+  uppladdning mot en äldre bas sammanfogas, och ett förslag blir en gren. GitHub och
+  andra forgar kan vara repots remote, och ett raderat STEP-id kommer aldrig tillbaka.
 - **BIM-snippets som en fungerande demonstration.** En föreslagen ändring färdas
   som `bim_snippet` i ett BCF 3.0-ärende, med ett publicerat schema bakom dess
   `reference_schema`, så att ändringen, diskussionen och beslutet finns på ett
@@ -590,12 +596,10 @@ Arbetssätten står i [CONTRIBUTING.md](CONTRIBUTING.md) och IFC-grafen i
   till en `manager`.
 - **Krocktest på båda ställena**: på servern med IfcOpenShells IfcClash och i
   Dataspatium med dess egen kärna i JavaScript.
-- **Härnäst**: en ändpunkt för AI-verktyg (MCP) på den egna datorn, där AI
-  föreslår och en människa godkänner; kontroll av klassificeringar och egenskaper
-  mot bSDD; omkontroll av versionerna när projektets IDS ändras, med
-  buildingSMARTs fynd kopplade till byggdelar; proprietära format genom
-  källprogrammens IFC-export; och en testsvit mot promptinjektion i snippets och
-  MCP.
+- **Härnäst**: AI i nivå 2 genom IfcMCP bakom MCP-ändpunkten, där AI föreslår och
+  en människa godkänner; en geodataserver med OGC API – Features och Tiles på
+  PostGIS; buildingSMARTs fynd kopplade till byggdelar; och proprietära format
+  genom källprogrammens IFC-export.
 
 ## Fel och förslag
 

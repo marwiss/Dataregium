@@ -1957,7 +1957,7 @@ wheels = [
 
 [[package]]
 name = "opencde-client"
-version = "3.0.0"
+version = "0.1.0"
 source = { editable = "client" }
 dependencies = [
     { name = "httpx" },
@@ -1968,7 +1968,7 @@ requires-dist = [{ name = "httpx", specifier = ">=0.28" }]
 
 [[package]]
 name = "opencde-server"
-version = "3.0.0"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
