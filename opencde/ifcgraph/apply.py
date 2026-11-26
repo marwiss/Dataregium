@@ -367,12 +367,14 @@ def apply_all(
     ops: list[dict[str, Any]] | None = None,
     keep_theirs: list[str] | None = None,
     proposer: str = "",
+    max_step_id: int = 0,
 ) -> dict[str, Any]:
     import ifcopenshell
 
     from opencde.ifcgraph.ops import _ifc_hold_ids, _ifc_keep_guard  # the app's guard of the STEP ids
 
-    model = _ifc_hold_ids(ifcopenshell.open(str(base)))
+    # The document's history, not the base file's alone: no id a later version deleted comes back (LD-61, UL-48).
+    model = _ifc_hold_ids(ifcopenshell.open(str(base)), max_step_id)
     touched: list[int] = []
     problems: list[dict[str, Any]] = []
     held = _hold(model, keep_theirs or [], problems)
@@ -414,6 +416,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--read", action="store_true")
     parser.add_argument("--memory-mb", type=int, default=0)
     parser.add_argument("--proposer", default="")
+    parser.add_argument("--max-step-id", type=int, default=0, help="the highest STEP id the document has had")
     args = parser.parse_args(argv)
     if args.memory_mb:
         limit_memory(args.memory_mb)
@@ -433,6 +436,7 @@ def main(argv: list[str] | None = None) -> int:
                 ops=change_set.get("ops"),
                 keep_theirs=change_set.get("keep_theirs"),
                 proposer=args.proposer,
+                max_step_id=args.max_step_id,
             )
     except Exception as exc:  # the caller reads the last line of stderr
         sys.stderr.write(json.dumps({"error": f"{type(exc).__name__}: {exc}"[:300]}) + "\n")

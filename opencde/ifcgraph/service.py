@@ -862,6 +862,8 @@ class IfcGraphService:
             raise RuntimeError("the base version is not in this project")
         if not self.wants(str(version["file_name"])):
             raise RuntimeError("the base version is not an IFC file")
+        head = await self.documents.head(project_id=project_id, document_id=str(base["document_id"]))
+        known = head.max_step_id if head is not None and head.max_step_id is not None else 0
         key = make_key("proposals", proposal_id, "ifc")
         with tempfile.TemporaryDirectory(prefix="ifcproposal-") as tmp:
             workdir = Path(tmp)
@@ -881,6 +883,7 @@ class IfcGraphService:
                 "--memory-mb",
                 str(self.settings.ifcgraph_memory_mb),
                 f"--proposer={author}",
+                f"--max-step-id={known}",
             ]
             answer = await self._in_a_process(command, "applying the change set")
             summary = json.loads(answer.strip().splitlines()[-1])

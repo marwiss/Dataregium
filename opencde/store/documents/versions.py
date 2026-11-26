@@ -515,7 +515,7 @@ class DocumentRepository:
                   -[:HAS_VERSION]->(v:DocumentVersion)
             WITH p, d, v ORDER BY v.version_index DESC LIMIT 1
             RETURN d.document_id AS document_id, p.project_id AS project_id, p.name AS project_name,
-                   properties(v) AS version
+                   properties(v) AS version, d.max_step_id AS max_step_id
             """,
             project_id=project_id,
             document_id=document_id,
@@ -552,7 +552,7 @@ class DocumentRepository:
             WITH p, d, collect(v)[0] AS v
             WHERE any(suffix IN $suffixes WHERE toLower(v.file_name) ENDS WITH suffix)
             RETURN d.document_id AS document_id, p.project_id AS project_id, p.name AS project_name,
-                   properties(v) AS version
+                   properties(v) AS version, d.max_step_id AS max_step_id
             ORDER BY document_id
             LIMIT $limit
             """,
@@ -579,7 +579,7 @@ class DocumentRepository:
             WITH p, d, v ORDER BY p.name, p.project_id, v.title, d.document_id
             LIMIT $limit
             RETURN d.document_id AS document_id, p.project_id AS project_id, p.name AS project_name,
-                   properties(v) AS version
+                   properties(v) AS version, d.max_step_id AS max_step_id
             """,
             user_id=user_id,
             project_ids=list(project_ids),

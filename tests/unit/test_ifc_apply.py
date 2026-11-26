@@ -221,6 +221,21 @@ def test_the_guard_has_the_apps_form_in_ifc4_and_only_the_highest_stays(tmp_path
     assert b"#21=IFCDOCUMENTREFERENCE($,'20','StepIdGuard',$,$);" in out.read_bytes()
 
 
+def test_the_documents_history_holds_an_id_a_later_version_deleted(tmp_path: Path) -> None:
+    """UL-48, LD-61: a change set tried on a version whose file no longer has the document's highest id gets that id
+    from the server (``--max-step-id``), so that what it makes is numbered above it and a guard holds it."""
+    import ifcopenshell
+
+    base = tmp_path / "base.ifc"
+    base.write_bytes(MODEL.read_bytes())
+    top = int(ifcopenshell.open(str(base)).get_max_id())
+    out = tmp_path / "out.ifc"
+    assert apply_all(base, [], out, ops=[NEW_WALL], max_step_id=top + 50)["ops"]["failed"] is None
+    model = ifcopenshell.open(str(out))
+    made = {e.id() for e in model} - {e.id() for e in ifcopenshell.open(str(base))}
+    assert made and min(made) > top + 50, "nothing the change made takes an id the document had"
+
+
 # -- Dataspatium's write tools in a change set (``ops``), before its changes --------------------------------------
 
 OTHER_WALL = "3eT96F_cnDsOufCEsotwtp"  # YVT-B, #373
