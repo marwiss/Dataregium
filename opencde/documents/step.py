@@ -11,7 +11,11 @@ whose identification is the id it protects. Nothing of the file is executed or k
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
+from array import array
+from bisect import bisect_left
 from dataclasses import dataclass, field
 from typing import IO, TYPE_CHECKING
 
@@ -20,11 +24,46 @@ if TYPE_CHECKING:
 
 MAX_LINE = 1 << 20
 ALL = 1 << 62  # no limit on what is read of a stored file, which the upload has limited already
+#: The largest id read as a number; a longer one is read as this, as no tool numbers that high (and ``int`` of a long
+#: run of digits is refused).
+LARGEST = (1 << 63) - 1
+#: The highest id the safety net works with. Its sets are bitmaps, a bit an id (16 MiB at the most); a file or a
+#: document with an id above it is kept as it came.
+MAX_ID = 1 << 27
+#: The most moved ids a version's metadata names one by one; a file that moves more (a re-export) gives the count too.
+MAX_LISTED = 1000
 _INSTANCE = re.compile(rb"^\s*#([0-9]+)\s*=")
 _GUARD = re.compile(
     rb"^\s*#([0-9]+)\s*=\s*IFCDOCUMENTREFERENCE\s*\(\s*(?:\$|'[^']*')\s*,\s*'([0-9]+)'\s*,\s*'StepIdGuard'"
 )
 _SCHEMA = re.compile(rb"FILE_SCHEMA\s*\(\s*\(\s*'([A-Za-z0-9_]+)'")
+_HEADER = 1 << 16  # the most of a file's start searched for its schema
+
+
+def _number(digits: bytes) -> int:
+    return LARGEST if len(digits) > 18 else int(digits)
+
+
+class IdSet:
+    """Instance ids, a bit each, up to ``MAX_ID``; ``over`` says that one above it was left out."""
+
+    def __init__(self) -> None:
+        self.bits = bytearray()
+        self.over = False
+
+    def add(self, value: int) -> None:
+        if value > MAX_ID:
+            self.over = True
+            return
+        index = value >> 3
+        if index >= len(self.bits):
+            size = min(max(index + 1, 2 * len(self.bits)), (MAX_ID >> 3) + 1)
+            self.bits.extend(bytes(size - len(self.bits)))
+        self.bits[index] |= 1 << (value & 7)
+
+    def number(self) -> int:
+        """The set as one number, bit ``n`` for id ``n``."""
+        return int.from_bytes(self.bits, "little")
 
 
 @dataclass(frozen=True)
@@ -41,22 +80,28 @@ class StepIds:
         return max([self.highest, *self.guards.values()])
 
 
-def scan(stream: IO[bytes], limit: int) -> StepIds:
-    """The ids of the file in ``stream``, read up to ``limit`` bytes. A file that is not STEP has none."""
+def scan(stream: IO[bytes], limit: int, into: IdSet | None = None) -> StepIds:
+    """The ids of the file in ``stream``, read up to ``limit`` bytes; with ``into``, every instance id but a guard's is
+    put there as well. A file that is not STEP has none."""
     highest = 0
     guards: dict[int, int] = {}
     schema: str | None = None
+    header = b""
     read = 0
     starts = True
     while read < limit and (line := stream.readline(MAX_LINE)):
         read += len(line)
-        if starts:
-            if schema is None and (named := _SCHEMA.search(line)):
+        if schema is None and len(header) < _HEADER:
+            header += line[: _HEADER - len(header)]
+            if named := _SCHEMA.search(header):
                 schema = named.group(1).decode("ascii").upper()
-            if found := _INSTANCE.match(line):
-                highest = max(highest, int(found.group(1)))
-                if guard := _GUARD.match(line):
-                    guards[int(guard.group(1))] = int(guard.group(2))
+        if starts and (found := _INSTANCE.match(line)):
+            value = _number(found.group(1))
+            highest = max(highest, value)
+            if guard := _GUARD.match(line):
+                guards[value] = _number(guard.group(2))
+            elif into is not None:
+                into.add(value)
         starts = line.endswith(b"\n")
     return StepIds(highest=highest, guards=guards, schema=schema)
 
@@ -73,3 +118,203 @@ def stored_history(storage: LocalStorage, storage_key: str, file_name: str) -> i
 def is_step(file_name: str) -> bool:
     """Whether a version's file is IFC in STEP, by its name, as the server names the kinds of files elsewhere."""
     return file_name.lower().endswith(".ifc")
+
+
+# -- the safety net of an upload (UL-48, fas 5.0) -------------------------------------------------------------------
+
+_TOKEN = re.compile(rb"'|/\*|\*/|#([0-9]+)")
+_SET = re.compile(rb"[^\x00]")
+_DATA = re.compile(rb"^\s*DATA\s*;\s*$")
+_ENDSEC = re.compile(rb"^\s*ENDSEC\s*;\s*$")
+_PLAIN, _QUOTED, _COMMENT = 0, 1, 2
+
+
+@dataclass(frozen=True)
+class Protection:
+    """What the server did to an uploaded file before keeping it: the ids it moved, the guard it added."""
+
+    renumbered: list[tuple[int, int]] = field(default_factory=list)  # the first MAX_LISTED moved, (old id, new id)
+    renumbered_count: int = 0
+    guard: int | None = None  # the id of the guard added
+    size: int | None = None  # the file's size and SHA-256 after the change; None when nothing changed
+    sha256: str | None = None
+
+
+class Moved:
+    """The ids an upload reuses, in order, and where they go: the n-th of them gets ``start + n``."""
+
+    def __init__(self, bits: bytes, start: int) -> None:
+        self.bits = bits
+        self.start = start
+        self.order = array("q")
+        for found in _SET.finditer(bits):
+            byte = found.start()
+            self.order.extend(byte * 8 + bit for bit in range(8) if bits[byte] >> bit & 1)
+
+    def __len__(self) -> int:
+        return len(self.order)
+
+    @property
+    def top(self) -> int:
+        return self.start + len(self.order) - 1
+
+    def get(self, old: int) -> int | None:
+        byte = old >> 3
+        if byte >= len(self.bits) or not self.bits[byte] >> (old & 7) & 1:
+            return None
+        return self.start + bisect_left(self.order, old)
+
+    def pairs(self, limit: int) -> list[tuple[int, int]]:
+        return [(old, self.start + n) for n, old in enumerate(self.order[:limit])]
+
+
+@dataclass(frozen=True)
+class Plan:
+    """What the safety net does to an upload: the ids that move, the history after it, and the guard."""
+
+    moved: Moved | None
+    history: int
+    guard: tuple[int, int] | None  # the guard's own id and the id it protects; None when none is added
+
+
+def plan(upload: IdSet, ids: StepIds, parent: IdSet | None, parent_ids: StepIds | None, known: int | None) -> Plan:
+    """An instance the upload has and its parent has not, at or below the highest the document has given (its own
+    value, or for a document from before it was kept, the parent's highest), is at an id a version deleted or the
+    parent's guard held, and moves above everything (LD-61); guards are no instances. A file whose highest is then
+    below the history gets a guard (F98 a): the parent's own again when it is the one at the top, so that a client
+    which leaves it out gets the same back, and otherwise a new one of the history at the id above it. Without a
+    parent, a new document's file, nothing changes."""
+    if parent is None or parent_ids is None:
+        return Plan(None, max(known or 0, ids.history), None)
+    given = max(known or 0, parent_ids.history)
+    history = max(given, ids.history)
+    reused = upload.number() & ~parent.number() & ((2 << given) - 1)
+    moved = Moved(reused.to_bytes((reused.bit_length() + 7) // 8, "little"), max(history, ids.highest) + 1)
+    if moved:
+        return Plan(moved, moved.top, None)
+    if ids.highest >= history:
+        return Plan(None, history, None)
+    theirs = max(parent_ids.guards.items(), default=None)
+    if theirs is not None and theirs[0] == history:
+        return Plan(None, history, theirs)
+    return Plan(None, history + 1, (history + 1, history))
+
+
+def guard_line(schema: str | None, guard: tuple[int, int], newline: bytes) -> bytes:
+    """The app's guard (F70 d), ``(its id, the id it protects)``, in the schema's form (SA-110)."""
+    tail = "" if (schema or "").upper() == "IFC2X3" else ",$,$"
+    return f"#{guard[0]}=IFCDOCUMENTREFERENCE($,'{guard[1]}','StepIdGuard'{tail});".encode("ascii") + newline
+
+
+def _rewrite(piece: bytes, moved: Moved, state: int, whole: bool) -> tuple[bytes, int, bytes]:
+    """A piece with the moved ids given again outside strings and comments, the state at its end (a string or a
+    comment may run over a line break, and ``''`` inside a string reads the same as its end and a new start), and
+    what of it is held back to be read with the next piece: unless ``whole``, a reference at its very end, or a ``#``,
+    ``/`` or ``*`` that a mark may begin with, as a piece of a long line may end in the middle of one."""
+    tokens = list(_TOKEN.finditer(piece))
+    cut = len(piece)
+    if not whole:
+        last = tokens[-1] if tokens else None
+        if last is not None and last.end() == cut and last.group(1) is not None and len(last.group(0)) <= 20:
+            cut = last.start()
+            tokens.pop()
+        elif piece.endswith((b"#", b"/", b"*")) and (last is None or last.end() < cut):
+            cut -= 1
+    out: list[bytes] = []
+    at = 0
+    for found in tokens:
+        token = found.group(0)
+        if state == _QUOTED:
+            state = _PLAIN if token == b"'" else state
+        elif state == _COMMENT:
+            state = _PLAIN if token == b"*/" else state
+        elif token == b"'":
+            state = _QUOTED
+        elif token == b"/*":
+            state = _COMMENT
+        elif found.group(1) is not None and (new := moved.get(_number(found.group(1)))) is not None:
+            out += (piece[at : found.start()], b"#%d" % new)
+            at = found.end()
+    out.append(piece[at:cut])
+    return b"".join(out), state, piece[cut:]
+
+
+def protect(source: IO[bytes], target: IO[bytes], schema: str | None, planned: Plan) -> Protection:
+    """Write ``source`` to ``target`` as ``planned`` says: the moved ids given again everywhere outside strings and
+    comments, and the guard as the last line of the data section. Each line keeps its place; nothing else changes.
+    A line is read in pieces of ``MAX_LINE``, so that a long one takes no more memory than a short one."""
+    digest = hashlib.sha256()
+    size = 0
+    in_data = False
+    guarded = False
+    state = _PLAIN
+    starts = True
+    carry = b""
+    newline: bytes | None = None
+
+    def put(data: bytes) -> None:
+        nonlocal size
+        target.write(data)
+        digest.update(data)
+        size += len(data)
+
+    while read := source.readline(MAX_LINE):
+        piece, carry = carry + read, b""
+        ends = piece.endswith(b"\n")
+        if newline is None and ends:
+            newline = b"\r\n" if piece.endswith(b"\r\n") else b"\n"
+        if starts and state == _PLAIN:
+            if _DATA.match(piece):
+                in_data = True
+            elif in_data and _ENDSEC.match(piece):
+                in_data = False
+                if planned.guard is not None and not guarded:
+                    put(guard_line(schema, planned.guard, newline or b"\n"))
+                    guarded = True
+        if planned.moved is not None:
+            piece, state, carry = _rewrite(piece, planned.moved, state, ends)
+        put(piece)
+        starts = ends
+    if carry and planned.moved is not None:
+        put(_rewrite(carry, planned.moved, state, True)[0])
+    moved = planned.moved
+    return Protection(
+        renumbered=moved.pairs(MAX_LISTED) if moved is not None else [],
+        renumbered_count=len(moved) if moved is not None else 0,
+        guard=planned.guard[0] if guarded and planned.guard is not None else None,
+        size=size,
+        sha256=digest.hexdigest(),
+    )
+
+
+def protect_stored(
+    storage: LocalStorage, key: str, parent_key: str | None, parent_name: str | None, known: int | None
+) -> Protection:
+    """The safety net on a stored upload, in its place: ``Protection()`` when nothing had to change, else the file
+    rewritten beside it (``<key>.tmp``, which no sweep takes) and moved over it, and what was done. A parent that is
+    not IFC in STEP counts as none. Blocking: run it in a thread."""
+    upload = IdSet()
+    with storage.open_read(key) as stream:
+        ids = scan(stream, ALL, into=upload)
+    if ids.highest == 0 or upload.over or max(known or 0, ids.history) > MAX_ID:
+        return Protection()  # nothing read as STEP, for the check to refuse, or ids no tool gives
+    parent = parent_ids = None
+    if parent_key is not None and parent_name is not None and is_step(parent_name):
+        parent = IdSet()
+        with storage.open_read(parent_key) as stream:
+            parent_ids = scan(stream, ALL, into=parent)
+        if parent.over or parent_ids.history > MAX_ID:
+            return Protection()
+    planned = plan(upload, ids, parent, parent_ids, known)
+    if planned.moved is None and planned.guard is None:
+        return Protection()
+    path = storage.path(key)
+    written = path.with_name(path.name + ".tmp")
+    try:
+        with storage.open_read(key) as source, written.open("wb") as target:
+            done = protect(source, target, ids.schema, planned)
+        os.replace(written, path)
+    except BaseException:
+        written.unlink(missing_ok=True)
+        raise
+    return done

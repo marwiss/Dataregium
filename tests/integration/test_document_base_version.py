@@ -86,3 +86,52 @@ def test_an_upload_on_an_outdated_base_is_refused(client: TestClient, world: Wor
         headers=editor.headers,
     )
     assert bad.status_code == 400 and "document_id" in bad.json()["message"]
+
+
+def _ifc(*lines: bytes) -> bytes:
+    head = b"ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n"
+    return head + b"".join(line + b"\n" for line in lines) + b"ENDSEC;\nEND-ISO-10303-21;\n"
+
+
+def _metadata(client: TestClient, session: Session, document_id: str, index: int) -> dict[str, list[str]]:
+    found = client.get(f"/documents/1.0/documents/{document_id}/versions/{index}/metadata", headers=session.headers)
+    return {entry["name"]: entry["value"] for entry in found.json()["metadata"]}
+
+
+def _stored(client: TestClient, session: Session, document_id: str, index: int) -> bytes:
+    found = client.get(f"/documents/1.0/documents/{document_id}/versions/{index}/download", headers=session.headers)
+    assert found.status_code == 200, found.text
+    return found.content
+
+
+def test_an_upload_never_gives_an_id_a_version_deleted(client: TestClient, world: World) -> None:
+    """UL-48, LD-61, F98 a: version 2 deletes the highest wall and is kept with the guard of its id; an upload on
+    version 2 from a file without the guard gives the deleted id to a new wall, and the server moves it above the
+    history and says so in the version's metadata."""
+    editor = login_as(client, world, "editor")
+    web_sign_in(client, world, "editor")
+    one = _ifc(b"#1=IFCPROJECT($);", b"#5=IFCWALL($,$,'A');", b"#6=IFCWALL($,$,'B');")
+    first = upload_file(
+        client,
+        editor,
+        _instructions(client, editor, world, {"file_name": "m.ifc", "session_file_id": "f"}, len(one)),
+        one,
+    )
+    document_id = first["document_id"]
+    assert _metadata(client, editor, document_id, 1)["ifc_max_step_id"] == ["6"]
+
+    two = _ifc(b"#1=IFCPROJECT($);", b"#5=IFCWALL($,$,'A');")
+    on_one = {"file_name": "m.ifc", "session_file_id": "f", "document_id": document_id, "base_version_index": 1}
+    second = upload_file(client, editor, _instructions(client, editor, world, on_one, len(two)), two)
+    kept = _stored(client, editor, document_id, 2)
+    assert b"#7=IFCDOCUMENTREFERENCE($,'6','StepIdGuard',$,$);" in kept, "the guard of the deleted wall's id"
+    assert second["file_description"]["size_in_bytes"] == len(kept), "the version is the file kept"
+    assert _metadata(client, editor, document_id, 2)["ifc_max_step_id"] == ["7"]
+
+    three = _ifc(b"#1=IFCPROJECT($);", b"#5=IFCWALL($,$,'A');", b"#6=IFCWALL($,$,'C, made again at #6');")
+    on_two = {"file_name": "m.ifc", "session_file_id": "f", "document_id": document_id, "base_version_index": 2}
+    upload_file(client, editor, _instructions(client, editor, world, on_two, len(three)), three)
+    kept = _stored(client, editor, document_id, 3)
+    assert b"#8=IFCWALL($,$,'C, made again at #6');" in kept and b"#6=" not in kept
+    metadata = _metadata(client, editor, document_id, 3)
+    assert metadata["ifc_renumbered"] == ["6>8"] and metadata["ifc_max_step_id"] == ["8"]

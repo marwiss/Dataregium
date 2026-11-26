@@ -291,7 +291,16 @@ Varje version av en IFC-fil i STEP har `ifc_max_step_id` (`integer64`) i sin
 metadata när servern känner det: det högsta STEP-id som dokumentets versioner har
 haft, som det står nu, detsamma på varje version. En klient som lägger till
 instanser numrerar dem över det, så att inget id kommer tillbaka som en version har
-raderat.
+raderat. Servern ser till det när en ny version av en IFC-fil laddas upp: ett id
+som uppladdningen ger och som dess bas (eller den senaste versionen) inte har, och
+som ligger vid eller under den historiken, flyttas över den i hela filen, utanför
+citerade strängar och kommentarer, och versionens metadata anger flyttarna i
+`ifc_renumbered` som `gammalt>nytt` (de 1000 första, med `ifc_renumbered_count` när
+de är fler), så att klienten hämtar versionen igen. En fil vars högsta instans
+ligger under historiken sparas med appens vakt för den sist i sina data, en lös
+`IfcDocumentReference` med namnet `StepIdGuard`, samma vakt som basens när
+uppladdningen lämnade den utanför; versionens storlek och SHA-256 är den sparade
+filens.
 
 En version som rymmer en IFC-modell kan också få namngivna frågor, som dess
 våningar, rummens area eller en egenskaps värde. Det är ett tillägg som svarar

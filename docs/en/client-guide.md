@@ -284,6 +284,16 @@ Every version of an IFC file in STEP carries `ifc_max_step_id` (`integer64`) in 
 metadata once the server knows it: the highest STEP id the document's versions
 have had, as it stands now, the same on every version. A client that adds
 instances numbers them above it, so that no id comes back that a version deleted.
+The server makes sure of it when a new version of an IFC file is uploaded: an id
+the upload gives that its base (or the latest version) has not, at or below that
+history, is moved above it in the whole file, outside quoted strings and
+comments, and the version's metadata names the moves in `ifc_renumbered` as
+`old>new` (the first 1000, with `ifc_renumbered_count` when there are more), so
+that the client fetches the version again. A file whose highest instance is below
+the history is kept with the app's guard of it at the end of its data, a loose
+`IfcDocumentReference` named `StepIdGuard`, the same guard as the base's when the
+upload left that one out; the version's size and SHA-256 are those of the file
+kept.
 
 A version that holds an IFC model can also be asked named queries, such as its
 storeys, the areas of its spaces or the value of a property: an extension that

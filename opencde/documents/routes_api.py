@@ -50,7 +50,7 @@ from opencde.documents.schemas import (
     UploadFileDetails,
     UploadFilePartInstruction,
 )
-from opencde.documents.step import stored_history
+from opencde.documents.step import Protection, is_step, protect_stored, stored_history
 from opencde.documents.validation import metadata_entries as validation_metadata
 from opencde.errors import (
     CODE_IFC_VALIDATION_FAILED,
@@ -310,6 +310,48 @@ for _method in ("PUT", "POST"):
     )
 
 
+async def _protect(
+    documents: DocumentsDep,
+    user_id: str,
+    item: dict[str, Any],
+    base_version: Any,
+    storage: StorageDep,
+    target: str,
+) -> Protection:
+    """The safety net of an IFC upload (UL-48, LD-61, F98 a): the ids it reuses moved above the document's history,
+    and the guard of that history added when the file's highest instance is below it. The parent is the base version
+    the upload names, or else the document's latest; a new document's file is kept as it came."""
+    if not is_step(str(item["file_name"])):
+        return Protection()
+    parent = None
+    if item.get("document_id"):
+        document_id = str(item["document_id"])
+        if base_version is not None:
+            parent = await documents.version(user_id=user_id, document_id=document_id, version_index=int(base_version))
+        else:
+            parent = await documents.latest(user_id=user_id, document_id=document_id)
+    return await anyio.to_thread.run_sync(
+        protect_stored,
+        storage,
+        target,
+        parent.storage_key if parent else None,
+        parent.file_name if parent else None,
+        parent.max_step_id if parent else None,
+    )
+
+
+def _renumbered(protection: Protection) -> list[DocumentMetadataEntry]:
+    """The ids an upload's safety net moved, as ``old>new``: the client fetches the version again (SA-103)."""
+    if not protection.renumbered:
+        return []
+    pairs = [f"{old}>{new}" for old, new in protection.renumbered]
+    entries = [DocumentMetadataEntry(name="ifc_renumbered", value=pairs, data_type="string")]
+    if protection.renumbered_count > len(pairs):
+        count = str(protection.renumbered_count)
+        entries.append(DocumentMetadataEntry(name="ifc_renumbered_count", value=[count], data_type="integer32"))
+    return entries
+
+
 async def _complete(
     session: UploadSession,
     file_index: int,
@@ -351,6 +393,14 @@ async def _complete(
         )
     except AssemblyError as exc:
         raise HTTPException(400, str(exc)) from None
+    size = int(item["size_in_bytes"])
+    try:
+        protection = await _protect(documents, session.user_id, item, base_version, storage, target)
+    except BaseException:
+        storage.delete(target)
+        raise
+    if protection.size is not None and protection.sha256 is not None:
+        size, sha256 = protection.size, protection.sha256  # the file kept, with the ids moved or the guard added
     try:
         project = await _project(projects, project_id)
         checked = await _check_first(ifcgraph, project, project_id, target, item["file_name"])
@@ -384,13 +434,13 @@ async def _complete(
             title=item["title"],
             version_number=item["version_number"],
             file_name=item["file_name"],
-            size_in_bytes=int(item["size_in_bytes"]),
+            size_in_bytes=size,
             sha256=sha256,
             storage_key=target,
             author=session.username,
             metadata=default_metadata(
                 file_name=item["file_name"],
-                size_in_bytes=int(item["size_in_bytes"]),
+                size_in_bytes=size,
                 sha256=sha256,
                 author=session.username,
                 project_name=project["name"],
@@ -399,7 +449,8 @@ async def _complete(
                 [DocumentMetadataEntry(name="base_version_index", value=[str(base_version)], data_type="integer32")]
                 if base_version is not None
                 else []
-            ),
+            )
+            + _renumbered(protection),
             parent_version_index=None if base_version is None else int(base_version),
             on_latest=None if base_version is None else int(base_version),  # a second upload on the same base: 412
             max_step_id=await anyio.to_thread.run_sync(stored_history, storage, target, item["file_name"]),

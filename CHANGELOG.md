@@ -14,6 +14,11 @@ are in the commit history.
 - Every version of an IFC file carries `ifc_max_step_id` (`integer64`) in its metadata: the highest STEP id the
   document's versions have had, kept with the document (PostgreSQL migration 0008) and raised by every new version, so
   that a client gives no id again that a version deleted.
+- An upload of a new version of an IFC file no longer gives an id that an earlier version deleted: such an id is moved
+  above the document's history in the whole file, and the version's metadata names the moves in `ifc_renumbered`; a
+  file whose highest instance is below the history is kept with the app's guard of it (`StepIdGuard`, F98 a), the
+  base's own guard when the upload left it out. A change
+  set's worker numbers what it makes above the document's history, not the base file's alone.
 - The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
   the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
 
