@@ -25,6 +25,7 @@ from pydantic import SecretStr
 
 from opencde.accounts.roles import Role
 from opencde.documents.schemas import DocumentMetadataEntry
+from opencde.errors import ApiError
 from opencde.graph.graph import Graph
 from opencde.ids import new_id
 from opencde.main import create_app
@@ -288,8 +289,36 @@ async def selection_sessions(area: Area) -> None:
     assert await selections.by_token("not-a-token") is None and await selections.by_id("no-such-session") is None
 
 
+async def uploads_on_a_base(area: Area) -> None:
+    """Two uploads on the same base at once: one becomes the next version, the other is refused with 412, as the
+    document's latest is checked in the version's transaction and not before it (UL-48, fas 5.0)."""
+    users, projects, documents = area.users, area.projects, area.documents
+    editor = await users.create("editor", PASSWORD)
+    project = await projects.create("beta")
+    pid = project.project_id
+    await projects.set_member(pid, editor.id, Role.EDITOR)
+    first = await documents.create_version(project_id=pid, document_id=None, **_version())
+    made = await asyncio.gather(
+        *(
+            documents.create_version(project_id=pid, document_id=first.document_id, on_latest=1, **_version())
+            for _ in range(2)
+        ),
+        return_exceptions=True,
+    )
+    versions = [m for m in made if not isinstance(m, BaseException)]
+    refused = [m for m in made if isinstance(m, ApiError)]
+    assert [v.version_index for v in versions] == [2] and len(refused) == 1, made
+    assert refused[0].status_code == 412 and refused[0].code == "version_conflict"
+    assert "latest version is 2" in str(refused[0].detail)
+    third = await documents.create_version(project_id=pid, document_id=first.document_id, on_latest=2, **_version())
+    assert third.version_index == 3
+    with pytest.raises(HTTPException, match="Document not found"):
+        await documents.create_version(project_id=pid, document_id=new_id(), on_latest=1, **_version())
+
+
 CASES = (
     documents_and_their_versions,
+    uploads_on_a_base,
     publications,
     the_teams_read_the_latest_ids_file,
     upload_sessions_and_their_parts,

@@ -400,6 +400,7 @@ async def _complete(
                 else []
             ),
             parent_version_index=None if base_version is None else int(base_version),
+            on_latest=None if base_version is None else int(base_version),  # a second upload on the same base: 412
         )
     except BaseException:
         storage.delete(target)

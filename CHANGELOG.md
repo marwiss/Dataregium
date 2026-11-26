@@ -7,6 +7,13 @@ Dataspatium first. The releases 1.0.0, 2.0.0 and 3.0.0 are withdrawn; their
 notes stay below. Every release lists what a client can see; internal changes
 are in the commit history.
 
+## Unreleased
+
+- Two uploads on the same base version at once no longer both become versions: the document's latest version is
+  checked in the new version's transaction, so that the second gets the 412 `version_conflict` it would get later.
+- The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
+  the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
+
 ## 0.1.0 — 2026-11-24
 
 The first beta of the one series: what 3.0.0 had, in three tiers chosen with

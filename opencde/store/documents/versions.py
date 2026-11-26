@@ -22,6 +22,7 @@ from opencde.deps import GraphDep, PostgresDep
 from opencde.documents.links import version_links
 from opencde.documents.schemas import DocumentMetadataEntry, DocumentVersion, FileDescription
 from opencde.documents.validation import Validation, with_graph_findings
+from opencde.errors import CODE_VERSION_CONFLICT, ApiError
 from opencde.graph.graph import Graph, Tx
 from opencde.ids import new_id
 from opencde.store.jobs.conversions import STATE_DONE
@@ -69,6 +70,15 @@ class VersionRecord:
 _RETURN = """
 RETURN d.document_id AS document_id, p.project_id AS project_id, p.name AS project_name, properties(v) AS version
 """
+
+
+def latest_moved(base: int, latest: Any) -> ApiError:
+    """The 412 of an upload on a base version that is no longer the document's latest."""
+    return ApiError(
+        412,
+        f"The upload builds on version {base}, but the document's latest version is {latest}",
+        code=CODE_VERSION_CONFLICT,
+    )
 
 
 def _record(row: dict[str, Any]) -> VersionRecord:
@@ -257,6 +267,7 @@ class DocumentRepository:
         approved_by: str | None = None,
         change_set_id: str | None = None,
         change_set: str | None = None,
+        on_latest: int | None = None,
     ) -> VersionRecord:
         """A new document (``document_id`` None) or a new version of an existing one, in one transaction.
 
@@ -264,6 +275,8 @@ class DocumentRepository:
         ``document_id`` names an existing document. A version built on another names it in
         ``parent_version_index`` and is linked to it (``DERIVED_FROM``); one approved from a change set carries
         ``approved_by``, ``change_set_id`` (the topic's guid) and ``change_set`` (the changes, packed) (ADR 0021).
+        With ``on_latest`` the version is made only while the document's latest version is still that one, as an
+        upload on a base version asks (412 otherwise); the document's write lock is taken before its index is read.
         """
         now = now_iso()
         version_id = new_id()
@@ -285,7 +298,7 @@ class DocumentRepository:
                     title=title,
                     now=now,
                 )
-            else:
+            elif on_latest is None:
                 head = await tx.one(
                     """
                     MATCH (:Project {project_id: $project_id})-[:HAS_DOCUMENT]->(d:Document {document_id: $document_id})
@@ -295,6 +308,29 @@ class DocumentRepository:
                     project_id=project_id,
                     document_id=document_id,
                     title=title,
+                )
+            else:
+                # Written first, so that the document's lock is held before its latest index is read.
+                now_latest = await tx.one(
+                    """
+                    MATCH (:Project {project_id: $project_id})-[:HAS_DOCUMENT]->(d:Document {document_id: $document_id})
+                    SET d.title = $title
+                    RETURN coalesce(d.latest_index, 0) AS index
+                    """,
+                    project_id=project_id,
+                    document_id=document_id,
+                    title=title,
+                )
+                if now_latest is not None and int(now_latest["index"]) != on_latest:
+                    raise latest_moved(on_latest, now_latest["index"])
+                head = await tx.one(
+                    """
+                    MATCH (:Project {project_id: $project_id})-[:HAS_DOCUMENT]->(d:Document {document_id: $document_id})
+                    SET d.latest_index = coalesce(d.latest_index, 0) + 1
+                    RETURN d.latest_index AS index
+                    """,
+                    project_id=project_id,
+                    document_id=document_id,
                 )
             if head is None:
                 raise HTTPException(404, "Document not found")

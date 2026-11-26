@@ -37,6 +37,7 @@ from opencde.store.documents.versions import (
     _change,
     _change_set,
     _validation,
+    latest_moved,
 )
 from opencde.store.jobs.conversions import STATE_DONE
 from opencde.store.logbook.postgres import add_in
@@ -163,6 +164,14 @@ UPDATE documents d SET latest_index = d.latest_index + 1, title = $3
 WHERE d.project_id = $1 AND d.document_id = $2
 RETURNING d.latest_index AS index
 """
+#: The next index only while the latest is still $4; the row's lock makes a second upload on the same base wait and
+#: then find the latest moved.
+DOCUMENT_NEXT_ON = """
+UPDATE documents d SET latest_index = d.latest_index + 1, title = $3
+WHERE d.project_id = $1 AND d.document_id = $2 AND d.latest_index = $4
+RETURNING d.latest_index AS index
+"""
+DOCUMENT_LATEST = "SELECT latest_index AS index FROM documents WHERE project_id = $1 AND document_id = $2"
 VERSION_INSERT = """
 WITH made AS (
     INSERT INTO document_versions AS v (
@@ -321,9 +330,11 @@ class PostgresDocumentRepository:
         approved_by: str | None = None,
         change_set_id: str | None = None,
         change_set: str | None = None,
+        on_latest: int | None = None,
     ) -> VersionRecord:
         """A new document (``document_id`` None) or a new version of an existing one, in one transaction: the
-        document's row is locked while its next index is taken. The rest as the graph's ``create_version``."""
+        document's row is locked while its next index is taken, and with ``on_latest`` only while its latest version
+        is still that one (412 otherwise). The rest as the graph's ``create_version``."""
         now = now_iso()
         version_id = new_id()
         new_document_id = document_id or requested_document_id or new_id()
@@ -333,8 +344,12 @@ class PostgresDocumentRepository:
         async def work(tx: Tx) -> dict[str, Any]:
             if document_id is None:
                 head = await tx.one(DOCUMENT_INSERT, new_document_id, project_id, title, now)
-            else:
+            elif on_latest is None:
                 head = await tx.one(DOCUMENT_NEXT, project_id, document_id, title)
+            else:
+                head = await tx.one(DOCUMENT_NEXT_ON, project_id, document_id, title, on_latest)
+                if head is None and (now_latest := await tx.one(DOCUMENT_LATEST, project_id, document_id)):
+                    raise latest_moved(on_latest, now_latest["index"])
             if head is None:
                 raise HTTPException(404, "Document not found")
             index = int(head["index"])
