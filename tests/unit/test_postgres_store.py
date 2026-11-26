@@ -201,6 +201,7 @@ def test_the_migrations_are_numbered_from_one_without_gaps(tmp_path: Path) -> No
         (5, "0005_jobs"),
         (6, "0006_logs"),
         (7, "0007_project_models"),
+        (8, "0008_document_step_ids"),
     ], "every area's, in order"
     for names, words in ((["0001_a.sql", "0003_c.sql"], "without gaps"), (["1_a.sql"], "NNNN_name.sql")):
         folder = tmp_path / names[0]
@@ -920,7 +921,8 @@ async def test_a_version_is_made_in_one_transaction_with_the_next_index_and_its_
     assert fake.transactions == 1 and [query for query, _ in fake.statements] == [
         documents.DOCUMENT_INSERT,
         documents.VERSION_INSERT,
-    ]
+        documents.DOCUMENT_MAX_STEP_ID,
+    ], "the document's highest STEP id is read back with the version, also when the version brings none"
     assert record.document_id == "d-9" and record.version_index == 1 and record.metadata[0]["name"] == "file_name"
     made = fake.statements[1][1]
     assert made[3] == "editor" and made[5] == "1", "the author joins users by name; the number is the index"
@@ -930,7 +932,11 @@ async def test_a_version_is_made_in_one_transaction_with_the_next_index_and_its_
     record = await repository.create_version(
         document_id="d-9", parent_version_index=3, approved_by="manager", change_set_id="t-1", change_set="x", **fields
     )
-    assert [query for query, _ in fake.statements] == [documents.DOCUMENT_NEXT, documents.VERSION_INSERT]
+    assert [query for query, _ in fake.statements] == [
+        documents.DOCUMENT_NEXT,
+        documents.VERSION_INSERT,
+        documents.DOCUMENT_MAX_STEP_ID,
+    ]
     assert fake.statements[0][1] == ("p-1", "d-9", "Plan") and record.version_index == 4
     assert fake.statements[1][1][13:] == (3, "manager", "t-1", "x")
 

@@ -39,6 +39,7 @@ from ifc_db.merge import (
 from ifc_db.validation import pack_report, unpack_report
 
 from opencde.documents.schemas import DocumentMetadataEntry
+from opencde.documents.step import stored_history
 from opencde.ids import new_id
 from opencde.ifcgraph.maintenance import drop_partial
 from opencde.logging import get_logger
@@ -261,6 +262,7 @@ async def _as_version(
             metadata=metadata,
             parent_version_index=int(base["version_index"]),
             approved_by=author,
+            max_step_id=await asyncio.to_thread(stored_history, service.storage, key, latest.file_name),
         )
     except BaseException:
         service.storage.delete(key)

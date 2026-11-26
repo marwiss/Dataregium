@@ -373,6 +373,7 @@ class DocumentStore(Protocol):
         change_set_id: str | None = None,
         change_set: str | None = None,
         on_latest: int | None = None,
+        max_step_id: int | None = None,
     ) -> VersionRecord: ...
     async def versions_since(
         self, *, user_id: str, document_id: str, since: int, until: int

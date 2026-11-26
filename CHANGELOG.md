@@ -11,6 +11,9 @@ are in the commit history.
 
 - Two uploads on the same base version at once no longer both become versions: the document's latest version is
   checked in the new version's transaction, so that the second gets the 412 `version_conflict` it would get later.
+- Every version of an IFC file carries `ifc_max_step_id` (`integer64`) in its metadata: the highest STEP id the
+  document's versions have had, kept with the document (PostgreSQL migration 0008) and raised by every new version, so
+  that a client gives no id again that a version deleted.
 - The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
   the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
 

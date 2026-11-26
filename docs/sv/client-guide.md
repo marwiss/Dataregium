@@ -287,6 +287,12 @@ kontrollerad, de andra `ifc_validation_*`-posterna; `ifc_validation_report` är
 adressen till rapporten, ett tillägg som svarar på samma token. Se
 [ifc-db.md](ifc-db.md#kontroll-av-uppladdningar-mot-ifc-schemat).
 
+Varje version av en IFC-fil i STEP har `ifc_max_step_id` (`integer64`) i sin
+metadata när servern känner det: det högsta STEP-id som dokumentets versioner har
+haft, som det står nu, detsamma på varje version. En klient som lägger till
+instanser numrerar dem över det, så att inget id kommer tillbaka som en version har
+raderat.
+
 En version som rymmer en IFC-modell kan också få namngivna frågor, som dess
 våningar, rummens area eller en egenskaps värde. Det är ett tillägg som svarar
 på samma token och som kapabilitetsdokumentet annonserar i `ifc_queries`. Se

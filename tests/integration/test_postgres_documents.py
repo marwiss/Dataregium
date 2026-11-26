@@ -312,6 +312,16 @@ async def uploads_on_a_base(area: Area) -> None:
     assert "latest version is 2" in str(refused[0].detail)
     third = await documents.create_version(project_id=pid, document_id=first.document_id, on_latest=2, **_version())
     assert third.version_index == 3
+
+    # The highest STEP id the document has had is raised by each version and never lowered (UL-48, SA-103).
+    await documents.create_version(project_id=pid, document_id=first.document_id, max_step_id=40, **_version())
+    await documents.create_version(project_id=pid, document_id=first.document_id, max_step_id=12, **_version())
+    latest = await documents.latest(user_id=editor.id, document_id=first.document_id)
+    assert latest is not None and latest.max_step_id == 40
+    entry = [e for e in latest.metadata_entries() if e.name == "ifc_max_step_id"]
+    assert [e.model_dump() for e in entry] == [{"name": "ifc_max_step_id", "value": ["40"], "data_type": "integer64"}]
+    versions = await documents.versions(user_id=editor.id, document_id=first.document_id)
+    assert {v.max_step_id for v in versions} == {40}, "the document's value, on every version"
     with pytest.raises(HTTPException, match="Document not found"):
         await documents.create_version(project_id=pid, document_id=new_id(), on_latest=1, **_version())
 

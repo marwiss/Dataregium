@@ -50,6 +50,7 @@ from opencde.documents.schemas import (
     UploadFileDetails,
     UploadFilePartInstruction,
 )
+from opencde.documents.step import stored_history
 from opencde.documents.validation import metadata_entries as validation_metadata
 from opencde.errors import (
     CODE_IFC_VALIDATION_FAILED,
@@ -401,6 +402,7 @@ async def _complete(
             ),
             parent_version_index=None if base_version is None else int(base_version),
             on_latest=None if base_version is None else int(base_version),  # a second upload on the same base: 412
+            max_step_id=await anyio.to_thread.run_sync(stored_history, storage, target, item["file_name"]),
         )
     except BaseException:
         storage.delete(target)

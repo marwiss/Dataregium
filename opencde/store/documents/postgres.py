@@ -70,13 +70,14 @@ def _record(row: dict[str, Any]) -> VersionRecord:
         storage_key=row["storage_key"],
         author=row["author"],
         metadata=list(row["metadata"] or []),
+        max_step_id=None if row.get("max_step_id") is None else int(row["max_step_id"]),
     )
 
 
 # -- documents and their versions --------------------------------------------------------------------------------
 
 LATEST = """
-SELECT d.document_id, p.project_id, p.name AS project_name, v.id, v.version_index, v.version_number,
+SELECT d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
        v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
 FROM documents d
 JOIN memberships m ON m.project_id = d.project_id AND m.user_id = $1
@@ -87,7 +88,7 @@ ORDER BY v.version_index DESC
 LIMIT 1
 """
 VERSION = """
-SELECT d.document_id, p.project_id, p.name AS project_name, v.id, v.version_index, v.version_number,
+SELECT d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
        v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
 FROM documents d
 JOIN memberships m ON m.project_id = d.project_id AND m.user_id = $1
@@ -96,7 +97,7 @@ JOIN document_versions v ON v.document_id = d.document_id AND v.version_index = 
 WHERE d.document_id = $2
 """
 VERSIONS = """
-SELECT d.document_id, p.project_id, p.name AS project_name, v.id, v.version_index, v.version_number,
+SELECT d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
        v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
 FROM documents d
 JOIN memberships m ON m.project_id = d.project_id AND m.user_id = $1
@@ -108,7 +109,7 @@ ORDER BY v.version_index
 LATEST_MANY = """
 SELECT h.* FROM (
     SELECT DISTINCT ON (d.document_id)
-           d.document_id, p.project_id, p.name AS project_name, v.id, v.version_index, v.version_number,
+           d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
            v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
     FROM documents d
     JOIN memberships m ON m.project_id = d.project_id AND m.user_id = $1
@@ -122,7 +123,7 @@ ORDER BY h.document_id COLLATE "C"
 LATEST_IN_PROJECTS = """
 SELECT h.* FROM (
     SELECT DISTINCT ON (d.document_id)
-           d.document_id, p.project_id, p.name AS project_name, v.id, v.version_index, v.version_number,
+           d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
            v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
     FROM documents d
     JOIN memberships m ON m.project_id = d.project_id AND m.user_id = $1
@@ -172,6 +173,13 @@ WHERE d.project_id = $1 AND d.document_id = $2 AND d.latest_index = $4
 RETURNING d.latest_index AS index
 """
 DOCUMENT_LATEST = "SELECT latest_index AS index FROM documents WHERE project_id = $1 AND document_id = $2"
+#: The highest STEP id the document has had, raised and never lowered (UL-48); GREATEST passes NULL over, so that a
+#: version without a value returns the document's as it stands.
+DOCUMENT_MAX_STEP_ID = """
+UPDATE documents SET max_step_id = GREATEST(max_step_id, $3::bigint)
+WHERE project_id = $1 AND document_id = $2
+RETURNING max_step_id
+"""
 VERSION_INSERT = """
 WITH made AS (
     INSERT INTO document_versions AS v (
@@ -224,7 +232,7 @@ RETURNING version_id
 """
 # What the server's own jobs read of a project, by the project they were started in, not for a member.
 HEAD = """
-SELECT d.document_id, p.project_id, p.name AS project_name, v.id, v.version_index, v.version_number,
+SELECT d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
        v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
 FROM documents d
 JOIN projects p ON p.project_id = d.project_id
@@ -247,7 +255,7 @@ WHERE d.project_id = $1 AND d.document_id = $2
 PROJECT_HEADS = """
 SELECT h.* FROM (
     SELECT DISTINCT ON (d.document_id)
-           d.document_id, p.project_id, p.name AS project_name, v.id, v.version_index, v.version_number,
+           d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
            v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
     FROM documents d
     JOIN projects p ON p.project_id = d.project_id
@@ -264,7 +272,7 @@ LIMIT $3
 MEMBER_HEADS = """
 SELECT h.* FROM (
     SELECT DISTINCT ON (d.document_id)
-           d.document_id, p.project_id, p.name AS project_name, v.id, v.version_index, v.version_number,
+           d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
            v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
     FROM documents d
     JOIN memberships m ON m.project_id = d.project_id AND m.user_id = $1
@@ -331,6 +339,7 @@ class PostgresDocumentRepository:
         change_set_id: str | None = None,
         change_set: str | None = None,
         on_latest: int | None = None,
+        max_step_id: int | None = None,
     ) -> VersionRecord:
         """A new document (``document_id`` None) or a new version of an existing one, in one transaction: the
         document's row is locked while its next index is taken, and with ``on_latest`` only while its latest version
@@ -375,7 +384,8 @@ class PostgresDocumentRepository:
             )
             if row is None:
                 raise HTTPException(404, "Project not found")
-            return row
+            raised = await tx.one(DOCUMENT_MAX_STEP_ID, project_id, new_document_id, max_step_id)
+            return {**row, "max_step_id": raised["max_step_id"] if raised else None}
 
         return _record(await self.postgres.write(work))
 

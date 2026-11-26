@@ -24,6 +24,7 @@ from opencde.deps import ProjectsDep, SettingsDep, StorageDep, UsersDep
 from opencde.documents.assembly import store_stream
 from opencde.documents.links import api_base, with_query
 from opencde.documents.schemas import MAX_TITLE, MAX_VERSION_NUMBER
+from opencde.documents.step import stored_history
 from opencde.documents.validation import report as validation_report
 from opencde.errors import CODE_UPLOAD_TOO_LARGE, ApiError
 from opencde.ids import is_uuid, new_id, normalize_guid
@@ -496,6 +497,7 @@ async def select_ui_upload(
                     author=web_user.user.username,
                     project_name=project.name if project else "",
                 ),
+                max_step_id=await anyio.to_thread.run_sync(stored_history, storage, key, file_name),
             )
         except BaseException:
             storage.delete(key)

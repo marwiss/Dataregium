@@ -128,7 +128,7 @@ async def test_a_load_puts_rows_in_at_the_backups_migration_and_migrates_the_res
     assert database.transactions == 1
 
     for until, given, words in (
-        (8, rows, "after this server's 0007"),
+        (9, rows, "after this server's 0008"),
         (3, [("topics", {"guid": "t"})], "does not have at 0003: 'topics'"),
         (5, [("audit_events", {})], "does not have at 0005: 'audit_events'"),
     ):
@@ -500,9 +500,9 @@ async def test_a_backup_with_postgresql_holds_its_rows_beside_the_models(tmp_pat
     ifc = Graph("ifc", model_nodes())
     database = a_database({"users": [{"id": "u1", "username": "anna"}], "topics": [{"guid": "t1"}]})
     manifest = await backups.export(ifc, LocalStorage(tmp_path / "s"), tmp_path / "b", postgres=database)  # type: ignore[arg-type]
-    assert (manifest.store_dialect, manifest.rows, manifest.store_migration, manifest.nodes) == ("postgres", 2, 7, 2)
+    assert (manifest.store_dialect, manifest.rows, manifest.store_migration, manifest.nodes) == ("postgres", 2, 8, 2)
     written = json.loads((tmp_path / "b" / "manifest.json").read_text(encoding="utf-8"))
-    assert written["store_dialect"] == "postgres" and written["rows"] == 2 and written["store_migration"] == 7
+    assert written["store_dialect"] == "postgres" and written["rows"] == 2 and written["store_migration"] == 8
     assert set(written["checksums"]) == {*backups.GRAPH_FILES, backups.STORE_ROWS}
     with gzip.open(tmp_path / "b" / backups.STORE_ROWS, "rt", encoding="utf-8") as handle:
         assert [json.loads(line) for line in handle] == [
@@ -535,7 +535,7 @@ async def test_a_backup_of_postgresql_restores_into_postgresql_alone(
 
     into = Graph("ifc")
     await backups.restore(into, LocalStorage(tmp_path / "again"), tmp_path / "b", postgres=FakePostgres())  # type: ignore[arg-type]
-    assert loaded == [([("users", {"id": "u1"})], 7)]
+    assert loaded == [([("users", {"id": "u1"})], 8)]
     assert into.labels() == {"Model", "Entity", "IfcWall"}, "the models to the IFC graph"
     with pytest.raises(backups.BackupError, match="restores into PostgreSQL alone"):
         await backups.restore(Graph("ifc"), LocalStorage(tmp_path / "x"), tmp_path / "b")  # type: ignore[arg-type]

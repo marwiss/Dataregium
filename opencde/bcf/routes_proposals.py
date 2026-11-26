@@ -46,6 +46,7 @@ from opencde.deps import ProjectsDep, SettingsDep, StorageDep
 from opencde.documents.links import api_base
 from opencde.documents.routes_clash import camera_looking_at
 from opencde.documents.schemas import DocumentMetadataEntry, DocumentVersion
+from opencde.documents.step import stored_history
 from opencde.documents.validation import IfcRooms, IfcValidationCheck, IfcValidationIssue, rooms_of
 from opencde.errors import CODE_VERSION_CONFLICT, ApiError
 from opencde.ids import new_id
@@ -311,6 +312,7 @@ async def proposal_approve(
             approved_by=topic.username,
             change_set_id=topic.guid,
             change_set=pack_report(list(change_set.get("changes") or [])),
+            max_step_id=await anyio.to_thread.run_sync(stored_history, storage, key, latest.file_name),
         )
     except BaseException:
         storage.delete(key)

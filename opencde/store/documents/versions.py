@@ -21,6 +21,7 @@ from opencde import audit
 from opencde.deps import GraphDep, PostgresDep
 from opencde.documents.links import version_links
 from opencde.documents.schemas import DocumentMetadataEntry, DocumentVersion, FileDescription
+from opencde.documents.step import is_step
 from opencde.documents.validation import Validation, with_graph_findings
 from opencde.errors import CODE_VERSION_CONFLICT, ApiError
 from opencde.graph.graph import Graph, Tx
@@ -46,6 +47,7 @@ class VersionRecord:
     storage_key: str
     author: str
     metadata: list[dict[str, Any]]
+    max_step_id: int | None = None  # the highest STEP id the document has had (UL-48), None while unknown
 
     @property
     def extension(self) -> str:
@@ -64,12 +66,23 @@ class VersionRecord:
         )
 
     def metadata_entries(self) -> list[DocumentMetadataEntry]:
-        return [DocumentMetadataEntry.model_validate(entry) for entry in self.metadata]
+        """The version's metadata, and for an IFC file the highest STEP id its document has had, as it stands now
+        (``ifc_max_step_id``, SA-103), so that a client gives no id a version has deleted."""
+        entries = [DocumentMetadataEntry.model_validate(entry) for entry in self.metadata]
+        if self.max_step_id is not None and is_step(self.file_name):
+            entries = [entry for entry in entries if entry.name != MAX_STEP_ID]
+            entries.append(
+                DocumentMetadataEntry(name=MAX_STEP_ID, value=[str(self.max_step_id)], data_type="integer64")
+            )
+        return entries
 
 
 _RETURN = """
-RETURN d.document_id AS document_id, p.project_id AS project_id, p.name AS project_name, properties(v) AS version
+RETURN d.document_id AS document_id, p.project_id AS project_id, p.name AS project_name, properties(v) AS version,
+       d.max_step_id AS max_step_id
 """
+#: The metadata entry with the highest STEP id a document has had (SA-103).
+MAX_STEP_ID = "ifc_max_step_id"
 
 
 def latest_moved(base: int, latest: Any) -> ApiError:
@@ -98,6 +111,7 @@ def _record(row: dict[str, Any]) -> VersionRecord:
         storage_key=version["storage_key"],
         author=version["author"],
         metadata=json.loads(version.get("metadata") or "[]"),
+        max_step_id=None if row.get("max_step_id") is None else int(row["max_step_id"]),
     )
 
 
@@ -268,6 +282,7 @@ class DocumentRepository:
         change_set_id: str | None = None,
         change_set: str | None = None,
         on_latest: int | None = None,
+        max_step_id: int | None = None,
     ) -> VersionRecord:
         """A new document (``document_id`` None) or a new version of an existing one, in one transaction.
 
@@ -277,6 +292,7 @@ class DocumentRepository:
         ``approved_by``, ``change_set_id`` (the topic's guid) and ``change_set`` (the changes, packed) (ADR 0021).
         With ``on_latest`` the version is made only while the document's latest version is still that one, as an
         upload on a base version asks (412 otherwise); the document's write lock is taken before its index is read.
+        ``max_step_id`` raises the highest STEP id the document has had (``opencde.documents.step``), never lowers it.
         """
         now = now_iso()
         version_id = new_id()
@@ -363,6 +379,18 @@ class DocumentRepository:
             )
             if row is None:
                 raise HTTPException(404, "Project not found")
+            if max_step_id is not None:
+                raised = await tx.one(
+                    """
+                    MATCH (:Project {project_id: $project_id})-[:HAS_DOCUMENT]->(d:Document {document_id: $document_id})
+                    SET d.max_step_id = CASE WHEN coalesce(d.max_step_id, 0) > $high THEN d.max_step_id ELSE $high END
+                    RETURN d.max_step_id AS max_step_id
+                    """,
+                    project_id=project_id,
+                    document_id=new_document_id,
+                    high=max_step_id,
+                )
+                row = {**row, "max_step_id": raised["max_step_id"] if raised else None}
             if parent_version_index is not None:
                 await tx.run(
                     """

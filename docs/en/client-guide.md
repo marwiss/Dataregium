@@ -280,6 +280,11 @@ once checked, the other `ifc_validation_*` entries; `ifc_validation_report` is
 the address of the report, an extension that answers to the same token. See
 [ifc-db.md](ifc-db.md#checking-uploads-against-the-ifc-schema).
 
+Every version of an IFC file in STEP carries `ifc_max_step_id` (`integer64`) in its
+metadata once the server knows it: the highest STEP id the document's versions
+have had, as it stands now, the same on every version. A client that adds
+instances numbers them above it, so that no id comes back that a version deleted.
+
 A version that holds an IFC model can also be asked named queries, such as its
 storeys, the areas of its spaces or the value of a property: an extension that
 answers to the same token, and that the capabilities document announces in

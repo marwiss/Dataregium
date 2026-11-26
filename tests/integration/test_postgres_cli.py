@@ -138,7 +138,7 @@ async def test_on_postgresql_a_backup_restores_the_same_rows(
     assert {"conversions", "validations", "teams", "team_members", "web_sessions", "bcf_events"} <= set(before)
 
     manifest = await backups.export(None, storage, tmp_path / "backup", postgres=pg)
-    assert (manifest.store_dialect, manifest.store_migration, manifest.nodes) == ("postgres", 7, 0)
+    assert (manifest.store_dialect, manifest.store_migration, manifest.nodes) == ("postgres", 8, 0)
     assert manifest.rows == sum(len(rows) for rows in before.values())
 
     await tables.wipe(pg)
@@ -284,7 +284,9 @@ def test_on_postgresql_the_command_line_runs_with_no_graph(
     run("ifc-db", "list")
     doctor = run("doctor")
     assert "OK      Graph database: not used" in doctor
-    assert "OK      Schema of the server's own data: 7 of 7 migrations applied, the last 0007_project_models" in doctor
+    assert (
+        "OK      Schema of the server's own data: 8 of 8 migrations applied, the last 0008_document_step_ids" in doctor
+    )
 
     backed = run("backup", str(tmp_path / "backups"))
     (folder,) = (tmp_path / "backups").iterdir()
