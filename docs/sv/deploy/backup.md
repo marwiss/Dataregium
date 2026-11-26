@@ -87,15 +87,19 @@ viewpointernas komponenter, provningarna, krocktesterna, sammanslagningarna och
 anropsloggens poster efter de id servern gav dem. En säkerhetskopia från en
 tidigare utgåva lämnar de senare och säger hur många noder den lämnade (`WARN …
 nodes without a key were not exported`). Uppdatera därför först utcheckningen
-och bygg den här utgåvans image, och skriv sedan, med den gamla `.env` och den
+och hämta den här utgåvans image (`build api` i stället för `pull api` för en
+utcheckning som bygger sin egen), och skriv sedan, med den gamla `.env` och den
 gamla stackens graf igång, säkerhetskopian till datavolymen, som den nya stacken
-behåller, med den här utgåvans `opencde backup`. Det kommandot behöver
-`OPENCDE_TIER=experimental`, eftersom den här utgåvan har serverns egna data i
-en graf bara i nivå 3:
+behåller, med den här utgåvans `opencde backup` i en engångscontainer. Det
+kommandot behöver `OPENCDE_TIER=experimental`, eftersom den här utgåvan har
+serverns egna data i en graf bara i nivå 3. Imagens startkommando är `opencde`,
+så kommandot ges utan det, och containern körs som användaren 10001, som måste
+kunna skriva i mappen (`/data` tillhör den). Ange utgåvan i `OPENCDE_IMAGE_TAG`,
+eftersom den gamla `.env` kan ha den gamla:
 
 ```sh
-docker compose build api
-docker compose run --rm -e OPENCDE_TIER=experimental api opencde backup /data/migration
+OPENCDE_IMAGE_TAG=<release> docker compose pull api
+OPENCDE_IMAGE_TAG=<release> docker compose run --rm --no-deps -e OPENCDE_TIER=experimental api backup /data/migration
 ```
 
 Ta sedan bort `OPENCDE_STORE_GRAPH_URI` ur `.env` om

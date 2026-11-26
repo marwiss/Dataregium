@@ -85,15 +85,19 @@ and teams, the publication of a version, the components of viewpoints, the
 trials, clash checks, merges and request log entries by the ids the server gave
 them. A backup written by an earlier release leaves the latter out and says how
 many nodes it left (`WARN … nodes without a key were not exported`). So update
-the checkout and build this release's image first, and, with the old `.env` and
-the old stack's graph still running, write the backup to the data volume, which
-the new stack keeps, with this release's `opencde backup`. It needs
+the checkout and get this release's image first (`build api` instead of `pull api`
+for a checkout that builds its own), and, with the old `.env` and the old stack's
+graph still running, write the backup to the data volume, which the new stack
+keeps, with this release's `opencde backup` in a one-off container. It needs
 `OPENCDE_TIER=experimental` for that command, since this release keeps the
-server's own data in a graph in tier 3 alone:
+server's own data in a graph in tier 3 alone. The image's entrypoint is
+`opencde`, so the command is given without it, and the container runs as the
+user 10001, who must be able to write the folder (`/data` is theirs). Name the
+release in `OPENCDE_IMAGE_TAG`, as the old `.env` may hold the old one:
 
 ```sh
-docker compose build api
-docker compose run --rm -e OPENCDE_TIER=experimental api opencde backup /data/migration
+OPENCDE_IMAGE_TAG=<release> docker compose pull api
+OPENCDE_IMAGE_TAG=<release> docker compose run --rm --no-deps -e OPENCDE_TIER=experimental api backup /data/migration
 ```
 
 Then remove `OPENCDE_STORE_GRAPH_URI` from `.env` if it is
