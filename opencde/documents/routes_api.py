@@ -43,6 +43,7 @@ from opencde.deps import (
     UsersDep,
     client_ip,
 )
+from opencde.documents import three_way
 from opencde.documents.assembly import AssemblyError, assemble
 from opencde.documents.links import api_base, part_ranges, precheck_url, publication_url, validation_report_url
 from opencde.documents.schemas import (
@@ -75,11 +76,8 @@ from opencde.errors import (
 from opencde.etag import etag_for, matches
 from opencde.ids import is_uuid, new_id, normalize_guid
 from opencde.ifcgraph.service import IfcGraphDep, IfcGraphService
-from opencde.logging import get_logger
 from opencde.ratelimit import RATE_UPLOAD, limiter
-from opencde.repos.conflicts import details as conflict_details
 from opencde.repos.git import Git
-from opencde.repos.merge import MergeError, merge, placements_moved_twice, shape, why_not
 from opencde.repos.writer import prepare
 from opencde.storage import LocalStorage, make_key
 from opencde.store.documents.sessions import (
@@ -98,7 +96,6 @@ from opencde.store.documents.sessions import (
 from opencde.store.documents.versions import DocumentsDep, VersionRecord, default_metadata, publication_metadata
 from opencde.store.oauth2.tokens import Principal
 
-log = get_logger(__name__)
 router = APIRouter(prefix="/documents/1.0", tags=["Documents API"])
 
 SessionId = Annotated[str, Path(alias="session_id", max_length=64)]
@@ -362,14 +359,7 @@ async def _protect(
 
 def _renumbered(protection: Protection) -> list[DocumentMetadataEntry]:
     """The ids an upload's safety net moved, as ``old>new``: the client fetches the version again (SA-103)."""
-    if not protection.renumbered:
-        return []
-    pairs = [f"{old}>{new}" for old, new in protection.renumbered]
-    entries = [DocumentMetadataEntry(name="ifc_renumbered", value=pairs, data_type="string")]
-    if protection.renumbered_count > len(pairs):
-        count = str(protection.renumbered_count)
-        entries.append(DocumentMetadataEntry(name="ifc_renumbered_count", value=[count], data_type="integer32"))
-    return entries
+    return three_way.renumbered_metadata(protection.renumbered, protection.renumbered_count)
 
 
 def _merges(git: Git | None, ifcgraph: IfcGraphService | None, item: dict[str, Any], latest: VersionRecord) -> bool:
@@ -394,63 +384,23 @@ async def _merge_upload(
     merging: tuple[VersionRecord, VersionRecord],
 ) -> tuple[str, int, str]:
     """Merge the upload at ``target`` (its ids already above the document's history) with the versions since its
-    base, in its place: the upload's own blob for the side commit, and the merged file's size and SHA-256. 412
-    ``version_conflict`` with ifcmerge's conflicts in the approval's form, and the moved placements F201 b counts, or
-    with ``["*"]`` when the files cannot be merged as text."""
+    base, in its place (``three_way.merged``): the upload's own blob for the side commit, and the merged file's size
+    and SHA-256."""
     based, latest = merging
     repository = await git.ensure(project_id)
     side_blob = await git.blob(repository, storage.path(target))
-    paths = (storage.path(based.storage_key), storage.path(latest.storage_key), storage.path(target))
-    shapes = [await anyio.to_thread.run_sync(shape, path) for path in paths]
-    where = {"base_version_index": based.version_index, "latest_version_index": latest.version_index}
-    if (reason := why_not(*shapes)) is not None:
-        raise ApiError(
-            412,
-            f"The upload builds on version {based.version_index}, and the document's latest version is "
-            f"{latest.version_index}: {reason}, so it cannot be merged",
-            code=CODE_VERSION_CONFLICT,
-            details={"conflicts": ["*"], "conflict_details": [], "merge": where},
-        )
-    settings = ifcgraph.settings
     with tempfile.TemporaryDirectory(prefix="ifcmerge-") as folder:
-        moved = await anyio.to_thread.run_sync(placements_moved_twice, *paths)
-        try:
-            merged = await merge(
-                perl=settings.perl_path,
-                ifcmerge=str(settings.ifcmerge_path),
-                base=paths[0],
-                theirs=paths[1],
-                ours=paths[2],
-                folder=pathlib.Path(folder),
-                seconds=settings.ifcmerge_timeout_seconds,
-                memory_mb=settings.ifcmerge_memory_mb,
-            )
-        except MergeError as exc:
-            log.warning("ifcmerge_failed", project_id=project_id, error=str(exc)[:200])
-            raise HTTPException(500, "The upload could not be merged") from None
-        conflicts = merged.conflicts + moved
-        if conflicts or merged.path is None:
-            guids = {step_id: guid for guid, step_id in shapes[1].global_ids.items()}
-            keys, listed = await conflict_details(
-                ifcgraph,
-                conflicts,
-                schema=str(shapes[1].schema),
-                files=(
-                    (based.storage_key, based.file_name),
-                    (latest.storage_key, latest.file_name),
-                    (target, str(item["file_name"])),
-                ),
-                guids=guids,
-                latest_index=latest.version_index,
-            )
-            raise ApiError(
-                412,
-                f"The upload builds on version {based.version_index}, and what it changes collides with what "
-                f"version {latest.version_index} changed",
-                code=CODE_VERSION_CONFLICT,
-                details={"conflicts": keys or ["*"], "conflict_details": listed, "merge": where},
-            )
-        await anyio.to_thread.run_sync(shutil.copyfile, merged.path, storage.path(target))
+        done = await three_way.merged(
+            ifcgraph=ifcgraph,
+            storage=storage,
+            what="The upload",
+            project_id=project_id,
+            based=based,
+            latest=latest,
+            ours=(target, str(item["file_name"])),
+            folder=pathlib.Path(folder),
+        )
+        await anyio.to_thread.run_sync(shutil.copyfile, done.path, storage.path(target))
     after = await anyio.to_thread.run_sync(
         protect_stored, storage, target, latest.storage_key, latest.file_name, latest.max_step_id
     )

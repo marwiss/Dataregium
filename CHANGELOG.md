@@ -37,6 +37,9 @@ are in the commit history.
   it came. What both sides changed differently, and a placement both moved, is `412 version_conflict` with
   `conflicts` and `conflict_details` as for an approval; the capabilities' `git.ifcmerge` says whether the server
   merges, and the doctor tries a merge of its own.
+- ifcmerge gets each instance written `#id=CLASS(...)`, so that a file from a tool that writes `#id= CLASS` is merged
+  with sides written by IfcOpenShell instead of colliding on every instance, and the actors both sides made alike,
+  such as the application in their owner histories, stand once in the merged file.
 - The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
   the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
 

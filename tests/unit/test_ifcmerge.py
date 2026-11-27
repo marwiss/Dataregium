@@ -15,7 +15,18 @@ from pathlib import Path
 
 import pytest
 
-from opencde.repos.merge import Merged, MergeError, environment, merge, re_exported, shape, why_not
+from opencde.repos.merge import (
+    Merged,
+    MergeError,
+    collapse_identities,
+    environment,
+    inputs,
+    merge,
+    normalized_copy,
+    re_exported,
+    shape,
+    why_not,
+)
 from tests.conftest import FIXTURES_DIR
 
 STAND_IN = FIXTURES_DIR / "ifcmerge_stand_in.py"
@@ -44,7 +55,8 @@ def test_a_file_is_merged_only_when_every_line_of_its_data_is_one_instance(tmp_p
     )
     split = _shape(tmp_path, model("#5=IFCWALL('2O2Fr$t4X7Zf8NOew3FLOH',$,", "'W',$,$,$,$,$,$);"))
     spaced = _shape(tmp_path, model("#5 = IFCWALL('2O2Fr$t4X7Zf8NOew3FLOH',$,'W',$,$,$,$,$,$);"))
-    assert not split.whole and not spaced.whole, "ifcmerge reads #id=...; at the start of a line, nothing else"
+    assert not split.whole, "ifcmerge reads #id=...; at the start of a line, nothing else"
+    assert spaced.whole and spaced.global_ids == {"2O2Fr$t4X7Zf8NOew3FLOH": 5}, "its copy is written #id=CLASS"
     assert why_not(one, one, one) is None
     assert "whole instance" in str(why_not(one, split, one))
     assert "schema" in str(why_not(one, _shape(tmp_path, model(WALL, schema="IFC2X3")), one))
@@ -61,6 +73,54 @@ def test_a_re_export_is_never_merged(tmp_path: Path) -> None:
     )
     assert re_exported(base, renumbered) and not re_exported(base, base)
     assert "re-export" in str(why_not(base, base, renumbered))
+
+
+def test_ifcmerge_gets_every_instance_written_as_it_reads_one(tmp_path: Path) -> None:
+    """A tool that writes ``#id= CLASS`` would have every instance changed class against IfcOpenShell's ``#id=CLASS``
+    in ifcmerge's eyes; the copies it gets are written alike, and nothing else changes."""
+    source = tmp_path / "spaced.ifc"
+    lines = ("#1= IFCPROJECT('0YvctVUKr0kugbFTf53O9L',$,'P = #2',$,$,$,$,$,$);", "#12 =\tIFCWALL($);", "#3=IFCWALL($);")
+    source.write_bytes(model(*lines).replace(b"\n", b"\r\n"))
+    target = tmp_path / "copy.ifc"
+    assert normalized_copy(source, target) == 12
+    expected = ("#1=IFCPROJECT('0YvctVUKr0kugbFTf53O9L',$,'P = #2',$,$,$,$,$,$);", "#12=IFCWALL($);", lines[2])
+    assert target.read_bytes() == model(*expected).replace(b"\n", b"\r\n")
+    given = inputs(tmp_path, source, source, source)
+    assert given.highest == (12, 12, 12) and [path.name for path in given.paths] == [
+        "base.ifc",
+        "theirs.ifc",
+        "ours.ifc",
+    ]
+
+
+def test_the_actors_both_sides_made_stand_once_after_the_merge(tmp_path: Path) -> None:
+    """Two change sets on one base each make the server's organisation and application: once merged, the other
+    side's go into main's, whatever the application's version, and every reference follows outside the strings."""
+    org = "IFCORGANIZATION($,'Dataregium',$,$,$)"
+    theirs = tmp_path / "theirs.ifc"
+    theirs.write_bytes(model(f"#10={org};", "#11=IFCAPPLICATION(#10,'0.1.0','Dataregium','Dataregium');"))
+    merged = tmp_path / "merged.ifc"
+    lines = (
+        f"#10={org};",
+        "#11=IFCAPPLICATION(#10,'0.1.0','Dataregium','Dataregium');",
+        f"#20={org};",
+        "#21=IFCAPPLICATION(#20,'0.1.1','Dataregium','Dataregium');",
+        "#22=IFCPERSON($,'editor',$,$,$,$,$,$);",
+        "#23=IFCPERSONANDORGANIZATION(#22,#20,$);",
+        "#24=IFCOWNERHISTORY(#23,#21,$,.ADDED.,$,$,$,0);",
+        "#25=IFCWALL('2O2Fr$t4X7Zf8NOew3FLOH',#24,'Not #20, it''s #21',$,$,$,$,$,$);",
+    )
+    merged.write_bytes(model(*lines))
+    assert collapse_identities(merged, theirs) == {20: 10, 21: 11}
+    assert merged.read_bytes() == model(
+        lines[0],
+        lines[1],
+        lines[4],
+        "#23=IFCPERSONANDORGANIZATION(#22,#10,$);",
+        "#24=IFCOWNERHISTORY(#23,#11,$,.ADDED.,$,$,$,0);",
+        lines[7],
+    )
+    assert collapse_identities(merged, theirs) == {}, "nothing more to do"
 
 
 def test_perl_gets_no_variable_that_loads_a_module(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -95,7 +155,7 @@ def _merge(tmp_path: Path, ours: bytes, seconds: float = 20) -> Merged:
 def test_a_merge_gives_the_merged_file(tmp_path: Path) -> None:
     done = _merge(tmp_path, model(WALL, "#6=IFCWALL($);"))
     assert done.path == tmp_path / "merging" / "merged.ifc" and done.conflicts == []
-    assert done.path.read_bytes() == model(WALL)
+    assert done.path.read_bytes() == model(WALL, "#6=IFCWALL($);")
 
 
 def test_the_conflicts_are_read_from_the_report_over_several_lines(tmp_path: Path) -> None:
@@ -126,14 +186,14 @@ def test_the_real_ifcmerge_merges_changes_to_two_attributes_and_reports_one_chan
     ours = tmp_path / "ours.ifc"
     ours.write_bytes(model("#5=IFCWALL('2O2Fr$t4X7Zf8NOew3FLOH',$,'W','Described',$,$,$,$,$);"))
 
-    def run(upload: Path, name: str) -> Merged:
+    def run(upload: Path, name: str, on: Path = base) -> Merged:
         folder = tmp_path / name
         folder.mkdir()
         return asyncio.run(
             merge(
                 perl="perl",
                 ifcmerge=str(REAL),
-                base=base,
+                base=on,
                 theirs=theirs,
                 ours=upload,
                 folder=folder,
@@ -145,6 +205,11 @@ def test_the_real_ifcmerge_merges_changes_to_two_attributes_and_reports_one_chan
     done = run(ours, "one")
     assert done.path is not None
     assert b"#5=IFCWALL('2O2Fr$t4X7Zf8NOew3FLOH',$,'Main','Described',$,$,$,$,$);" in done.path.read_bytes()
+    spaced = tmp_path / "spaced.ifc"  # a tool's #5= IFCWALL, the sides IfcOpenShell's #5=IFCWALL
+    spaced.write_bytes(model(WALL.replace("#5=", "#5= ")))
+    again = run(ours, "spaced", spaced)
+    assert again.path is not None, again.conflicts
+    assert b"#5=IFCWALL('2O2Fr$t4X7Zf8NOew3FLOH',$,'Main','Described',$,$,$,$,$);" in again.path.read_bytes()
     both = tmp_path / "both.ifc"
     both.write_bytes(model("#5=IFCWALL('2O2Fr$t4X7Zf8NOew3FLOH',$,'Upload',$,$,$,$,$,$);"))
     conflict = run(both, "two")
@@ -209,8 +274,11 @@ def test_the_doctor_tries_a_merge_of_its_own(tmp_path: Path) -> None:
         store_password=SecretStr("x" * 20),
     )
     assert on.ifcmerge_on
-    wrong = asyncio.run(ifcmerge_check(on))
-    assert (wrong.ok, wrong.detail_key) == (False, "ifcmerge_wrong"), "the stand-in gives main's file back unmerged"
+    assert asyncio.run(ifcmerge_check(on)).ok, "the stand-in merges"
+    unmerged = tmp_path / "unmerged.py"  # one that says Success! and gives main's file back
+    unmerged.write_text("import shutil, sys\nprint('Success!')\nshutil.copyfile(sys.argv[3], sys.argv[5])\n")
+    wrong = asyncio.run(ifcmerge_check(on.model_copy(update={"ifcmerge_path": str(unmerged)})))
+    assert (wrong.ok, wrong.detail_key) == (False, "ifcmerge_wrong")
     if REAL and shutil.which("perl"):
         right = asyncio.run(ifcmerge_check(on.model_copy(update={"ifcmerge_path": REAL, "perl_path": "perl"})))
         assert right.ok, right.detail
