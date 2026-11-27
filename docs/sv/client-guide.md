@@ -350,6 +350,25 @@ jämförelsen av två versioner gör ([ifc-db.md](ifc-db.md#jämföra-två-versi
 Kapabiliteterna ger adresserna som `git.history_url`, `git.commit_url` och
 `ifc_diff.sides_url`; en server utan repona svarar `404`.
 
+När kapabiliteterna säger `"enabled": true` i `git.remote` kan ett projekts
+`manager` spegla dess repo till en forge vars värd finns bland `hosts`, som
+GitHub (ADR 0032), med en token med scopet `project`:
+`PUT /manage/1.0/projects/{id}/remote` med `url`, https-adressen till ett tomt
+repo utan inloggning, `token`, en finkornig token för bara det repot med läs- och
+skrivrätt till innehållet, `expires_at`, när token går ut (högst 366 dagar
+framåt, 365 om den utelämnas), `max_file_bytes`, forgens gräns för en fil (100
+MiB som hos GitHub), och `acknowledged: true`, att projektets filer, med de
+personuppgifter de kan bära, lämnar servern. Token sparas förseglad och visas
+aldrig igen; kopplingen upphör när den går ut. Servern pushar `main` och
+förslagens grenar åt ett håll efter nya versioner, var och en på det forgen höll,
+och aldrig över en ändring som gjorts hos forgen. En commit med en större fil
+speglas som en egen commit utan den, med samma författare, tid och meddelande och
+trailers `Dataregium-Left-Out` och `Dataregium-Mirror-Of`. `GET` ger `url`,
+`status` (`waiting`, `pushed`, `changed` när en gren ändrats hos forgen och
+lämnats som den är, eller `error`), `error`, `pushed_at`, grenarna `pushed` och
+filerna `left_out`; `DELETE` avslutar speglingen. En server utan den svarar
+`404`.
+
 En version som rymmer en IFC-modell kan också få namngivna frågor, som dess
 våningar, rummens area eller en egenskaps värde. Det är ett tillägg som svarar
 på samma token och som kapabilitetsdokumentet annonserar i `ifc_queries`. Se

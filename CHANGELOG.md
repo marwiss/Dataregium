@@ -65,6 +65,13 @@ are in the commit history.
   its repository holds the same bytes and it has not been read for that many days, never the latest version of a
   document or a published one; whatever reads the version (the download, the diff, a trial, a merge, a clash
   check, a publication) reads it back out of git first. Unset, every file stays.
+- With `OPENCDE_GIT_REMOTES_ENABLED` and the forges' hosts in `OPENCDE_GIT_REMOTE_HOSTS`, a project's manager can
+  mirror its repository to a forge such as GitHub (ADR 0032): `PUT /manage/1.0/projects/{id}/remote` with the https
+  address of an empty repository, a fine-grained token for it, when it expires and `acknowledged: true`. The token is
+  kept sealed and never shown again; the server pushes `main` and the proposals' branches one way, never over a change
+  made at the forge, and mirrors a commit with a file over the forge's limit without it (`Dataregium-Left-Out`).
+  `GET` gives the status, `DELETE` ends it; `git.remote` in the capabilities. PostgreSQL migration 0011. The
+  `postgres` extra now brings `cryptography`.
 - The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
   the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
 

@@ -65,6 +65,11 @@ EXPIRED_CHANGE_SET_DRAFTS = """
 DELETE FROM change_set_drafts
 WHERE changeset_id IN (SELECT changeset_id FROM change_set_drafts WHERE expires_at < $1 LIMIT $2)
 """
+#: A connection to a forge goes with its token (ADR 0032); a manager connects the project again with a new one.
+EXPIRED_PROJECT_REMOTES = """
+DELETE FROM project_remotes
+WHERE project_id IN (SELECT project_id FROM project_remotes WHERE expires_at < $1 LIMIT $2)
+"""
 #: Of the logbook only the request log and the sign-in throttle expire; the audit log is kept.
 EXPIRED_REQUEST_LOG_ENTRIES = """
 DELETE FROM request_log_entries WHERE id IN (SELECT id FROM request_log_entries WHERE expires_at < $1 LIMIT $2)
@@ -85,6 +90,7 @@ EXPIRING = (
     EXPIRED_SELECTION_SESSIONS,
     EXPIRED_UPLOAD_SESSIONS,
     EXPIRED_CHANGE_SET_DRAFTS,
+    EXPIRED_PROJECT_REMOTES,
     EXPIRED_REQUEST_LOG_ENTRIES,
     EXPIRED_SIGN_IN_THROTTLES,
 )

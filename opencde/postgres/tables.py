@@ -121,6 +121,10 @@ VALIDATIONS_IN = "INSERT INTO validations SELECT * FROM jsonb_populate_recordset
 PROPOSALS_OUT = "SELECT to_jsonb(t) AS data FROM proposals t ORDER BY t.id OFFSET $1 LIMIT $2"
 IFC_COPIES_OUT = "SELECT to_jsonb(t) AS data FROM ifc_copies t ORDER BY t.copy_id OFFSET $1 LIMIT $2"
 IFC_COPIES_IN = "INSERT INTO ifc_copies SELECT * FROM jsonb_populate_recordset(NULL::ifc_copies, $1::jsonb)"
+PROJECT_REMOTES_OUT = "SELECT to_jsonb(t) AS data FROM project_remotes t ORDER BY t.project_id OFFSET $1 LIMIT $2"
+PROJECT_REMOTES_IN = """
+INSERT INTO project_remotes SELECT * FROM jsonb_populate_recordset(NULL::project_remotes, $1::jsonb)
+"""
 PROPOSALS_IN = "INSERT INTO proposals SELECT * FROM jsonb_populate_recordset(NULL::proposals, $1::jsonb)"
 CLASHES_OUT = "SELECT to_jsonb(t) AS data FROM clashes t ORDER BY t.id OFFSET $1 LIMIT $2"
 CLASHES_IN = "INSERT INTO clashes SELECT * FROM jsonb_populate_recordset(NULL::clashes, $1::jsonb)"
@@ -185,6 +189,7 @@ TABLES: tuple[Table, ...] = (
     Table("sign_in_throttles", 6, SIGN_IN_THROTTLES_OUT, SIGN_IN_THROTTLES_IN),
     Table("project_repos", 9, PROJECT_REPOS_OUT, PROJECT_REPOS_IN),
     Table("ifc_copies", 10, IFC_COPIES_OUT, IFC_COPIES_IN),
+    Table("project_remotes", 11, PROJECT_REMOTES_OUT, PROJECT_REMOTES_IN),
 )
 BY_NAME = {table.name: table for table in TABLES}
 #: Every table at once, for ``restore --force`` and ``seed --reset``, into a database with every migration.
@@ -193,7 +198,8 @@ TRUNCATE users, projects, memberships, teams, team_members, web_sessions, oauth_
          access_tokens, refresh_tokens, documents, document_versions, publications, upload_sessions, upload_parts,
          selection_sessions, topics, related_topics, header_files, document_references, comments, viewpoints,
          components, bitmaps, bcf_documents, bcf_events, conversions, validations, proposals, clashes, merges,
-         change_set_drafts, audit_events, request_log_entries, sign_in_throttles, project_repos, ifc_copies
+         change_set_drafts, audit_events, request_log_entries, sign_in_throttles, project_repos, ifc_copies,
+         project_remotes
 """
 PRESENT = "SELECT tablename FROM pg_tables WHERE schemaname = current_schema()"
 COLUMNS = """

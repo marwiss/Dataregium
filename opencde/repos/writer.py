@@ -110,9 +110,10 @@ def message_of(
 
 
 def trailers(message: str) -> dict[str, str]:
-    """The ``Dataregium-`` trailers of a commit's message, by their names without the prefix."""
+    """The ``Dataregium-`` trailers of a commit's message, by their names without the prefix: those of its last
+    paragraph, which the server writes, never a line of the client's message above it."""
     found: dict[str, str] = {}
-    for line in message.splitlines():
+    for line in message.strip().rsplit("\n\n", 1)[-1].splitlines():
         name, colon, value = line.partition(": ")
         if colon and name.startswith("Dataregium-") and " " not in name:
             found[name.removeprefix("Dataregium-")] = value.strip()

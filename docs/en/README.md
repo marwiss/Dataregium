@@ -572,8 +572,12 @@ whoever, human or AI agent, carries a part of it further. The ways of working ar
 - **Versions in git in tier 2.** Every version of a text file, such as an IFC file in
   STEP, becomes a commit in a git repository per project on the server, and Bruno
   Postle's [ifcmerge](https://github.com/brunopostle/ifcmerge) does all merging: an
-  upload against an older base is merged, and a proposal becomes a branch. GitHub and
-  other forges can be the repository's remote, and a deleted STEP id never comes back.
+  upload against an older base is merged, and a proposal becomes a branch. The
+  repository can be mirrored one way to GitHub and other forges the server's
+  administrator names, and a deleted STEP id never comes back.
+- **AI in tier 2 through IfcMCP** behind the MCP endpoint: reading tools on a version
+  and a limited edit on a working copy that becomes a proposal as a whole file, which a
+  human approves; the pictures are Dataspatium's.
 - **BIM snippets as a working demonstration.** A proposed change travels as a
   `bim_snippet` in a BCF 3.0 topic, with a published schema behind its
   `reference_schema`, so that the change, the discussion and the decision are in one
@@ -589,8 +593,7 @@ whoever, human or AI agent, carries a part of it further. The ways of working ar
   changes to that part; a change across several teams' parts goes to a `manager`.
 - **A clash check in both places**: on the server with IfcOpenShell's IfcClash and in
   Dataspatium with its own core in JavaScript.
-- **Next**: AI in tier 2 through IfcMCP behind the MCP endpoint, where AI proposes and
-  a human approves; a geodata server with OGC API – Features and Tiles on PostGIS;
+- **Next**: a geodata server with OGC API – Features and Tiles on PostGIS;
   buildingSMART's findings linked to building elements; and proprietary formats
   through the source programs' IFC export.
 

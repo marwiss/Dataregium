@@ -131,6 +131,15 @@ def capabilities(settings: Settings) -> dict[str, Any]:
                     "max_message": 2000,
                     "history_url": "/documents/1.0/documents/{document_id}/history",
                     "commit_url": "/documents/1.0/documents/{document_id}/versions/{version_index}/commit",
+                    "remote": (  # a project's mirror at a forge, set by its managers (ADR 0032)
+                        {
+                            "enabled": True,
+                            "url": "/manage/1.0/projects/{project_id}/remote",
+                            "hosts": settings.git_remote_hosts,
+                        }
+                        if settings.git_remotes_on
+                        else {"enabled": False}
+                    ),
                 }
                 if settings.git_on and settings.offers("documents")
                 else {"enabled": False}

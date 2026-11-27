@@ -61,8 +61,8 @@ ifc-lpg = ["opencde-server[ifc-db]"]
 ifcgraph = ["opencde-server[ifc-db]"]
 # A shared store for the rate limits when several server processes run (ADR 0007).
 redis = ["redis>=5.0"]
-# The server's own data in PostgreSQL rather than a graph (ADR 0029).
-postgres = ["asyncpg>=0.31"]
+# PostgreSQL for the server's own data (ADR 0029), and the sealing of a forge's token for the mirror (ADR 0032).
+postgres = ["asyncpg>=0.31", "cryptography>=46"]
 
 [project.scripts]
 opencde = "opencde.cli:app"

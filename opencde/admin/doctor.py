@@ -253,6 +253,32 @@ async def git_history_check(postgres: Postgres) -> Check:
     return Check("git_history", True, "git_history_missing" if count else "git_history_ok", {"projects": count})
 
 
+#: The projects mirrored to a forge, those whose last attempt did not push everything, and the files left out.
+MIRRORS = """
+SELECT project_id, status, left_out FROM project_remotes WHERE expires_at > $1 ORDER BY project_id LIMIT 10000
+"""
+NAMED = 5  # the files left out that the check names
+
+
+async def git_remotes_check(postgres: Postgres) -> Check:
+    """How the mirrors to the forges go (ADR 0032): a project whose push failed or was changed at the forge makes the
+    check fail, and the files left out are named by project and path in the repository (F208 c), as each project's
+    status names them all."""
+    try:
+        rows = await postgres.run(MIRRORS, now_iso())
+    except PostgresUnavailable:
+        return Check("git_remotes", True, "git_remotes_unknown")
+    failing = sum(row["status"] in ("error", "changed") for row in rows)
+    files = [f"{row['project_id']}:{entry['path']}" for row in rows for entry in row["left_out"] or []]
+    found = {
+        "projects": len(rows),
+        "failing": failing,
+        "left_out": len(files),
+        "files": ", ".join(files[:NAMED]) + (" …" if len(files) > NAMED else "") or "-",
+    }
+    return Check("git_remotes", not failing, "git_remotes_failing" if failing else "git_remotes_ok", found)
+
+
 async def run_checks(
     settings: Settings,
     graph: Graph,
@@ -275,6 +301,8 @@ async def run_checks(
         checks.append(await git_check(settings))
         if settings.git_on and postgres is not None:
             checks.append(await git_history_check(postgres))
+            if settings.git_remotes_on:
+                checks.append(await git_remotes_check(postgres))
     if settings.ifcmerge_path:
         checks.append(await ifcmerge_check(settings))
     https = settings.public_url.startswith("https://")

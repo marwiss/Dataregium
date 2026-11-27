@@ -15,6 +15,7 @@ form tokens and session cookies.
 from __future__ import annotations
 
 import os
+import re
 import secrets
 from contextvars import ContextVar
 from enum import StrEnum
@@ -90,6 +91,7 @@ POSTGRES_URL_SCHEMES = ("postgresql://", "postgres://")
 #: What the local engine answers to as Host and public URL (ADR 0023).
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 MIN_SECRET_KEY_LENGTH = 32
+HOST_NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+")
 MIN_PASSWORD_LENGTH = 12
 SECRET_KEY_FILE = "secret_key"  # a file name under the data directory, not a key  # noqa: S105  # nosec B105
 
@@ -410,6 +412,17 @@ class Settings(BaseSettings):
         "bytes and it has not been read for this many days (F94 c): not the latest version of a document, and not a "
         "published one; it is read back out of git when it is wanted. Unset keeps every file.",
     )
+    git_remotes_enabled: bool = Field(
+        False,
+        description="Let a project's manager mirror its repository to a forge (ADR 0032, F209 c): main and the "
+        "proposals' branches pushed one way, with a token for that repository. Needs OPENCDE_GIT_ENABLED and the "
+        "forges' hosts in OPENCDE_GIT_REMOTE_HOSTS.",
+    )
+    git_remote_hosts: list[str] = Field(
+        default_factory=list,
+        description='The hosts of the forges a project may be mirrored to, as ["github.com"]; an address to another '
+        "host, or to one on a private network, is refused.",
+    )
     ifcmerge_path: str | None = Field(
         None,
         description="ifcmerge, which merges an upload on an older base with the versions since (ADR 0030): "
@@ -626,6 +639,15 @@ class Settings(BaseSettings):
             raise ValueError(f"OPENCDE_WORKCOPY_GRAPH_URI must use one of {', '.join(GRAPH_URI_SCHEMES)}")
         return value
 
+    @field_validator("git_remote_hosts")
+    @classmethod
+    def _check_git_remote_hosts(cls, value: list[str]) -> list[str]:
+        hosts = [host.strip().lower() for host in value]
+        for host in hosts:
+            if not HOST_NAME.fullmatch(host):
+                raise ValueError("OPENCDE_GIT_REMOTE_HOSTS names hosts, as github.com, without a scheme or a port")
+        return hosts
+
     @field_validator("bsdd_api_url")
     @classmethod
     def _check_bsdd_api_url(cls, value: str) -> str:
@@ -749,6 +771,11 @@ class Settings(BaseSettings):
         """Whether the projects' repositories are written (ADR 0030): with OPENCDE_GIT_ENABLED and the server's own
         data in PostgreSQL; a server whose own data is in the graph gets none (F99 a)."""
         return self.git_enabled and self.store_url is not None
+
+    @property
+    def git_remotes_on(self) -> bool:
+        """Whether a project's repository may be mirrored to a forge (ADR 0032): with the repositories and a host."""
+        return self.git_remotes_enabled and self.git_on and bool(self.git_remote_hosts)
 
     @property
     def ifcmerge_on(self) -> bool:

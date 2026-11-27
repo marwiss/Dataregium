@@ -284,7 +284,9 @@ def test_on_postgresql_the_command_line_runs_with_no_graph(
     run("ifc-db", "list")
     doctor = run("doctor")
     assert "OK      Graph database: not used" in doctor
-    assert "OK      Schema of the server's own data: 10 of 10 migrations applied, the last 0010_ifc_files" in doctor
+    assert (
+        "OK      Schema of the server's own data: 11 of 11 migrations applied, the last 0011_project_remotes" in doctor
+    )
 
     backed = run("backup", str(tmp_path / "backups"))
     (folder,) = (tmp_path / "backups").iterdir()

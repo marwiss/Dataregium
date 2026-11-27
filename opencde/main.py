@@ -9,6 +9,7 @@ deliver them.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -19,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from opencde import __version__, capabilities, health
 from opencde.accounts import routes_manage as manage_routes
+from opencde.accounts import routes_remote as remote_routes
 from opencde.accounts import routes_teams as team_routes
 from opencde.admin import api as admin_api
 from opencde.admin import graph_query, routes_requests
@@ -75,11 +77,13 @@ from opencde.postgres.schema import migrate
 from opencde.ratelimit import PathRateLimitMiddleware, install_rate_limiting
 from opencde.repos.git import Git
 from opencde.repos.reading import prune
+from opencde.repos.remote import push_round
 from opencde.repos.upkeep import upkeep
 from opencde.requestlog import RequestLogMiddleware, RequestLogWriter
 from opencde.settings import LOOPBACK_HOSTS, Settings
+from opencde.store.accounts.remotes import PostgresRemotes
 from opencde.store.documents.postgres import prunable_versions
-from opencde.store.logbook.postgres import request_log_store
+from opencde.store.logbook.postgres import audit_log_store, request_log_store
 from opencde.ui.templating import STATIC_DIR, render
 from opencde.web import account as account_routes
 from opencde.web import routes as web_routes
@@ -178,7 +182,19 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
                         settings.git_files_kept_days,
                         lambda offset, limit: prunable_versions(postgres, offset, limit),
                     )
+                pushing = app.state.pushing
+                if settings.git_remotes_on and postgres is not None and (pushing is None or pushing.done()):
+                    app.state.pushing = asyncio.create_task(  # beside the round: a push may take a while
+                        push_round(
+                            app.state.git,
+                            PostgresRemotes(postgres),
+                            settings.secret_key.get_secret_value(),
+                            audit_log_store(app.state.store, postgres),
+                            settings.git_remote_hosts,
+                        )
+                    )
 
+        app.state.pushing = None  # the mirrors' pushes to the forges (ADR 0032)
         cleaner = ExpiryCleaner(  # what expires is in PostgreSQL when it holds the server's own data
             app.state.store if app.state.postgres is None else None,
             settings.cleanup_interval_seconds,
@@ -221,6 +237,8 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
             yield
         finally:
             await cleaner.stop()
+            if app.state.pushing is not None:
+                app.state.pushing.cancel()
             if app.state.ifcgraph is not None:
                 await app.state.ifcgraph.shutdown()
             if app.state.workcopy is not None:
@@ -331,6 +349,7 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
     app.include_router(web_routes.router)
     app.include_router(account_routes.router)
     app.include_router(manage_routes.router)
+    app.include_router(remote_routes.router)
     app.include_router(team_routes.router)
     if settings.admin_ui_enabled:
         app.include_router(admin_router.router)

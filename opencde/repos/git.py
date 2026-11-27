@@ -256,6 +256,15 @@ class Git:
             )
             return (await self.run(repository, "write-tree", index=index)).decode("ascii").strip()
 
+    async def tree_without(self, repository: Path, commit: str, paths: list[str]) -> str:
+        """The tree of ``commit`` with ``paths`` left out (a forge's mirror, ADR 0032)."""
+        with tempfile.TemporaryDirectory(prefix="index-", dir=self.root) as folder:
+            index = Path(folder) / "index"
+            await self.run(repository, "read-tree", f"{commit}^{{tree}}", index=index)
+            listing = "".join(f"0 {ZERO}\t{path}\0" for path in paths)  # mode 0: the path goes
+            await self.run(repository, "update-index", "-z", "--index-info", stdin=listing.encode(), index=index)
+            return (await self.run(repository, "write-tree", index=index)).decode("ascii").strip()
+
     async def commit(
         self, repository: Path, tree: str, parents: list[str], author: Person, committer: Person, message: str
     ) -> str:

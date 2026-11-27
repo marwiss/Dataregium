@@ -578,8 +578,12 @@ Arbetssätten står i [CONTRIBUTING.md](CONTRIBUTING.md) och IFC-grafen i
 - **Versioner i git i nivå 2.** Varje version av en textfil, som en IFC-fil i STEP,
   blir en commit i ett git-repo per projekt på servern, och Bruno Postles
   [ifcmerge](https://github.com/brunopostle/ifcmerge) gör all sammanfogning: en
-  uppladdning mot en äldre bas sammanfogas, och ett förslag blir en gren. GitHub och
-  andra forgar kan vara repots remote, och ett raderat STEP-id kommer aldrig tillbaka.
+  uppladdning mot en äldre bas sammanfogas, och ett förslag blir en gren. Repot kan
+  speglas åt ett håll till GitHub och andra forgar som serverns administratör
+  namngett, och ett raderat STEP-id kommer aldrig tillbaka.
+- **AI i nivå 2 genom IfcMCP** bakom MCP-ändpunkten: läsande verktyg på en version och
+  en begränsad redigering på en arbetskopia som blir ett förslag som hel fil, som en
+  människa godkänner; bilderna ritar Dataspatium.
 - **BIM-snippets som en fungerande demonstration.** En föreslagen ändring färdas
   som `bim_snippet` i ett BCF 3.0-ärende, med ett publicerat schema bakom dess
   `reference_schema`, så att ändringen, diskussionen och beslutet finns på ett
@@ -596,9 +600,7 @@ Arbetssätten står i [CONTRIBUTING.md](CONTRIBUTING.md) och IFC-grafen i
   till en `manager`.
 - **Krocktest på båda ställena**: på servern med IfcOpenShells IfcClash och i
   Dataspatium med dess egen kärna i JavaScript.
-- **Härnäst**: AI i nivå 2 genom IfcMCP bakom MCP-ändpunkten, där AI föreslår och
-  en människa godkänner; en geodataserver med OGC API – Features och Tiles på
-  PostGIS; buildingSMARTs fynd kopplade till byggdelar; och proprietära format
+- **Härnäst**: en geodataserver med OGC API – Features och Tiles på PostGIS; buildingSMARTs fynd kopplade till byggdelar; och proprietära format
   genom källprogrammens IFC-export.
 
 ## Fel och förslag

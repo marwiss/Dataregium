@@ -343,6 +343,25 @@ history, as the comparison of two versions does
 addresses as `git.history_url`, `git.commit_url` and `ifc_diff.sides_url`; a server
 without the repositories answers `404`.
 
+When the capabilities say `"enabled": true` in `git.remote`, a project's
+`manager` can mirror its repository to a forge whose host is among `hosts`, such
+as GitHub (ADR 0032), with a token of the `project` scope:
+`PUT /manage/1.0/projects/{id}/remote` with `url`, the https address of an empty
+repository without a sign-in, `token`, a fine-grained token for that repository
+alone with read and write access to its contents, `expires_at`, when the token
+expires (at most 366 days ahead, 365 when left out), `max_file_bytes`, the forge's
+limit for a file (100 MiB as at GitHub), and `acknowledged: true`, that the
+project's files, with the personal data they may hold, leave the server. The
+token is kept sealed and never shown again; the connection goes when it expires.
+The server pushes `main` and the proposals' branches one way after new versions,
+each on what the forge held, and never over a change made at the forge. A commit
+with a larger file is mirrored as a commit of its own without it, with the same
+author, time and message and the trailers `Dataregium-Left-Out` and
+`Dataregium-Mirror-Of`. `GET` gives `url`, `status` (`waiting`, `pushed`,
+`changed` when a branch was changed at the forge and left as it is, or `error`),
+`error`, `pushed_at`, the branches `pushed` and the files `left_out`; `DELETE`
+ends the mirror. A server without it answers `404`.
+
 A version that holds an IFC model can also be asked named queries, such as its
 storeys, the areas of its spaces or the value of a property: an extension that
 answers to the same token, and that the capabilities document announces in
