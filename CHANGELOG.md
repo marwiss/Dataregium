@@ -72,6 +72,8 @@ are in the commit history.
   made at the forge, and mirrors a commit with a file over the forge's limit without it (`Dataregium-Left-Out`).
   `GET` gives the status, `DELETE` ends it; `git.remote` in the capabilities. PostgreSQL migration 0011. The
   `postgres` extra now brings `cryptography`.
+- A change in a change set's `changes` on an attribute that a key of `keep_theirs` names is left out as given up,
+  rather than failing on the latest version, so a client may send its changes as they were with the keys it gives up.
 - The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
   the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
 

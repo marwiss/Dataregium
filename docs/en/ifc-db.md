@@ -775,7 +775,9 @@ change set again on the latest version. A client that cannot cut one change
 out of its operations sends them again with the keys it gives up in
 `keep_theirs`: the server then tries the change set on the document's latest
 version and gives each of those attributes back the latest version's value
-after the operations and the changes.
+after the operations and the changes. A change in `changes` on an attribute a
+key names is left out as given up, so the client may send its changes as they
+were.
 
 A version built on another is a node with its parent: `parent_version_index`
 and a link to the parent version, on a version approved from a change set and

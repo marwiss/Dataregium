@@ -774,7 +774,9 @@ som inte kan sammanfogas som text, och en server utan ifcmerge eller utan repona
 klient som inte kan skära ut en enda ändring ur sina operationer skickar dem
 igen med de nycklar den ger upp i `keep_theirs`: servern prövar då ändringssetet
 mot dokumentets senaste version och ger vart och ett av de attributen tillbaka
-den senaste versionens värde efter operationerna och ändringarna.
+den senaste versionens värde efter operationerna och ändringarna. En ändring i
+`changes` på ett attribut som en nyckel namnger lämnas ute som uppgiven, så att
+klienten kan skicka sina ändringar som de var.
 
 En version som bygger på en annan är en nod med sin förälder:
 `parent_version_index` och en länk till förälderversionen, på en version

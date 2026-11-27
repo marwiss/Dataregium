@@ -330,6 +330,10 @@ def test_keep_theirs_gives_each_key_back_the_value_the_file_held(tmp_path: Path)
         {"keep": 1, "error": "IfcWallStandardCase has no attribute Nothing"},
         {"keep": 2, "error": "IsDefinedBy is an inverse attribute"},
     ]
+    stale = {"guid": OTHER_WALL, "attribute": "Name", "op": "set", "old": "not the latest", "new": "ours"}
+    kept = apply_all(MODEL, [stale], out, keep_theirs=[f"{OTHER_WALL}/.Name"])
+    assert kept["problems"] == [] and kept["applied"] == 1, "a change on a key given up is left out, not failed"
+    assert ifcopenshell.open(str(out)).by_guid(OTHER_WALL).Name == "YVT-B"
     deleted = apply_all(
         MODEL, [], out, ops=[{"tool": "delete_elements", "ids": [WALL], "confirm": True}], keep_theirs=[LOCATION]
     )

@@ -22,7 +22,8 @@ fails, as in the app, and then nothing more is applied. The changes come next an
 to existing instances, as the app found it: a change the operations already made counts as applied rather than being
 made twice, and one they did not is applied as any. Last, each key of ``keep_theirs`` (``#170.NominalValue`` or
 ``<guid>/<path>.Name``, as the server's conflicts name them) gets back what the file held before: the latest
-version's value, which the proposer gave up. ``--proposer`` names who the owner histories the operations make name.
+version's value, which the proposer gave up; a change on an attribute a key names is left out, as given up too, so
+that a client may send its changes as they were. ``--proposer`` names who the owner histories the operations make name.
 
 The file written keeps the STEP ids as the app's writers keep them, with the app's own code (the owner's decision
 F70 d): when the changes delete the base's highest instance, a loose ``IfcDocumentReference`` named
@@ -291,6 +292,22 @@ def _hold(model: Any, keys: list[str], problems: list[dict[str, Any]]) -> list[t
     return held
 
 
+def _given_up(model: Any, held: list[tuple[int, dict[str, Any], Any]]) -> set[tuple[int, str]]:
+    """The instances and attributes the keys of ``keep_theirs`` name, by STEP id, as the file has them now."""
+    return {(_find(model, locator)[0].id(), str(locator["attribute"])) for _, locator, _ in held}
+
+
+def _gives_up(model: Any, change: dict[str, Any], given: set[tuple[int, str]]) -> bool:
+    """Whether a change sets an attribute the proposer gave up; one that cannot be found is applied, and fails."""
+    if not given or change.get("op") == "delete":
+        return False
+    try:
+        entity, _ = _find(model, change)
+    except CannotApply:
+        return False
+    return (entity.id(), str(change.get("attribute"))) in given
+
+
 def _restore(model: Any, held: list[tuple[int, dict[str, Any], Any]], problems: list[dict[str, Any]]) -> None:
     """Each key of ``keep_theirs`` set back to the latest version's value, on the instance its path leads to now: an
     operation may have put a new instance there, as a moved element gets a new point."""
@@ -380,6 +397,7 @@ def apply_all(
     touched: list[int] = []
     problems: list[dict[str, Any]] = []
     held = _hold(model, keep_theirs or [], problems)
+    given = _given_up(model, held)
     made = None
     if ops:
         from opencde.ifcgraph.ops import run
@@ -389,8 +407,8 @@ def apply_all(
     if made is None or made["failed"] is None:
         for index, change in enumerate(changes):
             try:
-                if made is not None and _already(model, change):
-                    already += 1
+                if (made is not None and _already(model, change)) or _gives_up(model, change, given):
+                    already += 1  # made by the operations, or given up: counted, never made twice
                     continue
                 touched.append(apply_one(model, change))
             except CannotApply as exc:
