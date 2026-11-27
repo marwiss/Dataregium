@@ -73,6 +73,7 @@ from opencde.postgres.database import wait_for_postgres
 from opencde.postgres.schema import migrate
 from opencde.ratelimit import PathRateLimitMiddleware, install_rate_limiting
 from opencde.repos.git import Git
+from opencde.repos.upkeep import upkeep
 from opencde.requestlog import RequestLogMiddleware, RequestLogWriter
 from opencde.settings import LOOPBACK_HOSTS, Settings
 from opencde.store.logbook.postgres import request_log_store
@@ -163,6 +164,8 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
                 await delete_expired_rows(app.state.postgres, storage=app.state.storage)
             if app.state.ifcgraph is not None:
                 await app.state.ifcgraph.resume_interrupted()
+            if app.state.git is not None:  # the repositories' leftovers and repacking (ADR 0030)
+                await upkeep(app.state.git)
 
         cleaner = ExpiryCleaner(  # what expires is in PostgreSQL when it holds the server's own data
             app.state.store if app.state.postgres is None else None,

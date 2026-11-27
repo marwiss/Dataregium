@@ -221,3 +221,50 @@ def test_a_repository_goes_into_a_bundle_and_comes_back_whole(tmp_path: Path) ->
             await again.unbundle(str(uuid.uuid4()), broken)
 
     asyncio.run(run())
+
+
+@needs_git
+def test_the_upkeep_takes_the_leftovers_and_repacks_a_grown_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+    import time
+
+    from opencde.repos import upkeep
+
+    async def run() -> upkeep.Upkept:
+        git = Git(tmp_path / "git")
+        project = str(uuid.uuid4())
+        notes = tmp_path / "notes.txt"
+        head = None
+        for index in (1, 2):
+            notes.write_bytes(b"version %d\n" % index)
+            commit = await prepare(
+                git, project_id=project, path=notes, file_name="notes.txt", title="N", author="a", author_id="u"
+            )
+            assert commit is not None
+            made = await commit.make(
+                head=head,
+                document_id=DOCUMENT,
+                version_index=index,
+                version_number=str(index),
+                created="2026-11-27T09:00:00Z",
+            )
+            await commit.move(new=made, old=head)
+            head = made
+        (git.root / f".trash-{project}-x").mkdir()
+        (git.root / ".new-fresh").mkdir()
+        stale = git.root / ".new-stale"
+        stale.mkdir()
+        old = time.time() - 2 * upkeep.LEFT_SECONDS
+        os.utime(stale, (old, old))
+        monkeypatch.setattr(upkeep, "LOOSE", 1)
+        done = await upkeep.upkeep(git)
+        counted = (await git.run(git.repository(project), "count-objects", "-v")).decode()
+        assert "count: 0" in counted and await git.head(git.repository(project)) == head
+        return done
+
+    done = asyncio.run(run())
+    assert (done.removed, done.repacked) == (2, 1)
+    names = sorted(p.name for p in (tmp_path / "git").iterdir())
+    assert ".new-fresh" in names and ".new-stale" not in names and not [n for n in names if n.startswith(".trash-")]
