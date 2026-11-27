@@ -239,3 +239,40 @@ def test_the_upkeep_takes_the_branches_of_trials_that_are_gone(merging: tuple[Te
     done = client.portal.call(upkeep, state.git, state.ifcgraph.proposals.open_among)  # type: ignore[union-attr]
     assert done.branches == 1 and old not in _branches(settings, world.project_id)
     assert len(_branches(settings, world.project_id)) == 1
+
+
+def test_a_merge_that_brings_a_new_finding_is_409(merging: tuple[TestClient, World, Settings]) -> None:
+    """Two change sets on version 1 each give a wall the same new GlobalId: each is clean alone, and ifcmerge merges
+    them without a conflict, but the merged file has the GlobalId twice, which the latest version does not."""
+    client, world, _ = merging
+    editor = login_as(client, world, "editor")
+    web_sign_in(client, world, "editor")
+    manager = login_as(client, world, "manager")
+    first = upload(client, world, editor, "three_walls_gtin.ifc", MODEL.read_bytes())
+    assert checked(client, editor, first)["ifc_validation_status"] == ["passed"]
+    document_id = first["document_id"]
+    shared = "2PairTestGuid000000000"
+    one = _propose(
+        client,
+        world,
+        editor,
+        change_set(document_id, {"guid": WALLS[0], "attribute": "GlobalId", "op": "set", "new": shared}),
+    )
+    two = _propose(
+        client,
+        world,
+        editor,
+        change_set(document_id, {"guid": WALLS[1], "attribute": "GlobalId", "op": "set", "new": shared}),
+    )
+    assert client.post(one + "/approve", headers=manager.headers).status_code == 201
+
+    refused = client.post(two + "/approve", headers=manager.headers)
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["message"] == "Merged with version 2, the trial is issues; see the trial"
+    trial = client.get(two, headers=editor.headers).json()
+    assert trial["state"] == "issues" and trial["merged_with_version_index"] == 2
+    assert any(
+        issue["kind"] == "schema" and "IfcRoot.UR1" in issue["message"] and issue.get("global_id") == shared
+        for issue in trial["issues"]
+    ), trial["issues"]
+    assert client.post(two + "/approve", headers=manager.headers).status_code == 409, "not clean any more"
