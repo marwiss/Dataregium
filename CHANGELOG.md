@@ -45,8 +45,9 @@ are in the commit history.
   ifcmerge with the latest version, as an upload is, instead of by the server's own comparison of the change sets:
   the merged file is tried against the latest version's findings, the version gets `merged_with_version_index` and
   `ifc_renumbered`, and the trial `merged_with_version_index` and `renumbered`, the ids of its new instances in the
-  version. A collision is `412 version_conflict` with the keys `#<step>.<attribute>` and `merge`, as for an upload;
-  a server without ifcmerge answers `["*"]`. The approval no longer reads IFC-DB's graph.
+  version. A collision is `412 version_conflict` with the keys `#<step>.<attribute>` and `merge`, as for an upload,
+  and each conflict's `change_index` names the change in the change set it meets; a server without ifcmerge answers
+  `["*"]`. The approval no longer reads IFC-DB's graph.
 - The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
   the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
 

@@ -340,22 +340,24 @@ def value_of(entity: Any, attribute: str) -> Any:
 
 def read_values(base: Path, changes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """What each change's attribute holds in ``base``: ``{"value": …}``, or ``{"error": …}`` where the instance or the
-    attribute is not there."""
+    attribute is not there, with the STEP id of the instance the change reaches (``step_id``) where it is found."""
     import ifcopenshell
 
     model = ifcopenshell.open(str(base))
     values: list[dict[str, Any]] = []
     for change in changes:
+        found: dict[str, Any] = {}
         try:
             entity, _ = _find(model, change)
+            found["step_id"] = int(entity.id())
             if change.get("op") == "delete":  # what a deletion points at is the instance itself, while it is there
-                values.append({"value": {"step_id": int(entity.id())}})
+                values.append({**found, "value": {"step_id": int(entity.id())}})
                 continue
-            values.append({"value": value_of(entity, str(change["attribute"]))})
+            values.append({**found, "value": value_of(entity, str(change["attribute"]))})
         except CannotApply as exc:
-            values.append({"error": str(exc)[:300]})
+            values.append({**found, "error": str(exc)[:300]})
         except (AttributeError, RuntimeError, TypeError):
-            values.append({"error": f"no attribute {change.get('attribute')}"})
+            values.append({**found, "error": f"no attribute {change.get('attribute')}"})
     return values
 
 

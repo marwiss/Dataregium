@@ -151,12 +151,17 @@ def test_the_worker_reads_what_the_changes_point_at_in_the_change_sets_form(tmp_
     )
     assert run.returncode == 0, run.stderr
     values = json.loads(run.stdout)["values"]
-    assert values[0] == {"value": "YVT-A"}
-    assert values[1] == {"value": {"enum": "NOCHANGE"}}, "an enumeration in the change set's form"
-    assert values[2] == {"value": 1693857534}
-    assert values[3] == {"value": {"step_id": 32}}, "an instance without a GlobalId by its STEP id"
+    import ifcopenshell
+
+    wall = ifcopenshell.open(str(MODEL)).by_guid(WALL)
+    assert values[0] == {"value": "YVT-A", "step_id": wall.id()}, "and the instance the change reaches"
+    assert values[1] == {"value": {"enum": "NOCHANGE"}, "step_id": 32}, "an enumeration in the change set's form"
+    assert values[2] == {"value": 1693857534, "step_id": 32}
+    assert values[3]["value"] == {"step_id": 32}, "an instance without a GlobalId by its STEP id"
     assert values[4]["value"]["type"] == "IfcLabel" and values[4]["value"]["value"] == "3"
-    assert "error" in values[5] and "error" in values[6]
+    assert values[4]["step_id"] != wall.id(), "the property, not the wall"
+    assert "error" in values[5] and values[5]["step_id"] == wall.id() and "error" in values[6]
+    assert "step_id" not in values[6], "a GlobalId the model lacks reaches nothing"
     assert not (tmp_path / "out.ifc").exists(), "nothing is written"
 
 

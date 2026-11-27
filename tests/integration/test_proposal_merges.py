@@ -162,6 +162,7 @@ def test_the_approval_merges_a_change_set_on_an_older_base(merging: tuple[TestCl
         "ours": "C",
     }, "what the base held, what the latest holds and what the proposal sets"
     assert detail["version_index"] == 3 and body["merge"] == {"base_version_index": 1, "latest_version_index": 3}
+    assert detail["change_index"] == 0, "the change in the change set, for the client to pair them"
     assert client.get(c, headers=editor.headers).json()["state"] == "clean", "a collision leaves the trial as it was"
 
 
@@ -223,6 +224,8 @@ def test_a_proposal_that_gives_up_a_conflict_keeps_theirs_once_merged(
     assert refused.status_code == 412, refused.text
     (key,) = refused.json()["conflicts"]
     assert key == f"#{point.id()}.Coordinates"
+    (detail,) = refused.json()["conflict_details"]
+    assert detail["change_index"] == 0, "the change named by GlobalId and path reaches the point"
 
     # The person keeps theirs: the same operations again, on the latest, with the key given up.
     snippet = ours.removesuffix("/ifc-proposal") + "/snippet"

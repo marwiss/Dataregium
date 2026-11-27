@@ -154,7 +154,9 @@ async def what_the_jobs_read_of_a_projects_versions(stores: Stores) -> None:
     assert await documents.head(project_id=w.other_id, document_id=SECOND) is None, "only the project's own"
 
     where = {"project_id": w.project_id, "document_id": SECOND, "version_index": 1}
-    assert await documents.version_file(**where) == {
+    unchecked = await documents.version_file(**where)
+    assert unchecked is not None and unchecked.pop("commit", None) is None, "without a repository no commit"
+    assert unchecked == {
         "storage_key": walls.storage_key,
         "file_name": "walls.ifc",
         "report": None,

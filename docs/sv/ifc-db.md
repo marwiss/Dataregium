@@ -753,8 +753,11 @@ kroppen, som för en uppladdning: nyckeln namnger instansen med dess STEP-id,
 `conflict_details` ger per krock `key`, `guid` (instansens egen, där den har
 en), `step_id`, `attribute` och `op`, vad basen höll (`base`), vad den senaste
 versionen håller (`theirs`) och vad prövningens fil håller (`ours`), i
-ändringssetets värdeform, och den senaste versionen (`version_index`). Filer som
-inte kan sammanfogas som text, och en server utan ifcmerge eller utan repona, ger
+ändringssetets värdeform, den senaste versionen (`version_index`), och
+`change_index`, platsen i `changes` för den ändring som når samma instans och
+attribut i basen, eller `null` för en krock som bara operationerna gjort;
+STEP-id:na är basens, som en instans som krockar behåller i varje version. Filer
+som inte kan sammanfogas som text, och en server utan ifcmerge eller utan repona, ger
 `["*"]`: klienten föreslår då ändringssetet igen på den senaste versionen. En
 klient som inte kan skära ut en enda ändring ur sina operationer skickar dem
 igen med de nycklar den ger upp i `keep_theirs`: servern prövar då ändringssetet

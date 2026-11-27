@@ -441,16 +441,20 @@ async def _merged(
         )
     ours = storage.path(str(node["storage_key"]))
     with tempfile.TemporaryDirectory(prefix="ifcmerge-") as folder:
-        done = await three_way.merged(
-            ifcgraph=ifcgraph,
-            storage=storage,
-            what="The change set",
-            project_id=project_id,
-            based=based,
-            latest=latest,
-            ours=(str(node["storage_key"]), "proposal.ifc"),
-            folder=Path(folder),
-        )
+        try:
+            done = await three_way.merged(
+                ifcgraph=ifcgraph,
+                storage=storage,
+                what="The change set",
+                project_id=project_id,
+                based=based,
+                latest=latest,
+                ours=(str(node["storage_key"]), "proposal.ifc"),
+                folder=Path(folder),
+            )
+        except ApiError as exc:
+            await _pair(ifcgraph, based, change_set, exc)
+            raise
         size, sha256 = await anyio.to_thread.run_sync(_copy_hashed, storage, done.path, key)
     after = await anyio.to_thread.run_sync(
         protect_stored, storage, key, latest.storage_key, latest.file_name, latest.max_step_id
@@ -465,6 +469,28 @@ async def _merged(
     if state != STATE_CLEAN:
         raise HTTPException(409, f"Merged with version {latest.version_index}, the trial is {state}; see the trial")
     return size, sha256, pairs, count
+
+
+async def _pair(ifcgraph: IfcGraphService, based: VersionRecord, change_set: dict[str, Any], exc: ApiError) -> None:
+    """Each conflict of a 412 with ``change_index``, the place in the change set's ``changes`` of the change to the
+    same instance and attribute, read in the base the change set was made on, for the client to pair them; null for
+    a conflict no change names (one the operations made)."""
+    listed = (exc.details or {}).get("conflict_details") or []
+    changes = [dict(change) for change in change_set.get("changes") or []]
+    if not listed or not changes:
+        return
+    try:
+        reached = await ifcgraph.values_of(based.storage_key, based.file_name, changes)
+    except RuntimeError:
+        reached = []
+    places: dict[tuple[int, str | None], int] = {}
+    for index, (change, found) in enumerate(zip(changes, reached, strict=False)):
+        if found.get("step_id") is not None:
+            places.setdefault((int(found["step_id"]), change.get("attribute")), index)
+            places.setdefault((int(found["step_id"]), None), index)
+    for detail in listed:
+        at = (int(detail["step_id"]), detail.get("attribute")) if detail.get("step_id") is not None else None
+        detail["change_index"] = places.get(at) if at is not None else None
 
 
 async def _branch_now(

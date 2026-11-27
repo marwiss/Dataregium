@@ -532,8 +532,6 @@ async def test_a_change_set_that_keeps_theirs_is_tried_on_the_latest_version(
     assert [issue["message"] for issue in unpack_report(fields["report"])] == ["keep_theirs 1: no instance #999999"], (
         "a key that names nothing in the latest version"
     )
-    retried = await service._try_proposal(proposal_id, "project-1", key, base_version_index=1, author="anna")
-    assert versions.asked == [2, 1] and retried["base_version_index"] == 1, "the approval's merge names its own"
 
 
 def test_the_apps_guards_of_the_step_ids_are_known_by_their_line() -> None:

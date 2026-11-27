@@ -752,8 +752,11 @@ of the body, as for an upload: the key names the instance by its STEP id,
 `conflict_details` gives per conflict `key`, `guid` (the instance's own, where
 it has one), `step_id`, `attribute` and `op`, what the base held (`base`),
 what the latest version holds (`theirs`) and what the trial's file holds
-(`ours`), in the change set's value form, and the latest version
-(`version_index`). Files that cannot be merged as text, and a server without
+(`ours`), in the change set's value form, the latest version
+(`version_index`), and `change_index`, the place in `changes` of the change
+that reaches the same instance and attribute in the base, or `null` for a
+conflict that only the operations made; the STEP ids are the base's, which an
+instance that collides keeps in every version. Files that cannot be merged as text, and a server without
 ifcmerge or without the repositories, give `["*"]`: the client proposes the
 change set again on the latest version. A client that cannot cut one change
 out of its operations sends them again with the keys it gives up in
