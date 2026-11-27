@@ -402,6 +402,14 @@ class Settings(BaseSettings):
     )
     git_path: str = Field("git", min_length=1, description="The git program the repositories are written with.")
     git_timeout_seconds: int = Field(120, ge=5, le=3600, description="Kill a git call that takes longer.")
+    git_files_kept_days: int | None = Field(
+        None,
+        ge=1,
+        le=3650,
+        description="Take the file of an old version out of the storage once its project's repository holds the same "
+        "bytes and it has not been read for this many days (F94 c): not the latest version of a document, and not a "
+        "published one; it is read back out of git when it is wanted. Unset keeps every file.",
+    )
     ifcmerge_path: str | None = Field(
         None,
         description="ifcmerge, which merges an upload on an older base with the versions since (ADR 0030): "

@@ -58,6 +58,7 @@ from opencde.ifcgraph.maintenance import delete_geometry, drop_partial
 from opencde.logging import get_logger
 from opencde.postgres.database import Postgres
 from opencde.repos.git import Git, GitError
+from opencde.repos.reading import restore, restore_record
 from opencde.repos.writer import propose
 from opencde.settings import Settings
 from opencde.storage import LocalStorage, make_key
@@ -883,6 +884,7 @@ class IfcGraphService:
             raise RuntimeError("the base version is not in this project")
         if not self.wants(str(version["file_name"])):
             raise RuntimeError("the base version is not an IFC file")
+        await self._restore(project_id, str(base["document_id"]), version)
         head = await self.documents.head(project_id=project_id, document_id=str(base["document_id"]))
         known = head.max_step_id if head is not None and head.max_step_id is not None else 0
         key = make_key("proposals", proposal_id, "ifc")
@@ -1024,6 +1026,7 @@ class IfcGraphService:
                 )
                 if version is None:
                     raise RuntimeError("the latest version is not in this project")
+                await self._restore(project_id, str(latest.document_id), version)
                 with tempfile.TemporaryDirectory(prefix="ifcproposal-") as tmp:
                     workdir = Path(tmp)
                     source = await asyncio.to_thread(
@@ -1044,6 +1047,18 @@ class IfcGraphService:
             state = str(fields.pop("state"))
             await self._set_proposal(proposal_id, state, **fields)
             return state
+
+    async def _restore(self, project_id: str, document_id: str, version: dict[str, Any]) -> None:
+        """A version's file (``version_file``'s answer), read back out of git when the round took it (F94 c)."""
+        await restore(
+            self.git,
+            self.storage,
+            storage_key=str(version["storage_key"]),
+            project_id=project_id,
+            document_id=document_id,
+            file_name=str(version["file_name"]),
+            commit=version.get("commit"),
+        )
 
     async def _parts_touched(
         self, project_id: str, base: Path, changed: Path, changes: Path
@@ -1095,6 +1110,7 @@ class IfcGraphService:
         record = await self.documents.version(user_id=user_id, document_id=document_id, version_index=version_index)
         if record is None or not changes:
             return None
+        await restore_record(self.git, self.storage, record)
         return await self.values_of(record.storage_key, record.file_name, changes)
 
     async def values_of(self, storage_key: str, file_name: str, changes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1631,6 +1647,7 @@ class IfcGraphService:
             raise ValueError(f"document version {side['document_id']}/{side['version_index']} not found")
         if not self.wants(str(version["file_name"])):
             raise ValueError(f"document version {side['document_id']}/{side['version_index']} is not an IFC file")
+        await self._restore(project_id, str(side["document_id"]), version)
         return await asyncio.to_thread(
             self._prepare_clash_input, str(version["storage_key"]), str(version["file_name"]), workdir
         )

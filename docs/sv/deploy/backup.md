@@ -29,7 +29,12 @@ graf. En server som har ett repo per projekt (`OPENCDE_GIT_ENABLED`) skriver
 vart och ett som en bundle efter raderna, så att det rymmer varje commit de
 nämner, med sin SHA-256 bland de andra och antalet i `repos`; återställningen
 prövar var och en och gör projektets repo av den, och vägrar en kopia med repon
-om inte `OPENCDE_GIT_ENABLED` är satt.
+om inte `OPENCDE_GIT_ENABLED` är satt. Med `OPENCDE_GIT_FILES_KEPT_DAYS` tar
+städrundan en gammal versions fil ur lagringen när dess repo har samma bytes
+och den inte lästs på så många dagar (aldrig ett dokuments senaste version
+eller en publicerad), och läser tillbaka den ur git när den behövs:
+säkerhetskopian har då en sådan version bara i projektets bundle, så en
+återställning behöver repona.
 
 Med serverns egna data i en egen graf (`OPENCDE_STORE_GRAPH_URI`,
 [ifc-db.md](../ifc-db.md)) håller en säkerhetskopia båda graferna i samma

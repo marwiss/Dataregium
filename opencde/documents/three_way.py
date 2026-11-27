@@ -32,6 +32,7 @@ from opencde.repos.merge import (
     shape,
     why_not,
 )
+from opencde.repos.reading import restore_record
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -70,6 +71,8 @@ async def merged(
 ) -> ThreeWay:
     """Merge ``ours`` (a stored file's key and name: the upload, or the trial's file) built on ``based`` with
     ``latest``, in ``folder``; ``what`` names it in the answers ("The upload")."""
+    for version in (based, latest):  # an old base's file, read back out of git (F94 c)
+        await restore_record(ifcgraph.git, storage, version)
     paths = (storage.path(based.storage_key), storage.path(latest.storage_key), storage.path(ours[0]))
     shapes = [await anyio.to_thread.run_sync(shape, path) for path in paths]
     where = {"base_version_index": based.version_index, "latest_version_index": latest.version_index}

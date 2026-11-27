@@ -29,7 +29,13 @@ graph. A server that keeps a repository per project (`OPENCDE_GIT_ENABLED`)
 writes each as a bundle after the rows, so that it holds every commit they
 name, with its SHA-256 among the others and their number in `repos`; the
 restore verifies each and makes the project's repository from it, and refuses
-a backup with repositories unless `OPENCDE_GIT_ENABLED` is set.
+a backup with repositories unless `OPENCDE_GIT_ENABLED` is set. With
+`OPENCDE_GIT_FILES_KEPT_DAYS` the cleaner's round takes the file of an old
+version out of the storage once its repository holds the same bytes and it has
+not been read for that many days (never the latest version of a document or a
+published one), and reads it back out of git when it is wanted: the backup
+then holds such a version in its project's bundle alone, so a restore needs
+the repositories.
 
 With the server's own data in a graph of its own (`OPENCDE_STORE_GRAPH_URI`,
 [ifc-db.md](../ifc-db.md)), one backup holds both graphs in the same files,

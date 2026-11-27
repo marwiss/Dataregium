@@ -78,6 +78,7 @@ from opencde.ids import is_uuid, new_id, normalize_guid
 from opencde.ifcgraph.service import IfcGraphDep, IfcGraphService
 from opencde.ratelimit import RATE_UPLOAD, limiter
 from opencde.repos.git import Git
+from opencde.repos.reading import restore_record
 from opencde.repos.writer import keep_conflict, prepare
 from opencde.storage import LocalStorage, make_key
 from opencde.store.documents.sessions import (
@@ -336,6 +337,7 @@ async def _protect(
     base_version: Any,
     storage: StorageDep,
     target: str,
+    git: Git | None = None,
 ) -> Protection:
     """The safety net of an IFC upload (UL-48, LD-61, F98 a): the ids it reuses moved above the document's history,
     and the guard of that history added when the file's highest instance is below it. The parent is the base version
@@ -349,6 +351,8 @@ async def _protect(
             parent = await documents.version(user_id=user_id, document_id=document_id, version_index=int(base_version))
         else:
             parent = await documents.latest(user_id=user_id, document_id=document_id)
+        if parent is not None and git is not None:
+            await restore_record(git, storage, parent)
     return await anyio.to_thread.run_sync(
         protect_stored,
         storage,
@@ -494,7 +498,7 @@ async def _complete(
         raise HTTPException(400, str(exc)) from None
     size = int(item["size_in_bytes"])
     try:
-        protection = await _protect(documents, session.user_id, item, base_version, storage, target)
+        protection = await _protect(documents, session.user_id, item, base_version, storage, target, git)
     except BaseException:
         storage.delete(target)
         raise
@@ -870,8 +874,10 @@ async def document_download(
     version_index: VersionIndex,
     documents: DocumentsDep,
     storage: StorageDep,
+    git: GitDep,
 ) -> StreamingResponse:
     record = await _version(principal, documents, document_id, version_index)
+    await restore_record(git, storage, record)  # an old version's file, read back out of git (F94 c)
     return file_response(storage, record.storage_key, media_type="application/octet-stream", filename=record.file_name)
 
 

@@ -26,7 +26,9 @@ from opencde.deps import GitDep, SettingsDep
 from opencde.ids import is_uuid, normalize_guid
 from opencde.ifcgraph.service import IfcGraphDep, IfcGraphService
 from opencde.repos.git import Git
+from opencde.repos.reading import restore_record
 from opencde.repos.writer import tree_path
+from opencde.storage import LocalStorage
 from opencde.store.documents.versions import DocumentsDep, VersionRecord
 
 TAG = "IFC diff (extension)"
@@ -156,6 +158,7 @@ async def ifc_diff(
     documents: DocumentsDep,
     ifcgraph: IfcGraphDep,
     settings: SettingsDep,
+    git: GitDep,
     other_document_id: OtherDocument = None,
 ) -> IfcDiff:
     """What `other_index` (of this document, or of `other_document_id`) has that this version lacks, what it lacks,
@@ -167,6 +170,8 @@ async def ifc_diff(
     b = await _version(documents, principal.user_id, other_document_id or document_id, other_index)
     if a.document_id == b.document_id and a.version_index == b.version_index:
         raise HTTPException(400, "A version is compared with another one")
+    for record in (a, b):  # an old version's file, read back out of git (F94 c)
+        await restore_record(git, ifcgraph.storage, record)
     try:
         report = await ifcgraph.diff(
             a=(a.storage_key, a.file_name), b=(b.storage_key, b.file_name), by_guid=a.document_id != b.document_id
@@ -181,12 +186,19 @@ async def ifc_diff(
 
 
 async def _side(
-    documents: Any, git: Git | None, user_id: str, latest: VersionRecord, value: str, folder: FilePath
+    documents: Any,
+    git: Git | None,
+    storage: LocalStorage,
+    user_id: str,
+    latest: VersionRecord,
+    value: str,
+    folder: FilePath,
 ) -> tuple[IfcDiffSide, tuple[str, str] | FilePath]:
     """A side of the comparison: a version of the document, or a commit of its history read out of the repository
     into ``folder``; 404 for a commit that is not the project's or does not hold the document."""
     if len(value) < 40:
         record = await _version(documents, user_id, latest.document_id, int(value))
+        await restore_record(git, storage, record)  # an old version's file, read back out of git (F94 c)
         side = IfcDiffSide(document_id=record.document_id, version_index=record.version_index, commit=record.commit)
         return side, (record.storage_key, record.file_name)
     where = tree_path(latest.document_id, latest.file_name)
@@ -236,8 +248,9 @@ async def ifc_diff_of_sides(
     if not IfcGraphService.wants(latest.file_name):
         raise HTTPException(400, f"{latest.title} is not an IFC file")
     with tempfile.TemporaryDirectory(prefix="ifcdiff-sides-") as folder:
-        side_a, input_a = await _side(documents, git, principal.user_id, latest, a, FilePath(folder))
-        side_b, input_b = await _side(documents, git, principal.user_id, latest, b, FilePath(folder))
+        storage = ifcgraph.storage
+        side_a, input_a = await _side(documents, git, storage, principal.user_id, latest, a, FilePath(folder))
+        side_b, input_b = await _side(documents, git, storage, principal.user_id, latest, b, FilePath(folder))
         if side_a.commit is not None and side_a.commit == side_b.commit:
             raise HTTPException(400, "A side is compared with another one")
         try:

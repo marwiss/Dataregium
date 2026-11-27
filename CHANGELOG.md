@@ -53,6 +53,10 @@ are in the commit history.
   version's commit, and `GET /documents/1.0/documents/{id}/ifc-diff?a=&b=` compares any two of them; an upload that
   did not merge is kept a day on a conflict's branch, named in the 412 as `conflict_commit`. The capabilities give
   `git.history_url`, `git.commit_url` and `ifc_diff.sides_url`.
+- With `OPENCDE_GIT_FILES_KEPT_DAYS` the cleaner's round takes the file of an old version out of the storage once
+  its repository holds the same bytes and it has not been read for that many days, never the latest version of a
+  document or a published one; whatever reads the version (the download, the diff, a trial, a merge, a clash
+  check, a publication) reads it back out of git first. Unset, every file stays.
 - The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
   the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
 

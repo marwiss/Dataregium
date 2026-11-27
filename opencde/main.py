@@ -74,9 +74,11 @@ from opencde.postgres.database import wait_for_postgres
 from opencde.postgres.schema import migrate
 from opencde.ratelimit import PathRateLimitMiddleware, install_rate_limiting
 from opencde.repos.git import Git
+from opencde.repos.reading import prune
 from opencde.repos.upkeep import upkeep
 from opencde.requestlog import RequestLogMiddleware, RequestLogWriter
 from opencde.settings import LOOPBACK_HOSTS, Settings
+from opencde.store.documents.postgres import prunable_versions
 from opencde.store.logbook.postgres import request_log_store
 from opencde.ui.templating import STATIC_DIR, render
 from opencde.web import account as account_routes
@@ -168,6 +170,14 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
             if app.state.git is not None:  # the repositories' leftovers, branches and repacking (ADR 0030)
                 trials = app.state.ifcgraph.proposals if app.state.ifcgraph is not None else None
                 await upkeep(app.state.git, trials.open_among if trials is not None else None)
+                postgres = app.state.postgres
+                if settings.git_files_kept_days is not None and postgres is not None:  # F94 c
+                    await prune(
+                        app.state.git,
+                        app.state.storage,
+                        settings.git_files_kept_days,
+                        lambda offset, limit: prunable_versions(postgres, offset, limit),
+                    )
 
         cleaner = ExpiryCleaner(  # what expires is in PostgreSQL when it holds the server's own data
             app.state.store if app.state.postgres is None else None,

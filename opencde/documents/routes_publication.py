@@ -26,9 +26,10 @@ from pydantic import BaseModel, Field
 from opencde.accounts.roles import Role, at_least
 from opencde.auth.dependencies import DocumentsPrincipal
 from opencde.bcf.binary import file_response
-from opencde.deps import SettingsDep, StorageDep, UsersDep, client_ip
+from opencde.deps import GitDep, SettingsDep, StorageDep, UsersDep, client_ip
 from opencde.documents.links import api_base, publication_url
 from opencde.ids import is_uuid, new_id, normalize_guid
+from opencde.repos.reading import restore_record
 from opencde.storage import LocalStorage, make_key
 from opencde.store.documents.versions import DocumentsDep, VersionRecord
 from opencde.timeutil import now_iso
@@ -119,6 +120,7 @@ async def publish_version(
     users: UsersDep,
     storage: StorageDep,
     settings: SettingsDep,
+    git: GitDep,
 ) -> Publication:
     """A `manager` publishes the version: the server keeps its file as one archive, `.ifczip` for an IFC file and
     `.zip` for another, and the version's metadata names it. 403 for other roles; 409 when the version is published
@@ -140,6 +142,7 @@ async def publish_version(
     publication_id = new_id()
     inner, file_name = archive_names(record.file_name)
     key = make_key("published", publication_id, "ifczip" if file_name.endswith(".ifczip") else "zip")
+    await restore_record(git, storage, record)  # an old version's file, read back out of git (F94 c)
     size, sha256 = await anyio.to_thread.run_sync(write_archive, storage, record.storage_key, key, inner)
     published = {
         "id": publication_id,

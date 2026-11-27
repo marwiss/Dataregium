@@ -261,6 +261,24 @@ LEFT JOIN LATERAL (
 ) r ON true
 WHERE d.project_id = $1 AND d.document_id = $2
 """
+#: The versions whose files the cleaner's round may take out of the storage (F94 c, ADR 0030): with a commit, not
+#: the latest of their document, and not published; the oldest first.
+PRUNABLE = """
+SELECT d.project_id, v.document_id, v.file_name, v.storage_key, v.commit
+FROM document_versions v JOIN documents d ON d.document_id = v.document_id
+WHERE v.commit IS NOT NULL
+  AND v.version_index < (SELECT max(o.version_index) FROM document_versions o WHERE o.document_id = v.document_id)
+  AND NOT EXISTS (SELECT 1 FROM publications p WHERE p.version_id = v.id)
+ORDER BY v.creation_date COLLATE "C", v.id COLLATE "C"
+OFFSET $1 LIMIT $2
+"""
+
+
+async def prunable_versions(postgres: Postgres, offset: int, limit: int) -> list[dict[str, Any]]:
+    """A page of the versions whose files the round may take away (``PRUNABLE``)."""
+    return await postgres.run(PRUNABLE, offset, limit)
+
+
 PROJECT_HEADS = """
 SELECT h.* FROM (
     SELECT DISTINCT ON (d.document_id)

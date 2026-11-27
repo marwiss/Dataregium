@@ -29,6 +29,7 @@ from opencde.documents.validation import report as validation_report
 from opencde.errors import CODE_UPLOAD_TOO_LARGE, ApiError
 from opencde.ids import is_uuid, new_id, normalize_guid
 from opencde.ifcgraph.service import IfcGraphDep
+from opencde.repos.reading import restore_record
 from opencde.repos.writer import prepare
 from opencde.storage import TooLargeError, make_key
 from opencde.store.accounts.sessions import WebUser
@@ -604,6 +605,7 @@ async def document_details_diff(
     web_user: WebUserDep,
     documents: DocumentsDep,
     ifcgraph: IfcGraphDep,
+    git: GitDep,
     other: Annotated[int, Query(ge=1, le=1_000_000_000)],
 ) -> Response:
     """The difference between this version and another of the same document, as lists (ADR 0021)."""
@@ -621,6 +623,8 @@ async def document_details_diff(
         raise HTTPException(404, "Document version not found")
     if not ifcgraph.wants(a.file_name) or not ifcgraph.wants(b.file_name):
         raise HTTPException(400, "Only IFC files are compared")
+    for record in (a, b):  # an old version's file, read back out of git (F94 c)
+        await restore_record(git, ifcgraph.storage, record)
     try:
         report = await ifcgraph.diff(a=(a.storage_key, a.file_name), b=(b.storage_key, b.file_name))
     except RuntimeError:
@@ -649,6 +653,7 @@ async def document_details_download(
     web_user: WebUserDep,
     documents: DocumentsDep,
     storage: StorageDep,
+    git: GitDep,
 ) -> Response:
     if web_user is None:
         return signin_redirect(request)
@@ -663,6 +668,7 @@ async def document_details_download(
     )
     if record is None:
         raise HTTPException(404, "Document version not found")
+    await restore_record(git, storage, record)  # an old version's file, read back out of git (F94 c)
     return file_response(storage, record.storage_key, media_type="application/octet-stream", filename=record.file_name)
 
 
