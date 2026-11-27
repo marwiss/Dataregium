@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import stat
 import sys
 import tempfile
 import uuid
@@ -272,7 +273,7 @@ def remove_tree(path: Path, missing_ok: bool = False) -> None:
         return
 
     def writable(function, name, *_):
-        os.chmod(name, 0o700)
+        os.chmod(name, stat.S_IWRITE)  # clears the read-only flag, as Python's documentation of rmtree shows
         function(name)
 
     if sys.version_info >= (3, 12):
