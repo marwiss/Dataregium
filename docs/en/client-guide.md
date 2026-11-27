@@ -301,7 +301,10 @@ text file (`.ifc`, `.ids`, `.xml`, `.json`, `.geojson`, `.csv`, `.txt`, `.md`) i
 then a commit on its project's `main`, at `documents/<document id>/model.ifc` and
 so on, with the uploader as author. An upload's file entry may give `message`, at
 most 2000 characters, for the commit; the server leaves out control characters but
-line breaks. Other files, such as `.ifczip` or a PDF, have no commit.
+line breaks. Other files, such as `.ifczip` or a PDF, have no commit. On a server
+that had versions before it kept repositories, `opencde git migrate` gives each
+project without one its history from those versions, in the order they were made,
+and `opencde doctor` names how many projects still lack it.
 
 A version that holds an IFC model can also be asked named queries, such as its
 storeys, the areas of its spaces or the value of a property: an extension that

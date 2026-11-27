@@ -28,7 +28,8 @@ are in the commit history.
   commit on its project's `main`, made in the version's transaction, and its metadata names it in `git_commit`;
   an upload's file entry may give `message` for the commit, and the capabilities announce `git`. The backup holds
   each repository as a bundle and restores it, the repository goes with its project, the doctor says whether git
-  answers, and the image has git. PostgreSQL migration 0009.
+  answers, and the image has git. PostgreSQL migration 0009. `opencde git migrate` gives the projects without a
+  repository their history from their versions, and the doctor names how many still lack it.
 - The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
   the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
 

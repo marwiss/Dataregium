@@ -19,7 +19,7 @@ from opencde import __version__
 from opencde.graph.driver import ping_within
 from opencde.graph.graph import Graph
 from opencde.graph.schema import KEYED
-from opencde.postgres.database import Postgres
+from opencde.postgres.database import Postgres, PostgresUnavailable
 from opencde.postgres.schema import applied, migrations
 from opencde.settings import Settings, in_a_container
 from opencde.storage import LocalStorage
@@ -189,6 +189,25 @@ async def git_check(settings: Settings) -> Check:
     return Check("git", True, "git_ok", {"version": version})
 
 
+#: The projects with versions of text files and no repository: their history comes with ``opencde git migrate``.
+WITHOUT_HISTORY = r"""
+SELECT count(DISTINCT d.project_id) AS projects
+FROM document_versions v JOIN documents d ON d.document_id = v.document_id
+WHERE v.commit IS NULL AND lower(v.file_name) ~ '\.(ifc|ids|xml|json|geojson|csv|txt|md)$'
+  AND NOT EXISTS (SELECT 1 FROM project_repos r WHERE r.project_id = d.project_id)
+"""
+
+
+async def git_history_check(postgres: Postgres) -> Check:
+    """How many projects have versions from before their repositories, for ``opencde git migrate``."""
+    try:
+        row = await postgres.one(WITHOUT_HISTORY)
+    except PostgresUnavailable:  # the store's own check says what is wrong with the database
+        return Check("git_history", True, "git_history_unknown")
+    count = int(row["projects"]) if row else 0
+    return Check("git_history", True, "git_history_missing" if count else "git_history_ok", {"projects": count})
+
+
 async def run_checks(
     settings: Settings,
     graph: Graph,
@@ -209,6 +228,8 @@ async def run_checks(
         checks.append(Check("bim", ready, "bim_ready" if ready else "bim_without_extra"))
     if settings.git_enabled:
         checks.append(await git_check(settings))
+        if settings.git_on and postgres is not None:
+            checks.append(await git_history_check(postgres))
     https = settings.public_url.startswith("https://")
     fine = https or settings.environment != "production"
     checks.append(

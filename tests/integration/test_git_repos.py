@@ -146,3 +146,49 @@ def test_a_backup_holds_the_repositories_and_restores_them(
             await postgres.close()
 
     asyncio.run(round_trip())
+
+
+def test_the_versions_from_before_the_repositories_get_their_history(settings: Settings, clean_database: None) -> None:
+    """``opencde git migrate`` builds main from a project's versions of text files in the order they were made, and
+    the next upload goes on from it; a second run leaves the project as it is."""
+    from opencde.admin.doctor import git_history_check
+    from opencde.bootstrap import make_postgres, make_storage
+    from opencde.repos.git import Git
+    from opencde.repos.migrate import migrate
+
+    world = build_world(settings)
+    with TestClient(create_app(settings, startup_wait_seconds=30)) as client:
+        editor = login_as(client, world, "editor")
+        web_sign_in(client, world, "editor")
+        first = _upload(client, world, editor, {"file_name": "notes.txt"}, b"one\n", "1")
+        file = {"file_name": "notes.txt", "document_id": first["document_id"]}
+        _upload(client, world, editor, file, b"two\n", "2")
+        _upload(client, world, editor, {"file_name": "plan.pdf"}, b"%PDF-1.7\n\0", "1")
+        assert "git_commit" not in _metadata(client, editor, first), "no repositories yet"
+    on = settings.model_copy(update={"git_enabled": True})
+    git = Git(on.data_dir / "git")
+
+    async def run() -> tuple[Any, Any, Any, Any]:
+        postgres = make_postgres(on)
+        assert postgres is not None
+        try:
+            before = await git_history_check(postgres)
+            done = await migrate(git, postgres, make_storage(on))
+            again = await migrate(git, postgres, make_storage(on), world.project_id)
+            return before, done, again, await git_history_check(postgres)
+        finally:
+            await postgres.close()
+
+    before, done, again, after = asyncio.run(run())
+    assert before.params["projects"] == 1 and after.params["projects"] == 0
+    migrated = next(d for d in done if d.project_id == world.project_id)
+    assert (migrated.commits, migrated.passed_over, migrated.skipped) == (2, 1, None)
+    assert again[0].skipped == "has a repository"
+    log = _git(on, world.project_id, "log", "--format=%an|%s", "main")
+    assert log == "editor|Plan: version 2\neditor|Plan: version 1\n"
+    with TestClient(create_app(on, startup_wait_seconds=30)) as client:
+        editor = login_as(client, world, "editor")
+        web_sign_in(client, world, "editor")
+        third = _upload(client, world, editor, file, b"three\n", "3")
+        commit = _metadata(client, editor, third)["git_commit"][0]
+        assert _git(on, world.project_id, "rev-parse", f"{commit}^").strip() == migrated.head

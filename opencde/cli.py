@@ -39,6 +39,8 @@ app.add_typer(user_app, name="user")
 app.add_typer(project_app, name="project")
 app.add_typer(client_app, name="client")
 app.add_typer(ifcgraph_app, name="ifc-db")
+git_app = typer.Typer(no_args_is_help=True, help="The projects' git repositories (ADR 0030).")
+app.add_typer(git_app, name="git")
 # Its old names, so that scripts keep working.
 app.add_typer(ifcgraph_app, name="ifc-lpg", hidden=True)
 app.add_typer(ifcgraph_app, name="ifcgraph", hidden=True)
@@ -436,6 +438,31 @@ def _git(settings: Settings) -> Git | None:
     from opencde.repos.git import Git
 
     return Git(settings.data_dir / "git", settings.git_path, settings.git_timeout_seconds) if settings.git_on else None
+
+
+@git_app.command("migrate")
+def git_migrate(
+    project: Annotated[
+        str | None, typer.Option("--project", help="The project's id; every project without one.")
+    ] = None,
+) -> None:
+    """Build the history of the versions from before the repositories: each project without a repository gets its
+    main from its versions of text files, in the order of their creation. Can be run again."""
+    from opencde.bootstrap import make_storage
+    from opencde.repos.migrate import migrate
+
+    async def work(store, settings):
+        git = _git(settings)
+        if git is None or store.postgres is None:
+            raise _fail("the repositories need OPENCDE_GIT_ENABLED and the server's own data in PostgreSQL")
+        return await migrate(git, store.postgres, make_storage(settings), project)
+
+    for done in _run(work):
+        if done.skipped:
+            print(f"SKIP    {done.project_id}: {done.skipped}")
+        else:
+            passed = f", {done.passed_over} versions passed over" if done.passed_over else ""
+            print(f"OK      {done.project_id}: {done.commits} commits, main {done.head}{passed}")
 
 
 @app.command()

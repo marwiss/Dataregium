@@ -309,6 +309,9 @@ commit på projektets `main`, i `documents/<dokumentets id>/model.ifc` och så
 vidare, med den som laddade upp som författare. En uppladdnings filpost kan ge
 `message`, högst 2000 tecken, till commiten; servern lämnar utanför styrtecken
 utom radbrytningar. Andra filer, som `.ifczip` eller en PDF, har ingen commit.
+På en server som hade versioner innan den fick repon ger `opencde git migrate`
+varje projekt utan repo sin historik ur de versionerna, i den ordning de gjordes,
+och `opencde doctor` säger hur många projekt som fortfarande saknar den.
 
 En version som rymmer en IFC-modell kan också få namngivna frågor, som dess
 våningar, rummens area eller en egenskaps värde. Det är ett tillägg som svarar
