@@ -93,6 +93,40 @@ jobs:
       # IfcOpenShell's EXPRESS rules import pytest at run time. The image has it from the extra alone, without the dev group.
       - run: uv run --no-dev --extra ifc-db python -m ifc_db.validation tests/fixtures/three_walls_gtin.ifc
 
+  ifcmerge:
+    # ifcmerge (GPL-3.0-or-later) as the image runs it, at the commit the image pins and at PR #25 (F97 c), fetched
+    # and checked against its SHA-256 here, never kept in this repository (ADR 0030).
+    name: ifcmerge (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: pinned main
+            commit: bd2e277f3bd353ba5b7bc450c91fc092f7d13950
+            sha256: 5eb34fa35dd4033b1313496d1672376dcf1cedd8d716831daf2f95f5e5761c95
+          - name: PR 25
+            commit: 387831ed8114b4575f7adce917fce23de2138226
+            sha256: e39317424f04e499a3c019fecec50d77f54644b592ed4a8f1041a09db08fbaa5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdatetime-perl libdatetime-timezone-perl
+      - run: |
+          curl -sSfL -o "$RUNNER_TEMP/ifcmerge" "https://raw.githubusercontent.com/brunopostle/ifcmerge/$COMMIT/ifcmerge"
+          echo "$SHA256  $RUNNER_TEMP/ifcmerge" | sha256sum -c -
+        env:
+          COMMIT: ${{ matrix.commit }}
+          SHA256: ${{ matrix.sha256 }}
+      - run: uv sync --extra ifc-db
+      - run: uv run pytest -q tests/unit/test_ifcmerge.py
+        env:
+          OPENCDE_TEST_IFCMERGE: ${{ runner.temp }}/ifcmerge
+
   ui:
     name: Browser tests (Playwright, axe-core)
     runs-on: ubuntu-latest

@@ -40,13 +40,28 @@ RUN --mount=type=cache,target=/root/.cache/uv \
        fi
 
 
+# ifcmerge (Bruno Postle, GPL-3.0-or-later; ADR 0030, F97 c), the three-way merge of IFC files in STEP, at the commit
+# its main had when it was pinned, checked against its SHA-256. It is run as a program of its own and never copied
+# into the repository; the NOTICE says where it comes from.
+ARG IFCMERGE_COMMIT=bd2e277f3bd353ba5b7bc450c91fc092f7d13950
+ARG IFCMERGE_SHA256=5eb34fa35dd4033b1313496d1672376dcf1cedd8d716831daf2f95f5e5761c95
+RUN mkdir -p /opt/ifcmerge \
+    && /app/.venv/bin/python -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" \
+         "https://raw.githubusercontent.com/brunopostle/ifcmerge/${IFCMERGE_COMMIT}/ifcmerge" /opt/ifcmerge/ifcmerge \
+    && echo "${IFCMERGE_SHA256}  /opt/ifcmerge/ifcmerge" | sha256sum -c - \
+    && printf '%s\n' "ifcmerge by Bruno Postle, https://github.com/brunopostle/ifcmerge" \
+         "commit ${IFCMERGE_COMMIT}" "GNU General Public License, version 3 or later (GPL-3.0-or-later):" \
+         "see GPL-3 beside this file, or https://www.gnu.org/licenses/gpl-3.0.html" > /opt/ifcmerge/NOTICE
+
+
 FROM python:3.13-slim-trixie AS runtime
 # Apply the distribution's security updates and remove pip: the runtime needs no
 # package manager, and pip's vendored libraries are what image scanners flag
-# between rebuilds of the base image. git writes the projects' repositories
-# (ADR 0030), run as a program of its own.
+# between rebuilds of the base image. git writes the projects' repositories,
+# and Perl with DateTime runs ifcmerge (ADR 0030), each a program of its own.
 RUN apt-get update && apt-get -y upgrade --no-install-recommends \
-    && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* \
+    && apt-get install -y --no-install-recommends git perl libdatetime-perl libdatetime-timezone-perl \
+    && rm -rf /var/lib/apt/lists/* \
     && python -m pip uninstall -y pip \
     && groupadd --system --gid 10001 opencde \
     && useradd --system --uid 10001 --gid opencde --home-dir /app --shell /usr/sbin/nologin opencde \
@@ -55,11 +70,14 @@ WORKDIR /app
 COPY --from=builder --chown=opencde:opencde /app /app
 # Owned by root, so that the server can run the rules but not change them. Empty when they were left out.
 COPY --from=builder /opt/gherkin /opt/gherkin
+COPY --from=builder /opt/ifcmerge /opt/ifcmerge
+RUN cp /usr/share/common-licenses/GPL-3 /opt/ifcmerge/GPL-3
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     OPENCDE_DATA_DIR=/data \
-    OPENCDE_IFC_DB_GHERKIN_ENV=/opt/gherkin
+    OPENCDE_IFC_DB_GHERKIN_ENV=/opt/gherkin \
+    OPENCDE_IFCMERGE_PATH=/opt/ifcmerge/ifcmerge
 USER opencde
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \

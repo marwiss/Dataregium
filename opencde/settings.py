@@ -402,6 +402,17 @@ class Settings(BaseSettings):
     )
     git_path: str = Field("git", min_length=1, description="The git program the repositories are written with.")
     git_timeout_seconds: int = Field(120, ge=5, le=3600, description="Kill a git call that takes longer.")
+    ifcmerge_path: str | None = Field(
+        None,
+        description="ifcmerge, which merges an upload on an older base with the versions since (ADR 0030): "
+        "/opt/ifcmerge/ifcmerge in the image. Unset, or without OPENCDE_GIT_ENABLED and the BIM functions, such an "
+        "upload gets 412 as before.",
+    )
+    perl_path: str = Field("perl", min_length=1, description="The Perl that runs ifcmerge, with DateTime.")
+    ifcmerge_timeout_seconds: int = Field(600, ge=10, le=7200, description="Kill a merge that takes longer.")
+    ifcmerge_memory_mb: int = Field(
+        4096, ge=256, description="Address-space limit of a merge (POSIX); ifcmerge holds the three files in memory."
+    )
     # The IFC-DB module: read as OPENCDE_IFC_DB_*, and still as OPENCDE_IFC_LPG_* and OPENCDE_IFCGRAPH_* (see `_ifc`).
     ifcgraph_enabled: bool = Field(
         False,
@@ -730,6 +741,12 @@ class Settings(BaseSettings):
         """Whether the projects' repositories are written (ADR 0030): with OPENCDE_GIT_ENABLED and the server's own
         data in PostgreSQL; a server whose own data is in the graph gets none (F99 a)."""
         return self.git_enabled and self.store_url is not None
+
+    @property
+    def ifcmerge_on(self) -> bool:
+        """Whether an upload on an older base is merged (ADR 0030): with the repositories, the BIM functions, whose
+        workers read the files for the report, and ifcmerge."""
+        return self.git_on and self.bim_on and bool(self.ifcmerge_path)
 
     @property
     def uses_graph(self) -> bool:
