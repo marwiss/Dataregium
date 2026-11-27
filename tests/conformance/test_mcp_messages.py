@@ -93,7 +93,7 @@ def test_a_tools_schema_takes_what_its_model_takes(tool: Any) -> None:
     accepted = least(definition)
     tool.arguments.model_validate(accepted)
     assert schema.is_valid(accepted)
-    refusals: list[dict[str, Any]] = [{}, {**accepted, "more": 1}]
+    refusals: list[dict[str, Any]] = [{**accepted, "more": 1}, *([{}] if definition["properties"] else [])]
     refusals += [
         {**accepted, name: {**value, "more": 1}} for name, value in accepted.items() if isinstance(value, dict)
     ]

@@ -276,3 +276,45 @@ def test_a_merge_that_brings_a_new_finding_is_409(merging: tuple[TestClient, Wor
         for issue in trial["issues"]
     ), trial["issues"]
     assert client.post(two + "/approve", headers=manager.headers).status_code == 409, "not clean any more"
+
+
+def test_a_whole_file_on_an_older_base_is_merged_and_compared_by_its_commit(
+    merging: tuple[TestClient, World, Settings], tmp_path: Any
+) -> None:
+    """F204 a with the repositories: the trial of a whole file is a commit on its branch, which the client compares
+    with the base through ifc-diff?a=&b=, and its approval on an older base is merged by ifcmerge."""
+    from tests.integration.test_ifc_proposal import FILE_SNIPPET, renamed_file
+
+    client, world, _ = merging
+    editor = login_as(client, world, "editor")
+    web_sign_in(client, world, "editor")
+    manager = login_as(client, world, "manager")
+    first = upload(client, world, editor, "three_walls_gtin.ifc", MODEL.read_bytes())
+    assert checked(client, editor, first)["ifc_validation_status"] == ["passed"]
+    document_id = first["document_id"]
+    topics = f"/bcf/3.0/projects/{world.project_id}/topics"
+
+    def propose_file(data: bytes) -> str:
+        topic = make_topic(client, world, editor, bim_snippet=FILE_SNIPPET)
+        params = {"base_document_id": document_id, "base_version_index": 1}
+        put = client.put(f"{topics}/{topic['guid']}/snippet", content=data, headers=editor.headers, params=params)
+        assert put.status_code == 200, put.text
+        proposal = f"{topics}/{topic['guid']}/ifc-proposal"
+        assert tried(client, editor, proposal)["state"] == "clean"
+        return proposal
+
+    one = propose_file(renamed_file(tmp_path, WALLS[0], "One"))
+    two = propose_file(renamed_file(tmp_path, WALLS[1], "Two"))
+    trial = client.get(two, headers=editor.headers).json()
+    assert trial["kind"] == "file" and len(trial["commit"]) == 40
+    compared = client.get(
+        f"/documents/1.0/documents/{document_id}/ifc-diff?a=1&b={trial['commit']}", headers=editor.headers
+    )
+    assert compared.status_code == 200, compared.text
+    assert [element["guid"] for element in compared.json()["changed"]] == [WALLS[1]]
+
+    assert client.post(one + "/approve", headers=manager.headers).status_code == 201
+    merged = client.post(two + "/approve", headers=manager.headers)
+    assert merged.status_code == 201, merged.text
+    download = client.get(merged.json()["links"]["document_version_download"]["url"], headers=editor.headers).content
+    assert b"'One'" in download and b"'Two'" in download, "both whole files are in version 3"

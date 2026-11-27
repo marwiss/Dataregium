@@ -65,7 +65,14 @@ BUILDING_PERMIT_EXTENSIONS = {
     "topic_type": ["Issue", "Request", "Question", "Information", "Inspection"],
     "topic_status": ["Open", "In progress", "Resolved", "Closed", "Custom test status"],
     "topic_label": ["Architecture", "Structural", "MEP", "Safety", "Reuse"],
-    "snippet_type": [".ifc", ".bcf", ".csv", ".json", "DataregiumIfcChangeSet"],  # change sets, as a new project has
+    "snippet_type": [
+        ".ifc",
+        ".bcf",
+        ".csv",
+        ".json",
+        "DataregiumIfcChangeSet",
+        "DataregiumIfcFile",
+    ],  # as a new project
     "priority": ["Low", "Medium", "High", "Critical"],
     "stage": ["Preliminary planning end", "Construction start", "Construction end"],
     "custom_information": ["Custom value 1", "Custom value 2"],

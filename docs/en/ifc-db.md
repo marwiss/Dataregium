@@ -702,6 +702,19 @@ carries `X-Total-Count` and `Link: <…>; rel="next"`. `404` for a document the
 member may not see, and when the IFC-DB module is off. The capabilities
 document gives the address as `ifc_changes.ifc_proposals_url`.
 
+A whole IFC file can be proposed too, when a change set cannot say all of it
+(an extension, F204 a): the topic's `bim_snippet` has the type
+`DataregiumIfcFile`, and `PUT …/snippet?base_document_id=&base_version_index=`
+uploads the file in STEP as `application/octet-stream`, at most the server's
+`max_upload_bytes`, with `ai_model` and `tool_call` in the query where an AI made
+it. The base must be a version of an IFC document of the project (`400`
+otherwise). The file is checked as it is, with nothing applied, after the safety
+net of the STEP ids against the base; the trial says `kind: "file"`, the teams
+are those whose parts what differs from the base touches, and
+`GET …/ifc-proposal/file` gives the file back to every member. With the
+repositories the trial gives its `commit`, for the client to compare it with the
+base through `ifc-diff?a={base}&b={commit}`. It is approved as a change set is.
+
 A `manager` approves a clean trial with `POST …/ifc-proposal/approve`: the
 applied file becomes the next version of the base document, with
 `base_version_index`, `change_set_id` (the topic's guid), `proposed_by` and

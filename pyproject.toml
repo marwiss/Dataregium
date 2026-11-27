@@ -52,6 +52,9 @@ ifc-db = [
     "ifc-db[ifcopenshell]>=1.0.0",
     "ifcclash>=0.9.0",
     "shapely>=2.0",  # the rooms of the walls (ifcgraph/ops.py); IfcOpenShell brings it too, without a floor
+    # IfcMCP's session as a library in the MCP endpoint's workers, with IfcQuery and IfcEdit (ADR 0031, F60); its own
+    # `mcp` extra is not installed, as the server speaks MCP itself.
+    "ifcopenshell-mcp>=0.9.0",
 ]
 # The extra's old names, so that builds that name them keep working.
 ifc-lpg = ["opencde-server[ifc-db]"]

@@ -53,6 +53,14 @@ are in the commit history.
   version's commit, and `GET /documents/1.0/documents/{id}/ifc-diff?a=&b=` compares any two of them; an upload that
   did not merge is kept a day on a conflict's branch, named in the 412 as `conflict_commit`. The capabilities give
   `git.history_url`, `git.commit_url` and `ifc_diff.sides_url`.
+- With the BIM functions and PostgreSQL, the MCP endpoint offers IfcOpenShell's IfcMCP tools (ADR 0031): reading a
+  version or a working copy (`ifc_summary`, `ifc_tree`, `ifc_info`, `ifc_select` and more), and on a working copy
+  that `ifc_open` makes, editing with an allow-list of `ifcopenshell.api` functions, ShapeBuilder and quantities;
+  `ifc_propose` makes the copy a proposal as a whole file, which a person approves. No tool loads, saves or
+  draws a file; the pictures are Dataspatium's. PostgreSQL migration 0010.
+- A whole IFC file can be proposed on a base version as a topic's snippet of the type `DataregiumIfcFile`, with the
+  base and what made it in the upload's query; it is checked as it is, given back at `…/ifc-proposal/file`, compared
+  by its `commit`, and approved as a change set is. The capabilities' `ifc_changes` names it.
 - With `OPENCDE_GIT_FILES_KEPT_DAYS` the cleaner's round takes the file of an old version out of the storage once
   its repository holds the same bytes and it has not been read for that many days, never the latest version of a
   document or a published one; whatever reads the version (the download, the diff, a trial, a merge, a clash

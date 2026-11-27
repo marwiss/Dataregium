@@ -35,6 +35,7 @@ from opencde.mcp.auth import McpPrincipal, require_mcp_scope
 from opencde.mcp.change_sets import CHANGE_SET_TOOLS
 from opencde.mcp.clash import GET_CLASH_CHECK, START_CLASH_CHECK
 from opencde.mcp.ifc_models import LIST_MODELS
+from opencde.mcp.ifcmcp_tools import IFCMCP_TOOLS
 from opencde.mcp.proposals import GET_PROPOSAL, LIST_PROPOSALS
 from opencde.mcp.protocol import (
     CLIENT_CAPABILITIES_KEY,
@@ -70,6 +71,7 @@ TOOLS: tuple[registry.Tool, ...] = (
     GET_PUBLICATION,
     START_CLASH_CHECK,
     GET_CLASH_CHECK,
+    *IFCMCP_TOOLS,  # IfcMCP's, last, as what is added comes last (ADR 0031)
 )
 _BY_NAME = {tool.name: tool for tool in TOOLS}
 _MODERN_METHODS = ("server/discover", "tools/list", "tools/call")

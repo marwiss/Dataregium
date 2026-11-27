@@ -340,6 +340,7 @@ async def trials_of_change_sets(jobs: Jobs) -> None:
         [],
     )
     claimed = {"project_id": pid, "topic_guid": topic, "snippet_key": "snippets/a.json", "author": "member"}
+    claimed |= {"base_document_id": document, "base_version_index": 1}  # for a whole file's trial (F204 a)
     assert await proposals.claim(first) == claimed, "with its topic, for the trial's commit (fas 5.5)"
     assert await proposals.claim(first) is None
     checked_at = now_iso()

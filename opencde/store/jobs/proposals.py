@@ -122,14 +122,15 @@ class ProposalRepository:
         return await self.graph.write(work)
 
     async def claim(self, proposal_id: str) -> dict[str, Any] | None:
-        """The queued trial's project, topic, snippet and author, now this process's to run; None when it is not
+        """The queued trial's project, topic, snippet, author and base, now this process's to run; None when it is not
         queued."""
         return await self.graph.one(
             """
             MATCH (p:Proposal {id: $id, state: $queued})
             SET p.state = $running, p.running_at = $now
             RETURN p.project_id AS project_id, p.topic_guid AS topic_guid, p.snippet_key AS snippet_key,
-                   p.author AS author
+                   p.author AS author, p.base_document_id AS base_document_id,
+                   p.base_version_index AS base_version_index
             """,
             id=proposal_id,
             queued=STATE_QUEUED,

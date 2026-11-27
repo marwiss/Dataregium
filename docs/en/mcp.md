@@ -240,6 +240,43 @@ one of the caller's projects. It closes 24 hours after its last use, and the
 server deletes it; an unknown or closed handle is a tool error that asks for a
 new one. A user has at most 10 open, and a change set at most 200 steps.
 
+## IfcMCP's tools
+
+With the BIM functions and PostgreSQL, the endpoint also offers the tools of
+IfcOpenShell's IfcMCP (ADR 0031), run in a worker of their own with the
+server's limits, on a version's file or on a working copy, never on a path a
+client names.
+
+- **Reading** (scope `mcp`), on `copy_id`, or on `document_id` and
+  `version_index` (`null` for the latest): `ifc_summary`, `ifc_tree`,
+  `ifc_info` (`element_id`), `ifc_select` (`query`, an IfcOpenShell selector),
+  `ifc_relations` (`element_id`, `traverse`), `ifc_contexts`, `ifc_materials`,
+  `ifc_validate` (`express_rules`), `ifc_schedule` and `ifc_cost`
+  (`max_depth`) and `ifc_schema` (`entity_type`). An answer is `result`, cut
+  with `truncated` and `count` when a list is longer than an answer may be, or
+  `error`, whose text may quote the model.
+- **Editing** (scope `mcp:propose`, an `editor` or a `manager`): `ifc_open`
+  copies a version for the caller and answers `copy_id` with `expires_at`; it
+  lasts four hours after its last use, at most three open. `ifc_list` and
+  `ifc_docs` show the `ifcopenshell.api` functions an AI may run, and
+  `ifc_edit` (`copy_id`, `function_path`, `params` as a JSON object) runs one
+  of them on the copy: making and removing elements, their attributes,
+  properties, quantities, containers, aggregates, types, materials,
+  classifications, groups, systems, geometry, openings, fillings and styles,
+  never a function that takes a file. `ifc_shape_list`, `ifc_shape_docs` and
+  `ifc_shape` build geometry with ShapeBuilder, and `ifc_quantify` writes base
+  quantities. New instances get ids above the document's history, and owner
+  histories name the user and this server.
+- **Proposing**: `ifc_propose` (`copy_id`, `title`, `description`,
+  `ai_model`) makes a BCF topic whose snippet is the copy as a whole file
+  (`DataregiumIfcFile`), tried on the copy's version and approved by a person
+  ([ifc-db.md](ifc-db.md)); called again, it puts the copy as it is then on the
+  same topic. `ifc_close` throws the copy away.
+
+There are no drawing tools: Dataspatium's AI panel draws from its own 3D view
+(F205 d). `ifc_load`, `ifc_save`, `ifc_new`, `ifc_reset`, `ifc_plot`,
+`ifc_render` and `ifc_clash` are not offered.
+
 ## The AI policy
 
 A project's `ai_policy` is `local`, the default, or `cloud`, set by its manager

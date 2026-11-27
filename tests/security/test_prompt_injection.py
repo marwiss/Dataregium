@@ -77,6 +77,7 @@ from tests.mcp_read_support import (
 )
 from tests.mcp_support import (
     BEARER,
+    BOUND,
     CLOUD,
     DOCUMENT,
     LOCAL,
@@ -1124,7 +1125,56 @@ def _given(arguments: dict[str, Any], path: Place, value: Any) -> dict[str, Any]
 
 def test_every_tool_of_the_endpoint_is_called_with_hostile_arguments() -> None:
     asked = sorted(tool.name for tool in routes.TOOLS)
-    assert sorted([*ANSWERED, *ON_A_DRAFT]) == asked, "a new tool gets a call here, and is asked too"
+    assert sorted([*ANSWERED, *ON_A_DRAFT, *ON_A_COPY]) == asked, "a new tool gets a call here, and is asked too"
+
+
+COPY = "44444444-4444-4444-8444-444444444444"
+ON_VERSION = {"copy_id": None, "document_id": DOCUMENT, "version_index": None}
+#: A call of each of IfcMCP's tools (ADR 0031), which need PostgreSQL for their working copies: here, where it is not,
+#: every call is a refusal, and none quotes what it was given. tests/integration/test_mcp_ifcmcp.py answers them.
+ON_A_COPY: dict[str, dict[str, Any]] = {
+    "ifc_summary": ON_VERSION,
+    "ifc_tree": ON_VERSION,
+    "ifc_info": ON_VERSION | {"element_id": 1},
+    "ifc_select": ON_VERSION | {"query": "IfcWall"},
+    "ifc_relations": ON_VERSION | {"element_id": 1, "traverse": None},
+    "ifc_contexts": ON_VERSION,
+    "ifc_materials": ON_VERSION,
+    "ifc_validate": ON_VERSION | {"express_rules": None},
+    "ifc_schedule": ON_VERSION | {"max_depth": None},
+    "ifc_cost": ON_VERSION | {"max_depth": None},
+    "ifc_schema": ON_VERSION | {"entity_type": "IfcWall"},
+    "ifc_open": {"document_id": DOCUMENT, "version_index": None},
+    "ifc_list": {"module": None},
+    "ifc_docs": {"function_path": "root.create_entity"},
+    "ifc_edit": {"copy_id": COPY, "function_path": "root.create_entity", "params": "{}"},
+    "ifc_quantify": {"copy_id": COPY, "rule": "IFC4QtoBaseQuantities", "selector": None},
+    "ifc_shape_list": {},
+    "ifc_shape_docs": {"method": "extrude"},
+    "ifc_shape": {"copy_id": COPY, "method": "extrude", "params": "{}"},
+    "ifc_propose": {"copy_id": COPY, "title": "A change", "description": None, "ai_model": None},
+    "ifc_close": {"copy_id": COPY},
+}
+
+
+@pytest.mark.parametrize("name", list(ON_A_COPY))
+def test_an_ifcmcp_refusal_never_quotes_its_arguments(name: str, tmp_path: Path) -> None:
+    schema = routes._BY_NAME[name].definition()["inputSchema"]
+    paths = list(_argument_paths(schema, ON_A_COPY[name]))
+    assert set(_places(schema)) <= set(paths), "every argument the schema names is asked"
+    calls = [_given(ON_A_COPY[name], path, value) for path in paths for value in HOSTILE_VALUES]
+    calls += [ON_A_COPY[name] | {text: text} for text in INJECTIONS]
+    proposing = routes._BY_NAME[name].scope == MCP_PROPOSE
+    settings = {"ifcgraph_enabled": True}
+    with endpoint(tmp_path, DocumentsGraph(), PROPOSER if proposing else BOUND, **settings) as client:
+        client.app.state.ifcgraph = FakeService()  # type: ignore[attr-defined]
+        answers = [call(client, name, arguments) for arguments in [ON_A_COPY[name], *calls]]
+    for answer in answers:
+        assert answer.status_code == 200, "arguments are the tool's to refuse"
+        result = answer.json()["result"]
+        assert result["isError"] is True, "without PostgreSQL every call is refused"
+        (said,) = result["content"]
+        untraced(said["text"])
 
 
 @pytest.mark.parametrize("name", list(ANSWERED))

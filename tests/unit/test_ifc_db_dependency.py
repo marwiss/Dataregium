@@ -26,7 +26,8 @@ def test_the_graph_side_is_always_installed_and_the_workers_come_with_the_extra(
         "ifc-db[ifcopenshell]>=1.0.0",
         "ifcclash>=0.9.0",
         "shapely>=2.0",
-    ], "the rooms need shapely 2, which IfcOpenShell brings without a floor"
+        "ifcopenshell-mcp>=0.9.0",
+    ], "the rooms need shapely 2, which IfcOpenShell brings without a floor; IfcMCP's session (ADR 0031)"
     for old in ("ifc-lpg", "ifcgraph"):
         assert project["optional-dependencies"][old] == ["opencde-server[ifc-db]"], "builds that name it keep working"
     assert 'ARG OPENCDE_EXTRAS="--extra postgres --extra ifc-db"' in (ROOT / "docker" / "Dockerfile").read_text(

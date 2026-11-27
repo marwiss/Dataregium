@@ -35,14 +35,16 @@ import hashlib
 import json
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import anyio
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from ifc_db.validation import pack_report
 from pydantic import BaseModel, ConfigDict, Field
 
 from opencde.accounts.roles import Role, at_least
+from opencde.bcf.binary import file_response
 from opencde.bcf.schemas import CommentPOST, Component, Components, TopicPUT, ViewpointPOST, Visibility
 from opencde.bcf.topic_access import TopicCtx, TopicsDep
 from opencde.deps import GitDep, ProjectsDep, SettingsDep, StorageDep, UsersDep
@@ -55,7 +57,7 @@ from opencde.documents.validation import IfcRooms, IfcValidationCheck, IfcValida
 from opencde.errors import CODE_VERSION_CONFLICT, ApiError
 from opencde.ids import new_id
 from opencde.ifcgraph.parts import owning_objects
-from opencde.ifcgraph.service import STATE_CLEAN, IfcGraphDep, IfcGraphService
+from opencde.ifcgraph.service import KIND_FILE, STATE_CLEAN, IfcGraphDep, IfcGraphService
 from opencde.logging import get_logger
 from opencde.repos.git import Git, GitError, proposal_ref
 from opencde.repos.writer import prepare, propose
@@ -98,6 +100,17 @@ class IfcProposalReport(BaseModel):
     state: str = Field(
         description="`queued` or `running` until the trial is over; then `clean` when every change applied and no "
         "finding is new compared with the base version, `issues` otherwise, or `failed` when the trial could not run."
+    )
+    kind: Literal["change_set", "file"] = Field(
+        "change_set",
+        description="`change_set` for a `DataregiumIfcChangeSet`, applied to the base; `file` for a whole IFC file "
+        "proposed on the base (`DataregiumIfcFile`, F204 a), which is checked as it is, and which "
+        "`…/ifc-proposal/file` gives back.",
+    )
+    commit: str | None = Field(
+        None,
+        description="The trial's commit on its proposal's branch, where the project has a repository: the client "
+        "compares it with the base through `ifc-diff?a={base}&b={commit}`.",
     )
     created_at: str = Field(description="When the change set was received, ISO 8601 in UTC.")
     checked_at: str | None = Field(None, description="When the trial ended.")
@@ -162,6 +175,8 @@ def proposal_report(node: dict[str, Any]) -> IfcProposalReport:
         base = IfcProposalBase(document_id=str(node["base_document_id"]), version_index=int(node["base_version_index"]))
     return IfcProposalReport(
         state=str(node["state"]),
+        kind="file" if node.get("kind") == KIND_FILE else "change_set",
+        commit=node.get("commit"),
         created_at=str(node["created_at"]),
         checked_at=node.get("checked_at"),
         base=base,
@@ -227,6 +242,24 @@ async def proposal_get(topic: TopicCtx, ifcgraph: IfcGraphDep) -> IfcProposalRep
     return proposal_report(node)
 
 
+@router.get(
+    "/ifc-proposal/file",
+    summary="Download the file of the topic's trial",
+    response_class=StreamingResponse,
+)
+async def proposal_file(topic: TopicCtx, ifcgraph: IfcGraphDep, storage: StorageDep) -> StreamingResponse:
+    """The IFC file the trial checked: a whole file proposed on the base (`kind` `file`), or the change set applied
+    to it, for every member of the project. 404 before the trial has a file, or when the BIM functions are off."""
+    if ifcgraph is None:
+        raise HTTPException(404, "Change sets are not tried on this server: the BIM functions are off")
+    node = await ifcgraph.proposal(user_id=topic.user_id, project_id=topic.project_id, topic_guid=topic.guid)
+    if node is None or not node.get("storage_key"):
+        raise HTTPException(404, "This topic's trial has no file")
+    return file_response(
+        storage, str(node["storage_key"]), media_type="application/octet-stream", filename="proposal.ifc"
+    )
+
+
 def _copy_hashed(storage: LocalStorage, source: Path, key: str) -> tuple[int, str]:
     """The applied file copied into the documents, with its size and SHA-256 as an upload has them."""
     digest = hashlib.sha256()
@@ -289,7 +322,10 @@ async def proposal_approve(
         if found is None:
             raise HTTPException(404, "The base version is gone")
         based = found
-    change_set = await anyio.to_thread.run_sync(_change_set, storage, str(node["snippet_key"]))
+    if node.get("kind") == KIND_FILE:  # a whole file (F204 a): no change set, its provenance on the trial
+        change_set: dict[str, Any] = {"provenance": json.loads(node["provenance"]) if node.get("provenance") else {}}
+    else:
+        change_set = await anyio.to_thread.run_sync(_change_set, storage, str(node["snippet_key"]))
     provenance = dict(change_set.get("provenance") or {})
     proposer = str(node["author"])
     proposing = await users.get_by_username(proposer)

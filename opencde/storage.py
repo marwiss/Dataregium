@@ -34,6 +34,7 @@ CATEGORIES = frozenset(
         "bcf-documents",
         "backups",
         "published",
+        "copies",  # the working copies an AI edits through IfcMCP (ADR 0031), until they expire
     }
 )
 _SUFFIX = re.compile(r"^[a-z0-9]{1,8}$")

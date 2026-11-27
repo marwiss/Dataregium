@@ -416,3 +416,74 @@ def test_a_change_set_with_operations_builds_a_wall_that_the_approval_keeps(
     (issue,) = [issue for issue in report["issues"] if issue["kind"] == "op"]
     assert (issue["op"], issue["tool"]) == (1, "create_wall") and issue["message"].startswith("op 1 (create_wall): ")
     assert client.post(f"{topics}/{failing['guid']}/ifc-proposal/approve", headers=manager.headers).status_code == 409
+
+
+FILE_SNIPPET = {
+    "snippet_type": "DataregiumIfcFile",
+    "is_external": False,
+    "reference": "proposal.ifc",
+    "reference_schema": "https://standards.buildingsmart.org/IFC/RELEASE/IFC4/ADD2_TC1/HTML/",
+}
+
+
+def renamed_file(tmp_path: Any, guid: str, name: str, source: Any = MODEL) -> bytes:
+    """The model with one wall renamed, written by IfcOpenShell as an app would."""
+    import ifcopenshell
+
+    model = ifcopenshell.open(str(source))
+    model.by_guid(guid).Name = name
+    target = tmp_path / f"{name}.ifc"
+    model.write(str(target))
+    return target.read_bytes()
+
+
+def test_a_whole_file_proposed_on_its_base_is_tried_and_approved(
+    ifc_client: tuple[TestClient, World], tmp_path: Any
+) -> None:
+    """F204 a and F124 a: a topic's snippet of the type DataregiumIfcFile is a whole IFC file on a base version, named
+    in the upload's query with what made it; it is checked as it is, given back, and approved as a change set is."""
+    client, world = ifc_client
+    editor = login_as(client, world, "editor")
+    web_sign_in(client, world, "editor")
+    manager = login_as(client, world, "manager")
+    viewer = login_as(client, world, "viewer")
+    version = upload(client, world, editor, "three_walls_gtin.ifc", MODEL.read_bytes())
+    assert checked(client, editor, version)["ifc_validation_status"] == ["passed"]
+    document_id = version["document_id"]
+    topics = f"/bcf/3.0/projects/{world.project_id}/topics"
+    topic = make_topic(client, world, editor, bim_snippet=FILE_SNIPPET)
+    snippet, proposal = f"{topics}/{topic['guid']}/snippet", f"{topics}/{topic['guid']}/ifc-proposal"
+    data = renamed_file(tmp_path, WALLS[0], "Whole")
+    base = {"base_document_id": document_id, "base_version_index": 1}
+
+    assert client.put(snippet, content=data, headers=editor.headers).status_code == 400, "a whole file names its base"
+    assert client.put(snippet, content=b"not a model", headers=editor.headers, params=base).status_code == 400
+    assert client.put(snippet, content=data, headers=viewer.headers, params=base).status_code == 403
+    put = client.put(snippet, content=data, headers=editor.headers, params={**base, "ai_model": "claude-opus-5-5"})
+    assert put.status_code == 200, put.text
+    report = tried(client, editor, proposal)
+    assert report["state"] == "clean" and report["kind"] == "file", report
+    assert report["base"] == {"document_id": document_id, "version_index": 1} and "change_count" not in report
+    given = client.get(proposal + "/file", headers=viewer.headers)
+    assert given.status_code == 200 and b"'Whole'" in given.content, "the trial's file, for every member"
+    assert client.get("/.well-known/dataregium").json()["extensions"]["ifc_changes"]["file_snippet_type"] == (
+        "DataregiumIfcFile"
+    )
+
+    approved = client.post(proposal + "/approve", headers=manager.headers)
+    assert approved.status_code == 201, approved.text
+    new = approved.json()
+    entries = {
+        entry["name"]: entry["value"]
+        for entry in client.get(new["links"]["document_version_metadata"]["url"], headers=editor.headers).json()[
+            "metadata"
+        ]
+    }
+    assert entries["proposed_by"] == ["editor"] and entries["ai_model"] == ["claude-opus-5-5"]
+    download = client.get(new["links"]["document_version_download"]["url"], headers=editor.headers)
+    assert b"'Whole'" in download.content and b"'YVT-A'" not in download.content
+    (viewpoint,) = client.get(f"{topics}/{topic['guid']}/viewpoints", headers=editor.headers).json()
+    selection = client.get(
+        f"{topics}/{topic['guid']}/viewpoints/{viewpoint['guid']}/selection", headers=editor.headers
+    ).json()["selection"]
+    assert [component["ifc_guid"] for component in selection] == [WALLS[0]], "what differs from the base"

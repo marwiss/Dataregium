@@ -706,6 +706,18 @@ lista servern kapat bär `X-Total-Count` och `Link: <…>; rel="next"`. `404`
 för ett dokument medlemmen inte får se, och när IFC-DB-modulen är av.
 Kapabilitetsdokumentet ger adressen som `ifc_changes.ifc_proposals_url`.
 
+En hel IFC-fil kan också föreslås, när ett ändringsset inte kan säga allt (ett
+tillägg, F204 a): ärendets `bim_snippet` har typen `DataregiumIfcFile`, och
+`PUT …/snippet?base_document_id=&base_version_index=` laddar upp filen i STEP
+som `application/octet-stream`, högst serverns `max_upload_bytes`, med
+`ai_model` och `tool_call` i frågan där en AI gjorde den. Basen måste vara en
+version av ett IFC-dokument i projektet (annars `400`). Filen kontrolleras som
+den är, utan att något tillämpas, efter skyddsnätet för STEP-id:na mot basen;
+prövningen säger `kind: "file"`, teamen är de vars delar det som skiljer från
+basen rör, och `GET …/ifc-proposal/file` ger filen tillbaka till varje medlem.
+Med repona ger prövningen sin `commit`, så att klienten kan jämföra den med
+basen genom `ifc-diff?a={bas}&b={commit}`. Den godkänns som ett ändringsset.
+
 En `manager` godkänner en ren prövning med `POST …/ifc-proposal/approve`:
 den tillämpade filen blir basdokumentets nästa version, med
 `base_version_index`, `change_set_id` (ärendets guid), `proposed_by` och

@@ -241,6 +241,43 @@ efter senaste användningen, och servern raderar det; ett okänt eller stängt
 handtag är ett verktygsfel som ber om ett nytt. En användare har högst 10
 öppna, och ett ändringsset högst 200 steg.
 
+## IfcMCP:s verktyg
+
+Med BIM-funktionerna och PostgreSQL ger ändpunkten också verktygen i
+IfcOpenShells IfcMCP (ADR 0031), körda i en egen arbetsprocess med serverns
+gränser, på en versions fil eller på en arbetskopia, aldrig på en sökväg som en
+klient anger.
+
+- **Läsande** (scope `mcp`), på `copy_id`, eller på `document_id` och
+  `version_index` (`null` för den senaste): `ifc_summary`, `ifc_tree`,
+  `ifc_info` (`element_id`), `ifc_select` (`query`, en selektor i IfcOpenShell),
+  `ifc_relations` (`element_id`, `traverse`), `ifc_contexts`, `ifc_materials`,
+  `ifc_validate` (`express_rules`), `ifc_schedule` och `ifc_cost`
+  (`max_depth`) och `ifc_schema` (`entity_type`). Ett svar är `result`, kapat
+  med `truncated` och `count` när en lista är längre än ett svar får vara, eller
+  `error`, vars text kan citera modellen.
+- **Redigerande** (scope `mcp:propose`, en `editor` eller `manager`): `ifc_open`
+  kopierar en version åt den som anropar och svarar `copy_id` med
+  `expires_at`; den varar fyra timmar efter senaste användning, högst tre öppna.
+  `ifc_list` och `ifc_docs` visar de funktioner i `ifcopenshell.api` som en AI
+  får köra, och `ifc_edit` (`copy_id`, `function_path`, `params` som ett
+  JSON-objekt) kör en av dem på kopian: skapa och ta bort element, deras
+  attribut, egenskaper, mängder, behållare, sammansättningar, typer, material,
+  klassifikationer, grupper, system, geometri, öppningar, fyllnader och stilar,
+  aldrig en funktion som tar en fil. `ifc_shape_list`, `ifc_shape_docs` och
+  `ifc_shape` bygger geometri med ShapeBuilder, och `ifc_quantify` skriver
+  basmängder. Nya instanser får id över dokumentets historia, och
+  ägarhistorierna namnger användaren och servern.
+- **Föreslå**: `ifc_propose` (`copy_id`, `title`, `description`, `ai_model`) gör
+  ett BCF-ärende vars snippet är kopian som hel fil (`DataregiumIfcFile`), prövad
+  på kopians version och godkänd av en människa ([ifc-db.md](ifc-db.md));
+  anropat igen lägger det kopian som den är då på samma ärende. `ifc_close`
+  kastar kopian.
+
+Det finns inga ritverktyg: Dataspatiums AI-panel ritar ur sin egen 3D-vy (F205
+d). `ifc_load`, `ifc_save`, `ifc_new`, `ifc_reset`, `ifc_plot`, `ifc_render`
+och `ifc_clash` ges inte.
+
 ## AI-policyn
 
 Ett projekts `ai_policy` är `local`, standardvärdet, eller `cloud`, och sätts av

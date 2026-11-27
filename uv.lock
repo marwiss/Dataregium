@@ -1117,6 +1117,18 @@ ifcopenshell = [
 ]
 
 [[package]]
+name = "ifc5d"
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "ifcopenshell" },
+    { name = "typing-extensions" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1a/21/e7e4abca9ef3fe1802f058ec90ccbfbb393113f81c03e07c877f24686be2/ifc5d-0.9.0-py3-none-any.whl", hash = "sha256:9db47904f3211fe24d8fdfc9632e9e457ec2938ca45ef8a44fa8b8db325566d1", size = 43604, upload-time = "2026-09-29T07:23:44.922Z" },
+]
+
+[[package]]
 name = "ifcclash"
 version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1125,6 +1137,18 @@ dependencies = [
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d4/1a/065c5e8a8f40dbe481785bb0c89436742b47c759e88cee49970197cb62e4/ifcclash-0.9.0-py3-none-any.whl", hash = "sha256:ebfaae128605521f198bdd3f8b94059560f464ec9a7f5a03038666da322be96d", size = 7171, upload-time = "2026-09-29T07:23:56.473Z" },
+]
+
+[[package]]
+name = "ifcedit"
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "ifc5d" },
+    { name = "ifcopenshell" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/73/76888d3ff7a4c372a48cf0302915251444316e9f3f3e25f22e7551a6eea0/ifcedit-0.9.0-py3-none-any.whl", hash = "sha256:8bec375d2e9a9bdd3360264c9db3a971c3613b7318f8f51cb36a43f031e1b93b", size = 17927, upload-time = "2026-09-29T07:23:29.135Z" },
 ]
 
 [[package]]
@@ -1178,6 +1202,30 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/40/77/a8c014467ce98e108a05af04b034c523cc990bdaf4ee85fd8490c5d509ef/ifcopenshell-0.9.0.post1-py315-none-manylinux_2_31_x86_64.whl", hash = "sha256:9882fb63cfb4eed2fdfaddd92c4b1624be5c77472bd8b53917d276459971b3ab", size = 54948697, upload-time = "2026-10-15T11:39:10.386Z" },
     { url = "https://files.pythonhosted.org/packages/f5/a7/993c06119e5c34ef00995ed7396db1068486d53d53db5c541bf0bd1c487a/ifcopenshell-0.9.0.post1-py315-none-win_amd64.whl", hash = "sha256:9f0ddd6af8502855a3342fd1621584241b3b31b848ebb96421164d092cdb45f7", size = 43318539, upload-time = "2026-10-15T11:38:05.013Z" },
     { url = "https://files.pythonhosted.org/packages/42/5c/35650e89ba91040c64aac47b8262b3846e146f0c9279b02699cf9944115f/ifcopenshell-0.9.0.post1-py315-none-win_arm64.whl", hash = "sha256:5feeca4999a3eaf8a5cbf4f444acde3aebb4ff3b7b9858146d3515355a134f50", size = 43163442, upload-time = "2026-10-15T11:38:04.109Z" },
+]
+
+[[package]]
+name = "ifcopenshell-mcp"
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "ifcedit" },
+    { name = "ifcopenshell" },
+    { name = "ifcquery" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/5b/d08673eaafce5b07af107f5f2b3b125a3d6c03623a0ae88dcac4b033bc03/ifcopenshell_mcp-0.9.0-py3-none-any.whl", hash = "sha256:0ede1a23f5c346a59ad7b4e6aae3e5c7f4cafc94eed7b6d174ed174e0d4a7908", size = 18271, upload-time = "2026-09-29T07:24:08.935Z" },
+]
+
+[[package]]
+name = "ifcquery"
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "ifcopenshell" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/62/2b/b7da05449472123ba01b1ef0befd8cb5b1795eefab3cbf6fd52a1114da2a/ifcquery-0.9.0-py3-none-any.whl", hash = "sha256:d8b3c5908c2a564e327df13063983bbc3327dca0da355b42bc1f7c15fcc7b291", size = 36661, upload-time = "2026-09-29T09:39:44.41Z" },
 ]
 
 [[package]]
@@ -1994,16 +2042,19 @@ dependencies = [
 ifc-db = [
     { name = "ifc-db", extra = ["ifcopenshell"] },
     { name = "ifcclash" },
+    { name = "ifcopenshell-mcp" },
     { name = "shapely" },
 ]
 ifc-lpg = [
     { name = "ifc-db", extra = ["ifcopenshell"] },
     { name = "ifcclash" },
+    { name = "ifcopenshell-mcp" },
     { name = "shapely" },
 ]
 ifcgraph = [
     { name = "ifc-db", extra = ["ifcopenshell"] },
     { name = "ifcclash" },
+    { name = "ifcopenshell-mcp" },
     { name = "shapely" },
 ]
 postgres = [
@@ -2048,6 +2099,7 @@ requires-dist = [
     { name = "ifc-db", git = "https://github.com/marwiss/IFC-DB?rev=bfb1c49" },
     { name = "ifc-db", extras = ["ifcopenshell"], marker = "extra == 'ifc-db'", git = "https://github.com/marwiss/IFC-DB?rev=bfb1c49" },
     { name = "ifcclash", marker = "extra == 'ifc-db'", specifier = ">=0.9.0" },
+    { name = "ifcopenshell-mcp", marker = "extra == 'ifc-db'", specifier = ">=0.9.0" },
     { name = "itsdangerous", specifier = ">=2.2" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "limits", specifier = ">=5.0" },

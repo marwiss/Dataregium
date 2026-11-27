@@ -45,6 +45,7 @@ from ifc_db.spatial import geometry_issues, import_spatial
 from ifc_db.validation import MAX_REPORTED, pack_report, unpack_report
 
 from opencde.admin.graph_query import ReadingGraph
+from opencde.documents.step import protect_stored
 from opencde.documents.validation import IfcRooms
 from opencde.graph.graph import Graph
 from opencde.graph.schema import SchemaGraph, library_dialect
@@ -89,6 +90,8 @@ log = get_logger(__name__)
 STATE_CLEAN = "clean"  # a proposal whose every change applied, with no finding the base lacks
 STATE_ISSUES = "issues"
 STATE_APPROVED = "approved"  # a clean proposal that became a version
+KIND_FILE = "file"  # a proposal whose snippet is a whole IFC file (F204 a), not a change set
+KIND_CHANGE_SET = "change_set"
 IFC_SUFFIXES = (".ifc", ".ifczip", ".ifcxml")
 IDS_SUFFIX = ".ids"
 # The IDS documents of one project an upload is checked against, and the specifications its report keeps (ADR 0015).
@@ -266,6 +269,8 @@ class IfcGraphService:
         self._ids_bsdd: dict[str, dict[str, Any]] = {}  # the bSDD URIs of an IDS version, by its storage key
         self._tasks: set[asyncio.Task[None]] = set()
         self._lock = asyncio.Semaphore(1)
+        # IfcMCP's tools for an AI (ADR 0031): one at a time beside the queue above, so that they never hold it up.
+        self._ifcmcp = asyncio.Semaphore(1)
 
     # -- scheduling ------------------------------------------------------------------------------
 
@@ -798,10 +803,21 @@ class IfcGraphService:
 
     # -- a change set tried on its base version (ADR 0021) --------------------------------------------
 
-    async def schedule_proposal(self, *, project_id: str, topic_guid: str, snippet_key: str, author: str) -> str:
-        """Queue the trial of a topic's change set; an earlier trial of the topic goes, with its file."""
+    async def schedule_proposal(
+        self,
+        *,
+        project_id: str,
+        topic_guid: str,
+        snippet_key: str,
+        author: str,
+        base: dict[str, Any] | None = None,
+        fields: dict[str, Any] | None = None,
+    ) -> str:
+        """Queue the trial of a topic's change set, or of a whole IFC file proposed on ``base`` (F204 a), with
+        ``fields`` such as its provenance kept on the trial; an earlier trial of the topic goes, with its file."""
         proposal_id = new_id()
-        base = await asyncio.to_thread(self._base_of, snippet_key)
+        if base is None:
+            base = await asyncio.to_thread(self._base_of, snippet_key)
         made, gone = await self.proposals.create(
             proposal_id=proposal_id,
             project_id=project_id,
@@ -816,6 +832,8 @@ class IfcGraphService:
                 self.storage.delete(key)
         if not made:
             raise ValueError("no such topic")
+        if fields:
+            await self._set_proposal(proposal_id, STATE_QUEUED, **fields)
         self._start_proposal(proposal_id)
         return proposal_id
 
@@ -845,13 +863,16 @@ class IfcGraphService:
             if row is None:
                 return
             try:
-                fields = await self._try_proposal(
-                    proposal_id,
-                    str(row["project_id"]),
-                    str(row["snippet_key"]),
-                    author=str(row["author"] or ""),
-                    topic=row.get("topic_guid"),
-                )
+                if await asyncio.to_thread(self._is_file, str(row["snippet_key"])):
+                    fields = await self._try_file_proposal(proposal_id, row)
+                else:
+                    fields = await self._try_proposal(
+                        proposal_id,
+                        str(row["project_id"]),
+                        str(row["snippet_key"]),
+                        author=str(row["author"] or ""),
+                        topic=row.get("topic_guid"),
+                    )
             except Exception as exc:
                 log.warning("ifc_proposal_failed", proposal_id=proposal_id, error=type(exc).__name__)
                 await self._set_proposal(proposal_id, STATE_FAILED, **_failure(exc))
@@ -948,6 +969,84 @@ class IfcGraphService:
             fields["notes"] = json.dumps(made["notes"], separators=(",", ":"))
             fields["ops_objects"] = json.dumps(made["objects"][:MAX_OPS_OBJECTS], separators=(",", ":"))
         return fields
+
+    def _is_file(self, snippet_key: str) -> bool:
+        """Whether a stored snippet is an IFC file in STEP rather than a change set."""
+        with self.storage.open_read(snippet_key) as handle:
+            return handle.read(64).lstrip(b"\xef\xbb\xbf \t\r\n").startswith(b"ISO-10303-21;")
+
+    async def _try_file_proposal(self, proposal_id: str, row: dict[str, Any]) -> dict[str, Any]:
+        """Check a whole IFC file proposed on its base version (F204 a, F124 a), as a change set's applied file is
+        checked: the safety net of the STEP ids against the base, the findings the base lacks, the teams whose parts
+        what differs from the base touches, and the proposal's branch. Nothing is applied."""
+        project_id, author = str(row["project_id"]), str(row["author"] or "")
+        document_id, version_index = str(row.get("base_document_id") or ""), row.get("base_version_index")
+        if not document_id or version_index is None:
+            raise RuntimeError("the proposal names no base version")
+        version = await self.documents.version_file(
+            project_id=project_id, document_id=document_id, version_index=int(version_index)
+        )
+        if version is None:
+            raise RuntimeError("the base version is not in this project")
+        if not self.wants(str(version["file_name"])):
+            raise RuntimeError("the base version is not an IFC file")
+        await self._restore(project_id, document_id, version)
+        head = await self.documents.head(project_id=project_id, document_id=document_id)
+        known = head.max_step_id if head is not None else None
+        key = make_key("proposals", proposal_id, "ifc")
+        await asyncio.to_thread(self.storage.copy_in, self.storage.path(str(row["snippet_key"])), key)
+        await asyncio.to_thread(
+            protect_stored, self.storage, key, str(version["storage_key"]), str(version["file_name"]), known
+        )
+        with tempfile.TemporaryDirectory(prefix="ifcproposal-") as tmp:
+            workdir = Path(tmp)
+            source = await asyncio.to_thread(
+                self._prepare_input, str(version["storage_key"]), str(version["file_name"]), workdir
+            )
+            touched = await self._differing(source, self.storage.path(key))
+            listed = workdir / "touching.json"
+            listed.write_text(json.dumps({"changes": [{"guid": guid} for guid in touched]}), encoding="utf-8")
+            teams, teams_error = await self._parts_touched(project_id, source, self.storage.path(key), listed)
+            checked, new = await self._new_findings(project_id, version, source, key)
+            commit = await self._branch(
+                proposal_id,
+                project_id,
+                document_id,
+                int(version_index),
+                version,
+                head,
+                key,
+                author,
+                row.get("topic_guid"),
+            )
+        return {
+            **_judged(checked, new, teams, teams_error),
+            "storage_key": key,
+            "file_name": "proposal.ifc",
+            "base_document_id": document_id,
+            "base_version_index": int(version_index),
+            "kind": KIND_FILE,
+            "commit": commit,
+            "ops_objects": json.dumps(touched[:MAX_OPS_OBJECTS], separators=(",", ":")),
+        }
+
+    async def _differing(self, base: Path, changed: Path) -> list[str]:
+        """The GlobalIds of what was added, removed or changed between two files, by the diff worker; the caller
+        holds the queue's lock."""
+        command = [
+            sys.executable,
+            "-m",
+            "opencde.ifcgraph.diff",
+            str(base),
+            str(changed),
+            "--memory-mb",
+            str(self.settings.ifcgraph_memory_mb),
+        ]
+        report = json.loads((await self._in_a_process(command, "the comparison")).strip().splitlines()[-1])
+        found: list[str] = []
+        for name in ("added", "changed", "removed"):
+            found += [str(element["guid"]) for element in report.get(name) or [] if element.get("guid")]
+        return list(dict.fromkeys(found))
 
     async def _branch(
         self,
@@ -1134,6 +1233,44 @@ class IfcGraphService:
                 ]
                 answer = await self._in_a_process(command, "reading the values")
         return list(json.loads(answer.strip().splitlines()[-1])["values"])
+
+    async def ifcmcp(
+        self,
+        tool: str,
+        arguments: dict[str, Any],
+        *,
+        path: Path | None,
+        write: bool = False,
+        known: int | None = None,
+        proposer: str = "",
+        budget: int = 200_000,
+    ) -> dict[str, Any]:
+        """One of IfcMCP's tools on the file at ``path`` (``mcp_worker``): a reading one on a version's file or a
+        working copy, an editing one on a working copy with ``write``, which the worker writes back; ``path`` is the
+        server's own, never a client's. The answer is ``{"result"}``, perhaps with ``truncated``, or ``{"error"}``,
+        whose text may quote the model and is data."""
+        async with self._ifcmcp:
+            with tempfile.TemporaryDirectory(prefix="ifcmcp-") as tmp:
+                listed = Path(tmp) / "arguments.json"
+                listed.write_text(json.dumps(arguments), encoding="utf-8")
+                command = [
+                    sys.executable,
+                    "-m",
+                    "opencde.ifcgraph.mcp_worker",
+                    str(path if path is not None else listed),
+                    tool,
+                    str(listed),
+                    "--memory-mb",
+                    str(self.settings.ifcgraph_memory_mb),
+                    "--max-step-id",
+                    str(int(known or 0)),
+                    f"--proposer={proposer}",
+                    f"--budget={int(budget)}",
+                    *(["--write"] if write else []),
+                    *(["--no-model"] if path is None else []),
+                ]
+                answer = await self._in_a_process(command, f"the tool {tool}")
+        return dict(json.loads(answer.strip().splitlines()[-1]))
 
     async def diff(
         self, *, a: tuple[str, str] | Path, b: tuple[str, str] | Path, by_guid: bool = False

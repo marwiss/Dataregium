@@ -23,6 +23,8 @@ from typing import Annotated, Any, Literal, get_args
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 SNIPPET_TYPE = "DataregiumIfcChangeSet"
+#: A whole IFC file proposed on a base version (F204 a, F124 a, ADR 0031), tried and approved as a change set is.
+FILE_SNIPPET_TYPE = "DataregiumIfcFile"
 SCHEMA_PATH = "/documents/1.0/ifc-changes/schema"
 SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 MAX_CHANGES = 10_000

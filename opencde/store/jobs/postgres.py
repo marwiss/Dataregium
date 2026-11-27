@@ -478,7 +478,7 @@ RETURNING id
 """
 PROPOSAL_CLAIM = """
 UPDATE proposals SET state = $3, running_at = $4 WHERE id = $1 AND state = $2
-RETURNING project_id, topic_guid, snippet_key, author
+RETURNING project_id, topic_guid, snippet_key, author, base_document_id, base_version_index
 """
 PROPOSAL_STATE = """
 UPDATE proposals
@@ -570,6 +570,82 @@ class PostgresProposalRepository:
 
     async def interrupted(self, *, given_up: str) -> list[dict[str, Any]]:
         return await self.postgres.run(PROPOSALS_INTERRUPTED, STATE_QUEUED, STATE_RUNNING, given_up)
+
+
+# -- the working copies of the MCP endpoint's IfcMCP tools (ADR 0031) -------------------------------------------
+
+#: A user's copies are made one after the other, so that two calls at once do not both find room for one more.
+COPY_OPEN = """
+INSERT INTO ifc_copies (copy_id, user_id, project_id, document_id, version_index, storage_key, created_at, expires_at)
+SELECT $5, m.user_id, m.project_id, d.document_id, $4, $6, $7::text, $8
+FROM memberships m JOIN documents d ON d.project_id = m.project_id AND d.document_id = $3
+WHERE m.user_id = $1 AND m.project_id = $2
+  AND (SELECT count(*) FROM ifc_copies o WHERE o.user_id = $1 AND o.expires_at > $7::text) < $9
+RETURNING copy_id
+"""
+#: A user's own copy, while it has not expired and the user is still a member of its project.
+COPY_GET = """
+SELECT c.copy_id, c.project_id, c.document_id, c.version_index, c.storage_key, c.topic_guid, c.expires_at
+FROM ifc_copies c JOIN memberships m ON m.project_id = c.project_id AND m.user_id = c.user_id
+WHERE c.copy_id = $2 AND c.user_id = $1 AND c.expires_at > $3
+"""
+COPY_TOUCH = "UPDATE ifc_copies SET expires_at = $3 WHERE copy_id = $2 AND user_id = $1"
+COPY_TOPIC = "UPDATE ifc_copies SET topic_guid = $3 WHERE copy_id = $2 AND user_id = $1"
+COPY_CLOSE = "DELETE FROM ifc_copies WHERE copy_id = $2 AND user_id = $1 RETURNING storage_key"
+
+
+class PostgresWorkingCopies:
+    """The working copies an AI edits through IfcMCP: a version's file copied for one user, until it expires; the
+    caller writes and deletes the files."""
+
+    def __init__(self, postgres: Postgres) -> None:
+        self.postgres = postgres
+
+    async def open(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        document_id: str,
+        version_index: int,
+        copy_id: str,
+        storage_key: str,
+        expires_at: str,
+        most: int,
+    ) -> bool:
+        """A copy for a member of the project, while the user has fewer than ``most`` open; False otherwise."""
+
+        async def work(tx: Tx) -> bool:
+            await tx.one(DRAFT_USER_LOCK, user_id)
+            made = await tx.one(
+                COPY_OPEN,
+                user_id,
+                project_id,
+                document_id,
+                version_index,
+                copy_id,
+                storage_key,
+                now_iso(),
+                expires_at,
+                most,
+            )
+            return made is not None
+
+        return await self.postgres.write(work)
+
+    async def get(self, *, user_id: str, copy_id: str) -> dict[str, Any] | None:
+        return await self.postgres.one(COPY_GET, user_id, copy_id, now_iso())
+
+    async def touch(self, *, user_id: str, copy_id: str, expires_at: str) -> None:
+        await self.postgres.execute(COPY_TOUCH, user_id, copy_id, expires_at)
+
+    async def set_topic(self, *, user_id: str, copy_id: str, topic_guid: str) -> None:
+        await self.postgres.execute(COPY_TOPIC, user_id, copy_id, topic_guid)
+
+    async def close(self, *, user_id: str, copy_id: str) -> str | None:
+        """The copy gone; its file's key, for the caller to delete, or None for no such copy."""
+        row = await self.postgres.one(COPY_CLOSE, user_id, copy_id)
+        return str(row["storage_key"]) if row else None
 
 
 # -- the open change sets of the MCP endpoint --------------------------------------------------------------------

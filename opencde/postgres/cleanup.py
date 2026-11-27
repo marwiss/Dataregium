@@ -57,6 +57,10 @@ EXPIRED_PRECHECKS = """
 DELETE FROM validations WHERE id IN (SELECT id FROM validations WHERE expires_at < $1 LIMIT $2)
 RETURNING storage_key
 """
+EXPIRED_IFC_COPIES = """
+DELETE FROM ifc_copies WHERE copy_id IN (SELECT copy_id FROM ifc_copies WHERE expires_at < $1 LIMIT $2)
+RETURNING storage_key
+"""
 EXPIRED_CHANGE_SET_DRAFTS = """
 DELETE FROM change_set_drafts
 WHERE changeset_id IN (SELECT changeset_id FROM change_set_drafts WHERE expires_at < $1 LIMIT $2)
@@ -70,7 +74,7 @@ DELETE FROM sign_in_throttles WHERE key IN (SELECT key FROM sign_in_throttles WH
 """
 #: The statements of the rows that own a file, each returning its key; they run first, so that a row goes before
 #: what owns it (an upload's parts before their session).
-EXPIRING_WITH_FILES = (EXPIRED_UPLOAD_PARTS, EXPIRED_PRECHECKS)
+EXPIRING_WITH_FILES = (EXPIRED_UPLOAD_PARTS, EXPIRED_PRECHECKS, EXPIRED_IFC_COPIES)
 #: One statement per expiring table that owns no file, each run with the moment and the batch size.
 EXPIRING = (
     EXPIRED_WEB_SESSIONS,

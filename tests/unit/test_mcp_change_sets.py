@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from opencde.mcp import change_sets, routes, write_tools
+from opencde.mcp.ifcmcp_tools import IFCMCP_TOOLS
 from opencde.store.jobs import drafts
 from opencde.store.jobs.drafts import ChangeSetDraftRepository, DraftRefused
 from tests.mcp_drafts_support import (
@@ -90,6 +91,7 @@ def test_the_change_sets_follow_list_models_in_dataspatiums_order(client: TestCl
         "get_publication",
         "start_clash_check",
         "get_clash_check",
+        *(tool.name for tool in IFCMCP_TOOLS),  # IfcMCP's last (ADR 0031)
     ]
     by_name = {tool["name"]: tool for tool in listed}
     for spec in write_tools.TOOLS:
@@ -99,6 +101,14 @@ def test_the_change_sets_follow_list_models_in_dataspatiums_order(client: TestCl
         assert schema["required"] == list(schema["properties"]) and schema["additionalProperties"] is False
         assert by_name[spec["name"]]["annotations"]["readOnlyHint"] is False
     proposing = {"open_changeset", *(spec["name"] for spec in write_tools.TOOLS), "change_attribute", "propose_changes"}
+    proposing |= {
+        "ifc_open",
+        "ifc_edit",
+        "ifc_quantify",
+        "ifc_shape",
+        "ifc_propose",
+        "ifc_close",
+    }  # IfcMCP's, which change
     assert {tool.name: tool.scope for tool in routes.TOOLS} == {
         tool.name: "mcp:propose" if tool.name in proposing else "mcp" for tool in routes.TOOLS
     }
