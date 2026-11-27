@@ -4,13 +4,15 @@
 ``GET /documents/1.0/documents/{id}/versions/{index}/ifc-diff/{other_index}`` compares two versions of a document, or
 with ``?other_document_id=`` a version of another document of a project the member is in, element by element: what
 the other has that this one lacks, what it lacks, and what differs, by GlobalId and path, as the worker
-``opencde.ifcgraph.diff`` finds it. The difference is computed on request in a worker process and never stored. The
-same bearer token as the Documents API.
+``opencde.ifcgraph.diff`` finds it. Two versions of one document whose GlobalIds keep their STEP ids are compared
+instance by instance too, and each element names the STEP ids brought to it (``by: "step"``, UL-48, fas 5.1); a
+re-export, or two documents, are compared by GlobalId alone (``by: "guid"``). The difference is computed on request in
+a worker process and never stored. The same bearer token as the Documents API.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -38,6 +40,20 @@ class IfcDiffElement(BaseModel):
     type: str
     name: str | None = None
     storey: str | None = None
+    step_ids: list[int] | None = Field(
+        None,
+        description="With `by` `step`: the STEP ids in b's file of the instances added or changed that were brought "
+        "to this element (the element itself, or what it reaches), at most 1000.",
+    )
+    step_ids_count: int | None = Field(None, description="How many there were, when `step_ids` was cut.")
+    step_ids_removed: list[int] | None = Field(
+        None,
+        description="With `by` `step`: the STEP ids in a's file of the instances removed (or, for a relationship, "
+        "that let the element go) that were brought to this element, at most 1000.",
+    )
+    step_ids_removed_count: int | None = Field(
+        None, description="How many there were, when `step_ids_removed` was cut."
+    )
 
 
 class IfcDiffAttribute(BaseModel):
@@ -63,16 +79,45 @@ class IfcDiffSide(BaseModel):
     version_index: int
 
 
+class IfcDiffLoose(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: int
+    type: str | None = Field(None, description="The class as the schema writes it, such as `IfcOwnerHistory`.")
+    side: Literal["a", "b"] = Field(description="The file the STEP id is in.")
+    change: Literal["added", "removed", "changed"]
+    objects: int | None = Field(None, description="In `shared`: how many objects reach the instance.")
+
+
 class IfcDiff(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    a: IfcDiffSide = Field(description="This version.")
-    b: IfcDiffSide = Field(description="The version compared with.")
+    by: Literal["step", "guid"] = Field(
+        description="`step` when the versions are of one document and every GlobalId in both has the same STEP id in "
+        "both, so that the instances were compared too; `guid` when one is a re-export, or for two documents, and "
+        "the comparison is by GlobalId alone, without STEP ids."
+    )
+    a: IfcDiffSide = Field(description="This version, `{version_index}`.")
+    b: IfcDiffSide = Field(description="The version compared with, `{other_index}`.")
     added: list[IfcDiffElement] = Field(description="Rooted entities only `b` has.")
     removed: list[IfcDiffElement] = Field(description="Rooted entities only `a` has.")
-    changed: list[IfcDiffChanged] = Field(description="Rooted entities in both whose attributes differ.")
+    changed: list[IfcDiffChanged] = Field(
+        description="Rooted entities in both whose attributes differ, or, with `by` `step`, under which an instance "
+        "changed (then perhaps with no attributes)."
+    )
     same: int = Field(description="How many rooted entities are in both and the same.")
     truncated: bool = Field(description="True when a list had more than the server keeps (10,000).")
+    unplaced: list[IfcDiffLoose] = Field(
+        default_factory=list,
+        description="With `by` `step`: instances added, removed or changed that no object reaches.",
+    )
+    unplaced_count: int | None = Field(None, description="How many there were, when `unplaced` was cut at 10,000.")
+    shared: list[IfcDiffLoose] = Field(
+        default_factory=list,
+        description="With `by` `step`: instances that more than 100 objects reach, such as a style or a unit, "
+        "brought to none of them.",
+    )
+    shared_count: int | None = Field(None, description="How many there were, when `shared` was cut at 10,000.")
 
 
 async def _version(documents: Any, user_id: str, document_id: str, version_index: int) -> VersionRecord:
@@ -114,7 +159,9 @@ async def ifc_diff(
     if a.document_id == b.document_id and a.version_index == b.version_index:
         raise HTTPException(400, "A version is compared with another one")
     try:
-        report = await ifcgraph.diff(a=(a.storage_key, a.file_name), b=(b.storage_key, b.file_name))
+        report = await ifcgraph.diff(
+            a=(a.storage_key, a.file_name), b=(b.storage_key, b.file_name), by_guid=a.document_id != b.document_id
+        )
     except RuntimeError as exc:
         raise HTTPException(400, f"The comparison could not be made: {exc}") from None
     return IfcDiff(

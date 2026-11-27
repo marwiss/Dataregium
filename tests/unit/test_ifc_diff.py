@@ -80,3 +80,68 @@ def test_the_same_file_differs_in_nothing_and_the_worker_answers_on_stdout(tmp_p
         check=False,
     )
     assert broken.returncode == 2 and json.loads(broken.stderr.strip().splitlines()[-1])["error"]
+
+
+# -- instance by instance (UL-48, fas 5.1) --------------------------------------------------------------------------
+
+
+def test_the_instances_under_each_element_are_named_by_their_step_ids(tmp_path: Path) -> None:
+    """A moved point and a changed property value are brought to the wall they belong to; the removed wall names its
+    instances in a's file, among them the storey's relationship that let it go, which marks no other wall; and an
+    owner history, which every rooted entity names, is brought to none."""
+    import ifcopenshell
+
+    edited = tmp_path / "edited.ifc"
+    added_guid, removed_guid = edited_copy(edited)
+    before, after = ifcopenshell.open(str(MODEL)), ifcopenshell.open(str(edited))
+    wall = after.by_guid(WALLS[0])
+    point = wall.ObjectPlacement.RelativePlacement.Location.id()
+    gtin = next(
+        p.id() for p in after.by_type("IfcPropertySingleValue") if p.Name == "GTIN" and p.NominalValue[0] == "4"
+    )
+    report = compare(MODEL, edited)
+    assert report["by"] == "step"
+    changed = {entry["guid"]: entry for entry in report["changed"]}
+    assert set(changed) == {WALLS[0]}, "the walls the storey kept are not marked"
+    assert {wall.id(), point, gtin} <= set(changed[WALLS[0]]["step_ids"]) and "step_ids_removed" not in changed[
+        WALLS[0]
+    ]
+    removed = report["removed"][0]
+    gone = before.by_guid(removed_guid)
+    container = gone.ContainedInStructure[0].id()
+    assert removed["guid"] == removed_guid and {gone.id(), container} <= set(removed["step_ids_removed"])
+    assert "step_ids" not in removed and report["added"][0]["step_ids"] == [after.by_guid(added_guid).id()]
+    assert {e["type"] for e in report["unplaced"]} >= {"IfcOwnerHistory"} and report["shared"] == []
+    assert all(e["side"] in ("a", "b") and e["change"] in ("added", "removed", "changed") for e in report["unplaced"])
+
+
+def test_an_instance_that_many_objects_reach_is_shared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import ifcopenshell
+
+    import opencde.ifcgraph.diff as diff
+
+    model = ifcopenshell.open(str(MODEL))
+    reached = {material.id(): len(diff._nearest(model, material)) for material in model.by_type("IfcMaterial")}
+    common = max(reached, key=lambda step_id: reached[step_id])
+    assert reached[common] >= 2, "the fixture has a material several walls reach"
+    model.by_id(common).Name = "Another material"
+    edited = tmp_path / "edited.ifc"
+    model.write(str(edited))
+    monkeypatch.setattr(diff, "MAX_OWNERS", 1)
+    report = compare(MODEL, edited)
+    assert report["shared"] == [
+        {"step_id": common, "type": "IfcMaterial", "side": "b", "change": "changed", "objects": reached[common]}
+    ]
+    assert all(common not in entry.get("step_ids", []) for entry in report["changed"])
+
+
+def test_a_re_export_or_two_documents_are_compared_by_globalid(tmp_path: Path) -> None:
+    """A file whose GlobalIds have other STEP ids, as a tool that renumbers gives it, is compared by GlobalId alone."""
+    import re
+
+    renumbered = tmp_path / "renumbered.ifc"
+    renumbered.write_bytes(re.sub(rb"#([0-9]+)", lambda m: b"#%d" % (int(m.group(1)) + 1000), MODEL.read_bytes()))
+    report = compare(MODEL, renumbered)
+    assert report["by"] == "guid" and report["changed"] == [] and report["unplaced"] == []
+    assert compare(MODEL, MODEL, by_guid=True)["by"] == "guid"
+    assert compare(MODEL, MODEL)["by"] == "step" and compare(MODEL, MODEL)["unplaced"] == []

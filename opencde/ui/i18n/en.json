@@ -254,6 +254,7 @@
   "docs.diff.old": "Before",
   "docs.diff.new": "After",
   "docs.diff.truncated": "The lists were cut at 10,000 elements each.",
+  "docs.diff.instances": "Only instances under it changed ({count})",
   "docs.diff.back": "Back to version {version}",
   "docs.diff.failed_title": "The comparison could not be made",
   "docs.diff.failed": "The files could not be compared; one of them may be too large, or not a readable IFC file.",

@@ -692,7 +692,10 @@ def _contexts(text: str) -> dict[str, dict[str, Any]]:
             "report": {
                 "added": [element],
                 "removed": [element],
-                "changed": [{**element, "attributes": [{"path": text, "old": text, "new": text}]}],
+                "changed": [
+                    {**element, "attributes": [{"path": text, "old": text, "new": text}]},
+                    {**element, "attributes": [], "step_ids": [5, 6], "step_ids_removed": [7]},
+                ],
                 "same": 3,
                 "truncated": False,
             },

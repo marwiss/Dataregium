@@ -318,3 +318,115 @@ def protect_stored(
         written.unlink(missing_ok=True)
         raise
     return done
+
+
+# -- the instances of a file, statement by statement, for the diff (UL-48, fas 5.1) ---------------------------------
+
+_STATEMENT = re.compile(rb"'|/\*|\*/|;")
+_REAL = re.compile(rb"(?<![#A-Za-z0-9_])[-+]?[0-9]+\.[0-9]*(?:[Ee][-+]?[0-9]+)?")
+_BLANK = re.compile(rb"\s+")
+_OPEN = re.compile(rb"[-+0-9.Ee#/*]{1,64}\Z")  # the end of a piece that the next piece may go on
+_HEAD = re.compile(rb"#([0-9]+)=")
+_GUARD_HEAD = re.compile(rb"#[0-9]+=IFCDOCUMENTREFERENCE\((?:\$|'[^']*'),'[0-9]+','StepIdGuard'")
+_HEAD_SIZE = 256
+
+
+def _real(found: re.Match[bytes]) -> bytes:
+    return b"%.10g" % float(found.group(0))
+
+
+#: The highest id the diff fingerprints, 8 bytes an id (128 MiB a file at the most); a file with one above it is
+#: compared by GlobalId alone.
+MAX_PRINTED_ID = 1 << 24
+
+
+class Fingerprints:
+    """A fingerprint of every instance of a file but the guards, by id (8 bytes of BLAKE2b; 0 for no instance), up to
+    ``MAX_PRINTED_ID``; ``over`` says that one above it was left out."""
+
+    def __init__(self) -> None:
+        self.prints = array("Q")
+        self.over = False
+
+    def put(self, value: int, digest: bytes) -> None:
+        if value > MAX_PRINTED_ID:
+            self.over = True
+            return
+        if value >= len(self.prints):
+            size = min(max(value + 1, 2 * len(self.prints)), MAX_PRINTED_ID + 1)
+            self.prints.frombytes(bytes(8 * (size - len(self.prints))))
+        self.prints[value] = int.from_bytes(digest, "little") or 1
+
+
+def fingerprints(stream: IO[bytes]) -> Fingerprints:
+    """The fingerprint of every instance of the file in ``stream``, each statement read whole over its lines: outside
+    strings without blanks or comments and with every real as ``%.10g``, as ifcmerge compares them, so that the same
+    instance written another way gives the same print. The app's guard is left out, as it is no part of the model."""
+    found = Fingerprints()
+    state = _PLAIN
+    head = b""
+    digest = hashlib.blake2b(digest_size=8)
+
+    def feed(data: bytes) -> None:
+        nonlocal head
+        if len(head) < _HEAD_SIZE:
+            head += data[: _HEAD_SIZE - len(head)]
+        digest.update(data)
+
+    def segment(data: bytes) -> None:
+        if state == _PLAIN:
+            feed(_REAL.sub(_real, _BLANK.sub(b"", data)))
+        elif state == _QUOTED:
+            feed(data)
+
+    def end() -> None:
+        nonlocal head, digest
+        if (own := _HEAD.match(head)) and not _GUARD_HEAD.match(head):
+            found.put(_number(own.group(1)), digest.digest())
+        head, digest = b"", hashlib.blake2b(digest_size=8)
+
+    def consume(piece: bytes, whole: bool) -> bytes:
+        """Read a piece; unless ``whole``, give back the end the next piece may go on."""
+        nonlocal state
+        at = 0
+        for token in _STATEMENT.finditer(piece):
+            segment(piece[at : token.start()])
+            at = token.end()
+            mark = token.group(0)
+            if state == _COMMENT:
+                state = _PLAIN if mark == b"*/" else state
+            elif state == _QUOTED:
+                feed(mark)
+                state = _PLAIN if mark == b"'" else state
+            elif mark == b"/*":
+                state = _COMMENT
+            else:
+                feed(mark)
+                if mark == b"'":
+                    state = _QUOTED
+                elif mark == b";":
+                    end()
+        rest = piece[at:]
+        carry = b""
+        if not whole:
+            if state == _PLAIN and (cut := _OPEN.search(rest, max(0, len(rest) - 64))):
+                rest, carry = rest[: cut.start()], rest[cut.start() :]
+            elif state == _COMMENT and rest.endswith(b"*"):
+                rest, carry = rest[:-1], b"*"
+        segment(rest)
+        return carry
+
+    carry = b""
+    while read := stream.readline(MAX_LINE):
+        piece = carry + read
+        if state == _PLAIN and not head and piece.endswith(b"\n") and piece.count(b";") == 1 and b"'" not in piece:
+            if b"/" not in piece:  # one whole statement on its line, without strings or comments: most of a model
+                text = _REAL.sub(_real, _BLANK.sub(b"", piece))
+                if (own := _HEAD.match(text)) and not _GUARD_HEAD.match(text):
+                    found.put(_number(own.group(1)), hashlib.blake2b(text, digest_size=8).digest())
+                carry = b""
+                continue
+        carry = consume(piece, piece.endswith(b"\n"))
+    if carry:
+        consume(carry, True)
+    return found

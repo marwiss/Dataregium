@@ -1076,11 +1076,12 @@ class IfcGraphService:
         except (OSError, ValueError):
             return None
 
-    async def diff(self, *, a: tuple[str, str], b: tuple[str, str]) -> dict[str, Any]:
+    async def diff(self, *, a: tuple[str, str], b: tuple[str, str], by_guid: bool = False) -> dict[str, Any]:
         """The difference between two stored IFC files, element by element (``diff.py``), computed now.
 
-        Each side is a storage key and a file name. The worker runs behind the conversion queue's lock, as the
-        checks do, and the answer is never stored (ADR 0021).
+        Each side is a storage key and a file name; ``by_guid`` compares by GlobalId alone, as for two documents,
+        whose STEP ids do not belong together. The worker runs behind the conversion queue's lock, as the checks do,
+        and the answer is never stored (ADR 0021).
         """
         async with self._lock:
             with tempfile.TemporaryDirectory(prefix="ifcdiff-") as tmp:
@@ -1097,6 +1098,7 @@ class IfcGraphService:
                     str(source_b),
                     "--memory-mb",
                     str(self.settings.ifcgraph_memory_mb),
+                    *(["--by-guid"] if by_guid else []),
                 ]
                 answer = await self._in_a_process(command, "the comparison")
             return dict(json.loads(answer.strip().splitlines()[-1]))

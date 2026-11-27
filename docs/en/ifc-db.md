@@ -774,6 +774,23 @@ are folded into the elements they belong to, and each list keeps at most
 large model takes a while. The version's page offers the same comparison as
 lists, and the capabilities document announces it as `ifc_diff`.
 
+Two versions of one document whose GlobalIds keep their STEP ids are also
+compared instance by instance, and the answer says `by: "step"`: blanks and
+comments do not count, a real is read as `%.10g`, and the app's `StepIdGuard`
+is left out. Each instance added, removed or changed is brought to the nearest
+objects that reach it (a point of a profile to its wall, a property to the
+objects of its set, a relationship to the objects it took in or let go), and
+their entries name it: `step_ids` in b's file and `step_ids_removed` in a's,
+at most 1000 each, with `step_ids_count` or `step_ids_removed_count` when cut.
+An object whose compared paths are the same but under which an instance
+changed is in `changed` with no attributes. An instance that no object
+reaches, such as an owner history, is in `unplaced`, and one that more than
+100 objects reach, such as a style or a unit, in `shared`, brought to none of
+them; each with its STEP id, its class, `side` (`a` or `b`) and `change`, at
+most 10,000, with `unplaced_count` or `shared_count` when cut. When one file is
+a re-export (a GlobalId with another STEP id), or for two documents, the answer
+says `by: "guid"` and has no STEP ids.
+
 ```http
 GET /documents/1.0/documents/{document_id}/versions/{version_index}/ifc-diff/{other_index}
 ```

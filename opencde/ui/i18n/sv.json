@@ -254,6 +254,7 @@
   "docs.diff.old": "Före",
   "docs.diff.new": "Efter",
   "docs.diff.truncated": "Listorna kapades vid 10 000 element vardera.",
+  "docs.diff.instances": "Bara instanser under det ändrades ({count})",
   "docs.diff.back": "Tillbaka till version {version}",
   "docs.diff.failed_title": "Jämförelsen kunde inte göras",
   "docs.diff.failed": "Filerna kunde inte jämföras; en av dem kan vara för stor, eller inte en läsbar IFC-fil.",

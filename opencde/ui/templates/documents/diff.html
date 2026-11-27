@@ -25,13 +25,18 @@
     <table class="table">
       <thead><tr><th scope="col">{{ t("docs.diff.element") }}</th><th scope="col">GlobalId</th><th scope="col">{{ t("docs.diff.attribute") }}</th><th scope="col">{{ t("docs.diff.old") }}</th><th scope="col">{{ t("docs.diff.new") }}</th></tr></thead>
       <tbody>
-        {% for element in report.changed %}{% for attribute in element.attributes %}
+        {% for element in report.changed %}{% for attribute in element.attributes or [none] %}
         <tr>
           <td>{% if loop.first %}{{ element.type }}{% if element.name %} {{ element.name }}{% endif %}{% if element.storey %}<br><span class="muted">{{ element.storey }}</span>{% endif %}{% endif %}</td>
           <td>{% if loop.first %}<code>{{ element.guid }}</code>{% endif %}</td>
+          {% if attribute is none %}
+          {% set count = (element.step_ids_count or (element.step_ids or [])|length) + (element.step_ids_removed_count or (element.step_ids_removed or [])|length) %}
+          <td colspan="3" class="muted">{{ t("docs.diff.instances", count=count) }}</td>
+          {% else %}
           <td><code>{{ attribute.path }}</code></td>
           <td><code>{{ attribute.old|tojson if attribute.old is not string else attribute.old }}</code></td>
           <td><code>{{ attribute.new|tojson if attribute.new is not string else attribute.new }}</code></td>
+          {% endif %}
         </tr>
         {% endfor %}{% endfor %}
       </tbody>

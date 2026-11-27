@@ -71,6 +71,9 @@ def test_two_versions_are_compared_through_the_api_and_on_the_page(
     assert paths["Name"] == {"path": "Name", "old": "YVT-A", "new": "Renamed"}
     assert paths["Reuse.GTIN"]["new"] == "4" and "ObjectPlacement" in paths
     assert body["same"] > 0 and body["truncated"] is False
+    # Versions of one document are compared instance by instance too (UL-48, fas 5.1).
+    assert body["by"] == "step" and changed[WALLS[0]]["step_ids"] and body["removed"][0]["step_ids_removed"]
+    assert {"IfcOwnerHistory"} <= {e["type"] for e in body["unplaced"]} and body["shared"] == []
 
     # The other way round, with another document, and what is refused.
     reverse = client.get(f"/documents/1.0/documents/{document_id}/versions/2/ifc-diff/1", headers=viewer.headers).json()
@@ -79,7 +82,13 @@ def test_two_versions_are_compared_through_the_api_and_on_the_page(
         f"/documents/1.0/documents/{document_id}/versions/1/ifc-diff/2?other_document_id={document_id}",
         headers=viewer.headers,
     )
-    assert other.status_code == 200 and other.json()["b"]["version_index"] == 2
+    assert other.status_code == 200 and other.json()["b"]["version_index"] == 2 and other.json()["by"] == "step"
+    copy = upload(client, world, editor, "three_walls_gtin.ifc", MODEL.read_bytes())
+    two = client.get(
+        f"/documents/1.0/documents/{document_id}/versions/1/ifc-diff/1?other_document_id={copy['document_id']}",
+        headers=viewer.headers,
+    ).json()
+    assert two["by"] == "guid" and two["changed"] == [] and "step_ids" not in str(two), "two documents: by GlobalId"
     assert (
         client.get(f"/documents/1.0/documents/{document_id}/versions/1/ifc-diff/1", headers=viewer.headers).status_code
         == 400

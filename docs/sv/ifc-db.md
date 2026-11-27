@@ -777,6 +777,23 @@ egenskapsmängder vävs in i elementen de hör till, och varje lista håller hö
 modell tar en stund. Versionens sida erbjuder samma jämförelse som listor, och
 kapabilitetsdokumentet annonserar den som `ifc_diff`.
 
+Två versioner av ett dokument vars GlobalId behåller sina STEP-id jämförs också
+instans för instans, och svaret säger `by: "step"`: blanktecken och kommentarer
+räknas inte, ett flyttal läses som `%.10g`, och appens `StepIdGuard` lämnas
+utanför. Varje instans som lagts till, tagits bort eller ändrats förs till de
+närmaste objekt som når den (en punkt i en profil till sin vägg, en egenskap
+till objekten i sin mängd, ett samband till de objekt det tog in eller släppte),
+och deras poster anger den: `step_ids` i b:s fil och `step_ids_removed` i a:s,
+högst 1000 vardera, med `step_ids_count` eller `step_ids_removed_count` när de
+kapats. Ett objekt vars jämförda sökvägar är lika men där en instans under det
+ändrats står i `changed` utan attribut. En instans som inget objekt når, som en
+ägarhistorik, står i `unplaced`, och en som fler än 100 objekt når, som en stil
+eller en enhet, i `shared`, förd till inget av dem; var och en med sitt STEP-id,
+sin klass, `side` (`a` eller `b`) och `change`, högst 10 000, med
+`unplaced_count` eller `shared_count` när de kapats. När den ena filen är en
+omexport (ett GlobalId med ett annat STEP-id), eller för två dokument, säger
+svaret `by: "guid"` och har inga STEP-id.
+
 ```http
 GET /documents/1.0/documents/{document_id}/versions/{version_index}/ifc-diff/{other_index}
 ```

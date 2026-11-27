@@ -9,7 +9,16 @@ from pathlib import Path
 
 import pytest
 
-from opencde.documents.step import MAX_ID, MAX_LINE, Protection, StepIds, is_step, protect_stored, scan
+from opencde.documents.step import (
+    MAX_ID,
+    MAX_LINE,
+    Protection,
+    StepIds,
+    fingerprints,
+    is_step,
+    protect_stored,
+    scan,
+)
 from opencde.ids import new_id
 from opencde.storage import LocalStorage, make_key
 from opencde.store.documents.versions import MAX_STEP_ID, VersionRecord
@@ -193,3 +202,46 @@ def test_an_upload_that_reuses_nothing_is_kept_as_it_came(tmp_path: Path) -> Non
 def test_ids_no_tool_gives_are_kept_as_they_came(tmp_path: Path, line: bytes) -> None:
     upload = _model(b"#1=IFCPROJECT($);", line)
     assert _protect(tmp_path, upload, _model(b"#1=IFCPROJECT($);"), known=90) == (upload, Protection())
+
+
+# -- the instances statement by statement, for the diff (UL-48, fas 5.1) ---------------------------------------------
+
+
+def _prints(data: bytes) -> dict[int, int]:
+    found = fingerprints(io.BytesIO(data))
+    return {step_id: value for step_id, value in enumerate(found.prints) if value}
+
+
+def test_an_instance_written_another_way_has_the_same_fingerprint() -> None:
+    """Blanks and comments outside strings, a real as 1. or 1.0 or 1.0E0, and a statement over several lines read
+    the same, as ifcmerge reads them; a blank inside a string does not, and the guard is no instance."""
+    one = _prints(_model(b"#1=IFCCARTESIANPOINT((1.,2.5,0.));", b"#2=IFCWALL('a b',$);"))
+    other = _prints(
+        _model(
+            b"#1 = IFCCARTESIANPOINT ( ( 1.0E0, 2.50, /* x */ 0.000 ) ) ;",
+            b"#2=IFCWALL(",
+            b"'a b',$);",
+            b"#3=IFCDOCUMENTREFERENCE($,'2','StepIdGuard',$,$);",
+        )
+    )
+    assert one == other and set(one) == {1, 2}
+    assert _prints(_model(b"#1=IFCCARTESIANPOINT((1.,2.5,0.));", b"#2=IFCWALL('ab',$);"))[2] != one[2]
+
+
+def test_a_statement_cut_between_pieces_reads_as_a_whole() -> None:
+    """A line longer than MAX_LINE is read in pieces; a real or a comment mark cut at a piece's end reads whole."""
+
+    def line(tail: bytes, at: int) -> bytes:
+        head = b"#7=IFCPOLYLINE(("
+        return head + b" " * (at - len(head)) + tail
+
+    cut = _prints(_model(line(b"1.50,#1));", MAX_LINE - 2), line(b"/* x */ #1));", MAX_LINE - 1).replace(b"#7", b"#8")))
+    whole = _prints(_model(b"#7=IFCPOLYLINE((1.5,#1));", b"#8=IFCPOLYLINE((#1));"))
+    assert cut == whole
+
+
+def test_a_file_with_ids_above_the_fingerprints_is_left_to_the_globalids() -> None:
+    from opencde.documents.step import MAX_PRINTED_ID
+
+    found = fingerprints(io.BytesIO(_model(b"#%d=IFCWALL($);" % (MAX_PRINTED_ID + 1))))
+    assert found.over and len(found.prints) == 0

@@ -19,6 +19,11 @@ are in the commit history.
   file whose highest instance is below the history is kept with the app's guard of it (`StepIdGuard`, F98 a), the
   base's own guard when the upload left it out. A change
   set's worker numbers what it makes above the document's history, not the base file's alone.
+- The comparison of two IFC versions of one document whose GlobalIds keep their STEP ids is also made instance by
+  instance (`by: "step"`): each element names the STEP ids added, changed (`step_ids`, in the second file) and
+  removed (`step_ids_removed`, in the first) that belong to it, and the instances no object reaches or that more than
+  100 objects reach are listed as `unplaced` and `shared`; a re-export, or two documents, are compared by GlobalId
+  (`by: "guid"`).
 - The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
   the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
 
