@@ -21,7 +21,8 @@ def main(argv: list[str]) -> None:
     if os.sep not in program:
         found = [os.path.join(folder, program) for folder in os.environ.get("PATH", "").split(os.pathsep)]
         program = next((path for path in found if os.access(path, os.X_OK)), program)
-    os.execv(program, argv[1:])  # noqa: S606 - the server's own command line: perl and ifcmerge
+    # The server's own command line, perl and ifcmerge with its own files: no shell, and nothing a client sent.
+    os.execv(program, argv[1:])  # noqa: S606  # nosec B606
 
 
 if __name__ == "__main__":
