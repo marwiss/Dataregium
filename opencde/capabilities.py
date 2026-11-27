@@ -125,7 +125,13 @@ def capabilities(settings: Settings) -> dict[str, Any]:
                 "for": "confidential clients an administrator approved",
             },
             "git": (
-                {"enabled": True, "ifcmerge": settings.ifcmerge_on, "max_message": 2000}
+                {
+                    "enabled": True,
+                    "ifcmerge": settings.ifcmerge_on,
+                    "max_message": 2000,
+                    "history_url": "/documents/1.0/documents/{document_id}/history",
+                    "commit_url": "/documents/1.0/documents/{document_id}/versions/{version_index}/commit",
+                }
                 if settings.git_on and settings.offers("documents")
                 else {"enabled": False}
             ),
@@ -133,6 +139,7 @@ def capabilities(settings: Settings) -> dict[str, Any]:
                 {
                     "enabled": True,
                     "url": "/documents/1.0/documents/{document_id}/versions/{version_index}/ifc-diff/{other_index}",
+                    "sides_url": "/documents/1.0/documents/{document_id}/ifc-diff?a={a}&b={b}",
                     "max_entries": DIFF_MAX_ENTRIES,
                 }
                 if settings.bim_on and settings.offers("documents")

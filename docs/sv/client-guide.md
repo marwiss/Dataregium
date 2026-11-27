@@ -330,7 +330,25 @@ klass), `conflict_details` med `base`, `theirs` och `ours`, och `merge` med base
 och den senaste versionen; en fil vars rader inte är en instans var, av ett annat
 schema eller omexporterad med andra STEP-id får `conflicts: ["*"]`. Ett
 ändringsset som godkänns på en äldre bas sammanfogas på samma sätt
-([ifc-db.md](ifc-db.md)).
+([ifc-db.md](ifc-db.md)). En uppladdning som inte gick ihop sparas ett dygn som
+en egen commit: 412 ger den som `conflict_commit` med `conflict_expires_at`, så
+att klienten kan jämföra den med den senaste versionen innan den laddar upp igen.
+
+Med repona listar `GET /documents/1.0/documents/{id}/history` de commits som
+ändrar dokumentets fil, nyast först, för en medlem i projektet: per commit
+`commit`, `parents`, `kind` (`version`, `upload` för en uppladdning som den kom
+bredvid sammanfogningen den blev, `proposal` för prövningen av ett ändringsset med
+dess `proposal_url`, `conflict` för en uppladdning som inte gick ihop, med
+`expires_at`), `version_index`, `base_version_index`, `merged_with_version_index`,
+`author`, `date` och `subject`; `$top` (högst 500) och `$skip` bläddrar.
+`GET …/versions/{index}/commit` ger en versions commit med föräldrar, författare,
+committer, hela meddelandet, och uppladdningen som den kom (`side_commit`) eller
+prövningen den godkändes från (`proposal_commit`).
+`GET /documents/1.0/documents/{id}/ifc-diff?a=&b=` jämför två sidor av ett
+IFC-dokument, var och en ett versionsindex eller en commit ur historiken, som
+jämförelsen av två versioner gör ([ifc-db.md](ifc-db.md#jämföra-två-versioner)).
+Kapabiliteterna ger adresserna som `git.history_url`, `git.commit_url` och
+`ifc_diff.sides_url`; en server utan repona svarar `404`.
 
 En version som rymmer en IFC-modell kan också få namngivna frågor, som dess
 våningar, rummens area eller en egenskaps värde. Det är ett tillägg som svarar

@@ -517,6 +517,7 @@ async def _branch_now(
             author=str(node["author"] or ""),
             author_id=proposing.id if proposing else None,
             created=now_iso(),
+            topic=str(node.get("topic_guid") or "") or None,
         )
     except (GitError, OSError, ValueError) as exc:
         log.warning("ifc_proposal_branch_failed", proposal_id=str(node["id"]), error=str(exc)[:200])

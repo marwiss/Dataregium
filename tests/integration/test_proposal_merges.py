@@ -5,19 +5,13 @@ never here: the tests run the stand-in in the fixtures, and the real one where `
 
 from __future__ import annotations
 
-import os
-import sys
-from collections.abc import Iterator
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from opencde.main import create_app
 from opencde.settings import Settings
-from tests.conftest import FIXTURES_DIR
-from tests.integration.conftest import bim_settings
-from tests.integration.conftest_accounts import World, build_world, login_as
+from tests.integration.conftest_accounts import World, login_as
 from tests.integration.helpers import Session
 from tests.integration.test_bcf_links_documents import make_topic
 from tests.integration.test_git_repos import _git
@@ -35,24 +29,6 @@ from tests.integration.test_web_signin import web_sign_in
 
 pytestmark = [pytest.mark.integration, pytest.mark.parametrize("store_kind", ["postgres"], indirect=True)]
 ifcopenshell = pytest.importorskip("ifcopenshell", reason="the ifc-db extra is not installed")
-REAL = os.environ.get("OPENCDE_TEST_IFCMERGE")
-
-
-@pytest.fixture
-def merging(settings: Settings, clean_database: None) -> Iterator[tuple[TestClient, World, Settings]]:
-    """Tier 2 with the repositories and ifcmerge: the real one where CI fetches it, else the stand-in."""
-    merge = {"ifcmerge_path": REAL, "perl_path": "perl"} if REAL else {}
-    on = bim_settings(settings).model_copy(
-        update={
-            "git_enabled": True,
-            "ifcmerge_path": str(FIXTURES_DIR / "ifcmerge_stand_in.py"),
-            "perl_path": sys.executable,
-            **merge,
-        }
-    )
-    world = build_world(on)
-    with TestClient(create_app(on, startup_wait_seconds=30)) as client:
-        yield client, world, on
 
 
 def _propose(client: TestClient, world: World, editor: Session, body: bytes) -> str:

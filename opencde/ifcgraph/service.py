@@ -845,7 +845,11 @@ class IfcGraphService:
                 return
             try:
                 fields = await self._try_proposal(
-                    proposal_id, str(row["project_id"]), str(row["snippet_key"]), author=str(row["author"] or "")
+                    proposal_id,
+                    str(row["project_id"]),
+                    str(row["snippet_key"]),
+                    author=str(row["author"] or ""),
+                    topic=row.get("topic_guid"),
                 )
             except Exception as exc:
                 log.warning("ifc_proposal_failed", proposal_id=proposal_id, error=type(exc).__name__)
@@ -856,7 +860,7 @@ class IfcGraphService:
             log.info("ifc_proposal_done", proposal_id=proposal_id, state=state, issues=fields["issue_count"])
 
     async def _try_proposal(
-        self, proposal_id: str, project_id: str, snippet_key: str, *, author: str = ""
+        self, proposal_id: str, project_id: str, snippet_key: str, *, author: str = "", topic: str | None = None
     ) -> dict[str, Any]:
         """Apply the operations and the changes to the base version's file, check the result, and keep what the base
         lacks.
@@ -914,6 +918,7 @@ class IfcGraphService:
                 head,
                 key,
                 author,
+                topic,
             )
             made = summary.get("ops")
             touching = changes
@@ -952,6 +957,7 @@ class IfcGraphService:
         head: Any,
         key: str,
         author: str,
+        topic: str | None = None,
     ) -> str | None:
         """The trial's file as a commit on the proposal's branch, on the base version's commit (ADR 0030, fas 5.4);
         None without one. A failure is logged and stops nothing: the approval makes the commit then."""
@@ -972,6 +978,7 @@ class IfcGraphService:
                 author=author,
                 author_id=user.id if user else None,
                 created=now_iso(),
+                topic=str(topic) if topic else None,
             )
         except (GitError, OSError, ValueError) as exc:
             log.warning("ifc_proposal_branch_failed", proposal_id=proposal_id, error=str(exc)[:200])
@@ -1112,10 +1119,13 @@ class IfcGraphService:
                 answer = await self._in_a_process(command, "reading the values")
         return list(json.loads(answer.strip().splitlines()[-1])["values"])
 
-    async def diff(self, *, a: tuple[str, str], b: tuple[str, str], by_guid: bool = False) -> dict[str, Any]:
-        """The difference between two stored IFC files, element by element (``diff.py``), computed now.
+    async def diff(
+        self, *, a: tuple[str, str] | Path, b: tuple[str, str] | Path, by_guid: bool = False
+    ) -> dict[str, Any]:
+        """The difference between two IFC files, element by element (``diff.py``), computed now.
 
-        Each side is a storage key and a file name; ``by_guid`` compares by GlobalId alone, as for two documents,
+        Each side is a storage key and a file name, or a file read out of a repository; ``by_guid`` compares by
+        GlobalId alone, as for two documents,
         whose STEP ids do not belong together. The worker runs behind the conversion queue's lock, as the checks do,
         and the answer is never stored (ADR 0021).
         """
@@ -1124,8 +1134,16 @@ class IfcGraphService:
                 workdir = Path(tmp)
                 (workdir / "a").mkdir()
                 (workdir / "b").mkdir()
-                source_a = await asyncio.to_thread(self._prepare_input, a[0], a[1], workdir / "a")
-                source_b = await asyncio.to_thread(self._prepare_input, b[0], b[1], workdir / "b")
+                source_a = (
+                    a
+                    if isinstance(a, Path)
+                    else await asyncio.to_thread(self._prepare_input, a[0], a[1], workdir / "a")
+                )
+                source_b = (
+                    b
+                    if isinstance(b, Path)
+                    else await asyncio.to_thread(self._prepare_input, b[0], b[1], workdir / "b")
+                )
                 command = [
                     sys.executable,
                     "-m",

@@ -249,7 +249,10 @@ async def test_a_trial_and_its_approval_run_on_the_store_alone(tmp_path: Path, m
         monkeypatch,
         [
             ("CREATE (t)-[:HAS_PROPOSAL]", [{"id": "proposal-1"}]),
-            ("p.snippet_key AS snippet_key, p.author", [{"project_id": "p1", "snippet_key": snippet, "author": "a"}]),
+            (
+                "p.topic_guid AS topic_guid, p.snippet_key",
+                [{"project_id": "p1", "snippet_key": snippet, "author": "a"}],
+            ),
             (
                 "r.report AS report",
                 [{"storage_key": "k", "file_name": "base.ifc", "report": pack_report([]), "checks": None}],

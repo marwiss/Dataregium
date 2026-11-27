@@ -48,6 +48,11 @@ are in the commit history.
   version. A collision is `412 version_conflict` with the keys `#<step>.<attribute>` and `merge`, as for an upload,
   and each conflict's `change_index` names the change in the change set it meets; a server without ifcmerge answers
   `["*"]`. The approval no longer reads IFC-DB's graph.
+- With the repositories, `GET /documents/1.0/documents/{id}/history` lists the commits of a document's file (versions,
+  uploads as they came, change sets' trials and uploads that did not merge), `GET …/versions/{index}/commit` gives a
+  version's commit, and `GET /documents/1.0/documents/{id}/ifc-diff?a=&b=` compares any two of them; an upload that
+  did not merge is kept a day on a conflict's branch, named in the 412 as `conflict_commit`. The capabilities give
+  `git.history_url`, `git.commit_url` and `ifc_diff.sides_url`.
 - The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
   the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
 

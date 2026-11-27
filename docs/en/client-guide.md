@@ -322,7 +322,26 @@ version_conflict` in the form of an approval's: `conflicts` as `#<step>.<attribu
 `conflict_details` with `base`, `theirs` and `ours`, and `merge` with the base and
 the latest version; a file whose lines are not one instance each, of another
 schema or re-exported with other STEP ids gets `conflicts: ["*"]`. A change set
-approved on an older base is merged the same way ([ifc-db.md](ifc-db.md)).
+approved on an older base is merged the same way ([ifc-db.md](ifc-db.md)). An
+upload that did not merge is kept a day as a commit of its own: the 412 gives it
+as `conflict_commit` with `conflict_expires_at`, for the client to compare it
+with the latest version before it uploads again.
+
+With the repositories, `GET /documents/1.0/documents/{id}/history` lists the
+commits that change the document's file, newest first, for a member of its
+project: per commit `commit`, `parents`, `kind` (`version`, `upload` for an upload
+as it came beside the merge it became, `proposal` for the trial of a change set
+with its `proposal_url`, `conflict` for an upload that did not merge, with
+`expires_at`), `version_index`, `base_version_index`, `merged_with_version_index`,
+`author`, `date` and `subject`; `$top` (at most 500) and `$skip` page through it.
+`GET …/versions/{index}/commit` gives a version's commit with its parents, author,
+committer, whole message, and the upload as it came (`side_commit`) or the trial
+it was approved from (`proposal_commit`). `GET /documents/1.0/documents/{id}/ifc-diff?a=&b=`
+compares two sides of an IFC document, each a version's index or a commit of the
+history, as the comparison of two versions does
+([ifc-db.md](ifc-db.md#comparing-two-versions)). The capabilities give the
+addresses as `git.history_url`, `git.commit_url` and `ifc_diff.sides_url`; a server
+without the repositories answers `404`.
 
 A version that holds an IFC model can also be asked named queries, such as its
 storeys, the areas of its spaces or the value of a property: an extension that

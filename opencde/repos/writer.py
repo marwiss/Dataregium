@@ -18,9 +18,9 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
-from opencde.ids import is_uuid, normalize_guid
+from opencde.ids import is_uuid, new_id, normalize_guid
 from opencde.logging import get_logger
-from opencde.repos.git import MAIN, Git, GitError, Person, proposal_ref
+from opencde.repos.git import MAIN, Git, GitError, Person, conflict_ref, proposal_ref
 
 log = get_logger(__name__)
 
@@ -78,6 +78,9 @@ def message_of(
     subject: str | None = None,
     approved_by: str | None = None,
     proposal: str | None = None,
+    topic: str | None = None,
+    conflict_with: int | None = None,
+    expires_at: str | None = None,
 ) -> str:
     """The commit's message: the title and the version, the client's message, and trailers a clone can be read by;
     a proposal's commit has no version yet."""
@@ -95,9 +98,25 @@ def message_of(
         lines.append(f"Dataregium-Merged-With: {merged_with}")
     if proposal is not None:
         lines.append(f"Dataregium-Proposal: {proposal}")
+    if topic is not None and (guid := clean(topic, 64).replace("\n", " ")):
+        lines.append(f"Dataregium-Topic: {guid}")
+    if conflict_with is not None:
+        lines.append(f"Dataregium-Conflict-With: {conflict_with}")
+    if expires_at is not None:
+        lines.append(f"Dataregium-Expires-At: {expires_at}")
     if approved_by is not None and (name := clean(approved_by, 200).replace("\n", " ")):
         lines.append(f"Dataregium-Approved-By: {name}")
     return "\n".join(lines) + "\n"
+
+
+def trailers(message: str) -> dict[str, str]:
+    """The ``Dataregium-`` trailers of a commit's message, by their names without the prefix."""
+    found: dict[str, str] = {}
+    for line in message.splitlines():
+        name, colon, value = line.partition(": ")
+        if colon and name.startswith("Dataregium-") and " " not in name:
+            found[name.removeprefix("Dataregium-")] = value.strip()
+    return found
 
 
 @dataclass
@@ -259,10 +278,12 @@ async def propose(
     author: str,
     author_id: str | None,
     created: str,
+    topic: str | None = None,
 ) -> str | None:
     """A change set's trial as a commit on its proposal's branch (``proposal_ref``, fas 5.4): the tree of the base
-    version's commit with the trial's file, the proposer its author. None without repositories, for a file that is not
-    text, or a base without a commit, which the approval then goes without."""
+    version's commit with the trial's file, the proposer its author, and the topic's guid for the history to link
+    the trial. None without repositories, for a file that is not text, or a base without a commit, which the approval
+    then goes without."""
     where = tree_path(document_id, file_name)
     if git is None or where is None or base_commit is None or not is_text(file_name, _start(path)):
         return None
@@ -285,10 +306,55 @@ async def propose(
             base=base,
             subject=f"change set on version {base}",
             proposal=proposal_id,
+            topic=topic,
         ),
     )
     branch = proposal_ref(proposal_id)
     await git.move_ref(repository, branch, commit, await git.ref(repository, branch))
+    return commit
+
+
+async def keep_conflict(
+    git: Git,
+    *,
+    repository: Path,
+    blob: str,
+    document_id: str,
+    file_name: str,
+    title: str,
+    base: int,
+    base_commit: str | None,
+    latest: int,
+    author: str,
+    author_id: str | None,
+    created: str,
+    expires_at: str,
+) -> str | None:
+    """An upload that did not merge, as a commit on a conflict's branch (``conflict_ref``, F96 b, fas 5.5) on its
+    base's commit, so that it can be compared with the latest version until ``expires_at``, when the upkeep takes
+    it. None for a base without a commit."""
+    where = tree_path(document_id, file_name)
+    if where is None or base_commit is None or not await git.has(repository, base_commit):
+        return None
+    commit = await git.commit(
+        repository,
+        await git.tree(repository, base_commit, {where: blob}),
+        [base_commit],
+        Person(clean(author, 200) or "unknown", f"{author_id or 'unknown'}@users.invalid", created),
+        Person(*SERVER, created),
+        message_of(
+            title=title,
+            version_number="",
+            message=None,
+            document_id=document_id,
+            version_index=None,
+            base=base,
+            subject=f"upload on version {base} that did not merge with version {latest}",
+            conflict_with=latest,
+            expires_at=expires_at,
+        ),
+    )
+    await git.move_ref(repository, conflict_ref(new_id()), commit, None)
     return commit
 
 

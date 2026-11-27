@@ -339,7 +339,8 @@ async def trials_of_change_sets(jobs: Jobs) -> None:
         True,
         [],
     )
-    assert await proposals.claim(first) == {"project_id": pid, "snippet_key": "snippets/a.json", "author": "member"}
+    claimed = {"project_id": pid, "topic_guid": topic, "snippet_key": "snippets/a.json", "author": "member"}
+    assert await proposals.claim(first) == claimed, "with its topic, for the trial's commit (fas 5.5)"
     assert await proposals.claim(first) is None
     checked_at = now_iso()
     await proposals.set_state(

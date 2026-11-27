@@ -2,7 +2,9 @@
 """The difference between two IFC document versions: an extension of the Documents API (ADR 0021, OB-30).
 
 ``GET /documents/1.0/documents/{id}/versions/{index}/ifc-diff/{other_index}`` compares two versions of a document, or
-with ``?other_document_id=`` a version of another document of a project the member is in, element by element: what
+with ``?other_document_id=`` a version of another document of a project the member is in, and
+``GET /documents/1.0/documents/{id}/ifc-diff?a=&b=`` two sides of a document that are each a version or a commit of
+its history (ADR 0030, fas 5.5), read out of the project's repository, element by element: what
 the other has that this one lacks, what it lacks, and what differs, by GlobalId and path, as the worker
 ``opencde.ifcgraph.diff`` finds it. Two versions of one document whose GlobalIds keep their STEP ids are compared
 instance by instance too, and each element names the STEP ids brought to it (``by: "step"``, UL-48, fas 5.1); a
@@ -12,15 +14,19 @@ a worker process and never stored. The same bearer token as the Documents API.
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path as FilePath
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from opencde.auth.dependencies import DocumentsPrincipal
-from opencde.deps import SettingsDep
+from opencde.deps import GitDep, SettingsDep
 from opencde.ids import is_uuid, normalize_guid
 from opencde.ifcgraph.service import IfcGraphDep, IfcGraphService
+from opencde.repos.git import Git
+from opencde.repos.writer import tree_path
 from opencde.store.documents.versions import DocumentsDep, VersionRecord
 
 TAG = "IFC diff (extension)"
@@ -31,6 +37,8 @@ DocumentId = Annotated[str, Path(alias="document_id", max_length=64)]
 VersionIndex = Annotated[int, Path(alias="version_index", ge=1, le=1_000_000_000)]
 OtherIndex = Annotated[int, Path(alias="other_index", ge=1, le=1_000_000_000)]
 OtherDocument = Annotated[str | None, Query(alias="other_document_id", max_length=64)]
+#: A side of ``ifc-diff?a=&b=``: a version's index, or a commit's 40 hexadecimal characters.
+Side = Annotated[str, Query(min_length=1, max_length=40, pattern=r"^(?:[0-9]{1,10}|[0-9a-f]{40})$")]
 
 
 class IfcDiffElement(BaseModel):
@@ -76,7 +84,8 @@ class IfcDiffSide(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     document_id: str
-    version_index: int
+    version_index: int | None = Field(None, description="The version, unless the side is a commit that is none.")
+    commit: str | None = Field(None, description="The side's commit, where the server keeps a repository.")
 
 
 class IfcDiffLoose(BaseModel):
@@ -165,7 +174,74 @@ async def ifc_diff(
     except RuntimeError as exc:
         raise HTTPException(400, f"The comparison could not be made: {exc}") from None
     return IfcDiff(
-        a=IfcDiffSide(document_id=a.document_id, version_index=a.version_index),
-        b=IfcDiffSide(document_id=b.document_id, version_index=b.version_index),
+        a=IfcDiffSide(document_id=a.document_id, version_index=a.version_index, commit=a.commit),
+        b=IfcDiffSide(document_id=b.document_id, version_index=b.version_index, commit=b.commit),
         **report,
     )
+
+
+async def _side(
+    documents: Any, git: Git | None, user_id: str, latest: VersionRecord, value: str, folder: FilePath
+) -> tuple[IfcDiffSide, tuple[str, str] | FilePath]:
+    """A side of the comparison: a version of the document, or a commit of its history read out of the repository
+    into ``folder``; 404 for a commit that is not the project's or does not hold the document."""
+    if len(value) < 40:
+        record = await _version(documents, user_id, latest.document_id, int(value))
+        side = IfcDiffSide(document_id=record.document_id, version_index=record.version_index, commit=record.commit)
+        return side, (record.storage_key, record.file_name)
+    where = tree_path(latest.document_id, latest.file_name)
+    repository = git.repository(latest.project_id) if git is not None else None
+    if git is None or repository is None or where is None or not repository.is_dir():
+        raise HTTPException(404, "No such commit of the document")
+    if not await git.holds(repository, value, where):
+        raise HTTPException(404, "No such commit of the document")
+    target = folder / f"{value}.ifc"
+    await git.blob_to(repository, value, where, target)
+    versions = {
+        record.commit: record.version_index
+        for record in await documents.versions(user_id=user_id, document_id=latest.document_id)
+        if record.commit
+    }
+    return IfcDiffSide(document_id=latest.document_id, version_index=versions.get(value), commit=value), target
+
+
+@router.get(
+    "/documents/{document_id}/ifc-diff",
+    summary="Compare two versions or commits of an IFC document element by element",
+    response_model=IfcDiff,
+    response_model_exclude_none=True,
+)
+async def ifc_diff_of_sides(
+    principal: DocumentsPrincipal,
+    document_id: DocumentId,
+    documents: DocumentsDep,
+    ifcgraph: IfcGraphDep,
+    git: GitDep,
+    a: Side,
+    b: Side,
+) -> IfcDiff:
+    """What `b` has that `a` lacks, what it lacks, and what differs, where each is a version's index or a commit of
+    the document's history (`GET …/history`): an upload as it came, a trial's file, an upload that did not merge.
+    404 when the BIM functions are off, the document is not yours, or a commit is not the document's; 400 when the
+    document is not an IFC file or the two sides are one."""
+    if ifcgraph is None:
+        raise HTTPException(404, "The BIM functions are off on this server")
+    if a == b:
+        raise HTTPException(400, "A side is compared with another one")
+    if not is_uuid(document_id):
+        raise HTTPException(404, "Document not found")
+    latest = await documents.latest(user_id=principal.user_id, document_id=normalize_guid(document_id))
+    if latest is None:
+        raise HTTPException(404, "Document not found")
+    if not IfcGraphService.wants(latest.file_name):
+        raise HTTPException(400, f"{latest.title} is not an IFC file")
+    with tempfile.TemporaryDirectory(prefix="ifcdiff-sides-") as folder:
+        side_a, input_a = await _side(documents, git, principal.user_id, latest, a, FilePath(folder))
+        side_b, input_b = await _side(documents, git, principal.user_id, latest, b, FilePath(folder))
+        if side_a.commit is not None and side_a.commit == side_b.commit:
+            raise HTTPException(400, "A side is compared with another one")
+        try:
+            report = await ifcgraph.diff(a=input_a, b=input_b)
+        except RuntimeError as exc:
+            raise HTTPException(400, f"The comparison could not be made: {exc}") from None
+    return IfcDiff(a=side_a, b=side_b, **report)

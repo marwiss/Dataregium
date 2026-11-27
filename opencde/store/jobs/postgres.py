@@ -478,7 +478,7 @@ RETURNING id
 """
 PROPOSAL_CLAIM = """
 UPDATE proposals SET state = $3, running_at = $4 WHERE id = $1 AND state = $2
-RETURNING project_id, snippet_key, author
+RETURNING project_id, topic_guid, snippet_key, author
 """
 PROPOSAL_STATE = """
 UPDATE proposals

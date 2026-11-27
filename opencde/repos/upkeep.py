@@ -6,7 +6,8 @@ interrupted making left (``.trash-*``, and ``.new-*`` and ``index-*`` older than
 at a time, a repository whose loose objects have grown past ``LOOSE``, with a memory window and a time limit of its
 own, pruning then the objects that no ref reaches and that are older than a day, such as those of a write whose
 transaction rolled back. A proposal's branch goes when its trial is no longer open (``open_among``): approved, or
-replaced by a new trial, or gone with its topic. What fails is logged and tried again in a later round.
+replaced by a new trial, or gone with its topic; a conflict's branch when its ``Dataregium-Expires-At`` has passed.
+What fails is logged and tried again in a later round.
 """
 
 from __future__ import annotations
@@ -18,7 +19,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from opencde.logging import get_logger
-from opencde.repos.git import Git, GitError, proposal_ref, remove_tree
+from opencde.repos.git import Git, GitError, conflict_ref, proposal_ref, remove_tree
+from opencde.repos.writer import trailers
+from opencde.timeutil import now_iso
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,6 +40,7 @@ class Upkept:
     removed: int = 0  # folders a deletion or an interrupted making left
     repacked: int = 0
     branches: int = 0  # the proposals' branches taken away
+    conflicts: int = 0  # the conflicts' branches that expired
 
 
 async def upkeep(git: Git, open_among: Callable[[list[str]], Awaitable[set[str]]] | None = None) -> Upkept:
@@ -57,6 +61,12 @@ async def upkeep(git: Git, open_among: Callable[[list[str]], Awaitable[set[str]]
                     if proposal_id not in still:
                         await git.delete_ref(repository, proposal_ref(proposal_id), commit)
                         done.branches += 1
+            now = now_iso()
+            for conflict_id, commit in (await git.conflicts(repository)).items():
+                expires_at = trailers(await git.message(repository, commit)).get("Expires-At")
+                if expires_at is None or expires_at <= now:
+                    await git.delete_ref(repository, conflict_ref(conflict_id), commit)
+                    done.conflicts += 1
             counted = await git.run(repository, "count-objects", "-v")
             loose = _COUNT.search(counted)
             if loose is None or int(loose.group(1)) <= LOOSE:

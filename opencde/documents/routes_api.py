@@ -78,7 +78,7 @@ from opencde.ids import is_uuid, new_id, normalize_guid
 from opencde.ifcgraph.service import IfcGraphDep, IfcGraphService
 from opencde.ratelimit import RATE_UPLOAD, limiter
 from opencde.repos.git import Git
-from opencde.repos.writer import prepare
+from opencde.repos.writer import keep_conflict, prepare
 from opencde.storage import LocalStorage, make_key
 from opencde.store.documents.sessions import (
     FILE_CANCELLED,
@@ -95,6 +95,7 @@ from opencde.store.documents.sessions import (
 )
 from opencde.store.documents.versions import DocumentsDep, VersionRecord, default_metadata, publication_metadata
 from opencde.store.oauth2.tokens import Principal
+from opencde.timeutil import later_iso, now_iso
 
 router = APIRouter(prefix="/documents/1.0", tags=["Documents API"])
 
@@ -106,6 +107,7 @@ FileIndex = Annotated[int, Path(alias="file_index", ge=0, le=1000)]
 
 KEEPALIVE_AFTER_SECONDS = 15.0
 KEEPALIVE_INTERVAL_SECONDS = 1.0
+CONFLICT_SECONDS = 86_400  # how long an upload that did not merge stays on its conflict's branch (F96 b)
 
 
 # ---------------------------------------------------------------------------- helpers
@@ -382,24 +384,46 @@ async def _merge_upload(
     target: str,
     item: dict[str, Any],
     merging: tuple[VersionRecord, VersionRecord],
+    session: UploadSession,
 ) -> tuple[str, int, str]:
     """Merge the upload at ``target`` (its ids already above the document's history) with the versions since its
     base, in its place (``three_way.merged``): the upload's own blob for the side commit, and the merged file's size
-    and SHA-256."""
+    and SHA-256. An upload that does not merge is kept a day on a conflict's branch (F96 b), named in the 412."""
     based, latest = merging
     repository = await git.ensure(project_id)
     side_blob = await git.blob(repository, storage.path(target))
     with tempfile.TemporaryDirectory(prefix="ifcmerge-") as folder:
-        done = await three_way.merged(
-            ifcgraph=ifcgraph,
-            storage=storage,
-            what="The upload",
-            project_id=project_id,
-            based=based,
-            latest=latest,
-            ours=(target, str(item["file_name"])),
-            folder=pathlib.Path(folder),
-        )
+        try:
+            done = await three_way.merged(
+                ifcgraph=ifcgraph,
+                storage=storage,
+                what="The upload",
+                project_id=project_id,
+                based=based,
+                latest=latest,
+                ours=(target, str(item["file_name"])),
+                folder=pathlib.Path(folder),
+            )
+        except ApiError as exc:
+            expires_at = later_iso(CONFLICT_SECONDS)
+            commit = await keep_conflict(
+                git,
+                repository=repository,
+                blob=side_blob,
+                document_id=based.document_id,
+                file_name=str(item["file_name"]),
+                title=str(item["title"]),
+                base=based.version_index,
+                base_commit=based.commit,
+                latest=latest.version_index,
+                author=session.username,
+                author_id=session.user_id,
+                created=now_iso(),
+                expires_at=expires_at,
+            )
+            if commit is not None and exc.details is not None:
+                exc.details.update(conflict_commit=commit, conflict_expires_at=expires_at)
+            raise
         await anyio.to_thread.run_sync(shutil.copyfile, done.path, storage.path(target))
     after = await anyio.to_thread.run_sync(
         protect_stored, storage, target, latest.storage_key, latest.file_name, latest.max_step_id
@@ -479,7 +503,9 @@ async def _complete(
     side_blob = None
     if merging is not None and git is not None and ifcgraph is not None:
         try:
-            side_blob, size, sha256 = await _merge_upload(git, ifcgraph, storage, project_id, target, item, merging)
+            side_blob, size, sha256 = await _merge_upload(
+                git, ifcgraph, storage, project_id, target, item, merging, session
+            )
         except BaseException:
             storage.delete(target)
             raise

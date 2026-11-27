@@ -12,7 +12,9 @@ the value they are expected to have. No value a client sent reaches an argument 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import re
 import shutil
 import stat
 import sys
@@ -25,7 +27,9 @@ from opencde.ids import is_uuid, normalize_guid
 
 MAIN = "refs/heads/main"
 PROPOSALS = "refs/heads/proposals/"
+CONFLICTS = "refs/heads/conflicts/"
 ZERO = "0" * 40
+SHA = re.compile(r"[0-9a-f]{40}")
 #: What a repository is set to when it is made: the server keeps it up, and refuses what would rewrite history.
 CONFIG = (
     ("gc.auto", "0"),
@@ -57,6 +61,40 @@ def proposal_ref(proposal_id: str) -> str:
     if not is_uuid(proposal_id):
         raise ValueError("a proposal's branch is named by its UUID")
     return PROPOSALS + normalize_guid(proposal_id)
+
+
+def conflict_ref(conflict_id: str) -> str:
+    """The branch of an upload that did not merge (F96 b, fas 5.5), named by an id of the server's own."""
+    if not is_uuid(conflict_id):
+        raise ValueError("a conflict's branch is named by its UUID")
+    return CONFLICTS + normalize_guid(conflict_id)
+
+
+#: A commit's fields as ``log`` reads them, apart by unit separators, each commit ended by a record separator; the
+#: server's messages hold no control character but the line break (``writer.clean``).
+LOGGED = "%H%x1f%P%x1f%an%x1f%aI%x1f%cn%x1f%B%x1e"
+
+
+def _logged(out: bytes) -> list[Logged]:
+    found: list[Logged] = []
+    for record in out.decode("utf-8", "replace").split("\x1e"):
+        parts = record.strip("\n").split("\x1f")
+        if len(parts) == 6 and SHA.fullmatch(parts[0]):
+            commit, parents, author, date, committer, message = parts
+            found.append(Logged(commit, tuple(parents.split()), author, date, committer, message))
+    return found
+
+
+@dataclass(frozen=True)
+class Logged:
+    """A commit as the history lists it."""
+
+    commit: str
+    parents: tuple[str, ...]
+    author: str
+    date: str  # ISO 8601, as git gives the author's date
+    committer: str
+    message: str
 
 
 class Git:
@@ -115,8 +153,10 @@ class Git:
         extra: dict[str, str] | None = None,
         answers: tuple[int, ...] = (0,),
         allow: tuple[str, ...] = (),
+        out: Path | None = None,
     ) -> bytes:
-        """``git <args>`` in ``repository`` (``GIT_DIR``, never a search upwards). Returns stdout."""
+        """``git <args>`` in ``repository`` (``GIT_DIR``, never a search upwards). Returns stdout, or with ``out``
+        writes it there as it comes, for a blob that may be large."""
         _, hooks = self._quiet()
         command = [
             self.executable,
@@ -132,22 +172,25 @@ class Git:
             *args,
         ]
         env = {**self.environment(repository, index), **(extra or {})}
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-            )
-        except OSError as exc:
-            raise GitError(f"git could not start: {type(exc).__name__}") from None
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(stdin), timeout=self.timeout)
-        except TimeoutError:
-            process.kill()
-            await process.wait()
-            raise GitError(f"git {args[0]} exceeded {self.timeout} s") from None
+        with contextlib.ExitStack() as stack:
+            target = stack.enter_context(out.open("wb")) if out is not None else asyncio.subprocess.PIPE
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *command,
+                    stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
+                    stdout=target,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                )
+            except OSError as exc:
+                raise GitError(f"git could not start: {type(exc).__name__}") from None
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(stdin), timeout=self.timeout)
+            except TimeoutError:
+                process.kill()
+                await process.wait()
+                raise GitError(f"git {args[0]} exceeded {self.timeout} s") from None
+        stdout = stdout or b""
         if process.returncode not in answers:
             lines = stderr.decode("utf-8", "replace").strip().splitlines()
             raise GitError(f"git {args[0]}: {lines[-1][:200] if lines else f'exit code {process.returncode}'}")
@@ -245,14 +288,70 @@ class Git:
 
     async def proposals(self, repository: Path) -> dict[str, str]:
         """The proposals' branches (``proposal_ref``): each proposal's id and the commit its branch names."""
-        out = await self.run(repository, "for-each-ref", "--format=%(refname) %(objectname)", PROPOSALS)
+        return await self._branches(repository, PROPOSALS)
+
+    async def conflicts(self, repository: Path) -> dict[str, str]:
+        """The branches of uploads that did not merge (``conflict_ref``), by their ids."""
+        return await self._branches(repository, CONFLICTS)
+
+    async def _branches(self, repository: Path, prefix: str) -> dict[str, str]:
+        out = await self.run(repository, "for-each-ref", "--format=%(refname) %(objectname)", prefix)
         found: dict[str, str] = {}
         for line in out.decode("ascii", "replace").splitlines():
             name, _, commit = line.partition(" ")
-            proposal_id = name.removeprefix(PROPOSALS)
-            if name.startswith(PROPOSALS) and is_uuid(proposal_id):
-                found[proposal_id] = commit
+            named = name.removeprefix(prefix)
+            if name.startswith(prefix) and is_uuid(named):
+                found[named] = commit
         return found
+
+    async def log(self, repository: Path, path: str, *, skip: int, limit: int) -> list[Logged]:
+        """The commits on any of the server's branches that change ``path``, newest first, sides of merges too."""
+        out = await self.run(
+            repository,
+            "log",
+            "--branches",
+            "--full-history",
+            f"--format={LOGGED}",
+            f"--skip={int(skip)}",
+            f"--max-count={int(limit)}",
+            "--",
+            path,
+        )
+        return _logged(out)
+
+    async def show(self, repository: Path, commit: str) -> Logged | None:
+        """One commit as the history lists it; None for a value that is not a commit of the repository."""
+        if not SHA.fullmatch(commit) or not await self.has(repository, commit):
+            return None
+        found = _logged(await self.run(repository, "log", "-1", f"--format={LOGGED}", commit))
+        return found[0] if found else None
+
+    async def count(self, repository: Path, path: str) -> int:
+        """How many commits ``log`` lists for ``path``."""
+        out = await self.run(repository, "rev-list", "--count", "--branches", "--full-history", "--", path)
+        return int(out.strip() or b"0")
+
+    async def holds(self, repository: Path, commit: str, path: str) -> bool:
+        """Whether ``commit`` is a commit on one of the server's branches whose tree has ``path``: one a branch no
+        longer reaches, such as an expired conflict's, holds nothing; a value that is not a commit's 40 hexadecimal
+        characters never reaches git."""
+        if not SHA.fullmatch(commit):
+            return False
+        out = await self.run(repository, "cat-file", "-t", f"{commit}:{path}", answers=(0, 128))
+        if out.strip() != b"blob":
+            return False
+        reached = await self.run(
+            repository, "for-each-ref", "--count=1", f"--contains={commit}", "--format=%(refname)", "refs/heads/"
+        )
+        return bool(reached.strip())
+
+    async def blob_to(self, repository: Path, commit: str, path: str, target: Path) -> None:
+        """Write the file ``path`` at ``commit`` to ``target``, as it comes."""
+        await self.run(repository, "cat-file", "blob", f"{commit}:{path}", out=target)
+
+    async def message(self, repository: Path, commit: str) -> str:
+        """A commit's whole message."""
+        return (await self.run(repository, "log", "-1", "--format=%B", commit)).decode("utf-8", "replace")
 
     def projects(self) -> list[str]:
         """The projects that have a repository, by the names of their folders: a UUID's alone."""

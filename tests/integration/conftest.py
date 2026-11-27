@@ -163,6 +163,30 @@ def settings(graph_target: GraphTarget, tmp_path: Path, store_kind: str, request
     )
 
 
+@pytest.fixture
+def merging(settings: Settings, clean_database: None) -> Iterator[tuple[TestClient, Any, Settings]]:
+    """Tier 2 with the repositories and ifcmerge (ADR 0030): the real one where ``OPENCDE_TEST_IFCMERGE`` names it,
+    as CI fetches it, else the stand-in in the fixtures. PostgreSQL alone (F99 a)."""
+    import sys
+
+    from tests.conftest import FIXTURES_DIR
+    from tests.integration.conftest_accounts import build_world
+
+    real = os.environ.get("OPENCDE_TEST_IFCMERGE")
+    merge = {"ifcmerge_path": real, "perl_path": "perl"} if real else {}
+    on = bim_settings(settings).model_copy(
+        update={
+            "git_enabled": True,
+            "ifcmerge_path": str(FIXTURES_DIR / "ifcmerge_stand_in.py"),
+            "perl_path": sys.executable,
+            **merge,
+        }
+    )
+    world = build_world(on)
+    with TestClient(create_app(on, startup_wait_seconds=30)) as client:
+        yield client, world, on
+
+
 def bim_settings(settings: Settings, **extra: Any) -> Settings:
     """The settings of a test of the BIM functions: on the files alone, with no graph, when PostgreSQL holds the
     server's own data (tier 2, F59), and with IFC-DB's graph otherwise (tier 3); several parts for the fixture model
