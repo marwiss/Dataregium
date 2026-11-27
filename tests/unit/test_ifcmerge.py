@@ -157,6 +157,7 @@ def test_the_real_ifcmerge_merges_changes_to_two_attributes_and_reports_one_chan
 def test_a_placement_both_sides_moved_is_a_conflict_ifcmerge_would_settle_by_itself(tmp_path: Path) -> None:
     """F201 b: main and the upload each give the wall another placement; ifcmerge keeps main's without a word, and
     the server reports it. A name both renamed is ifcmerge's own conflict, and an owner history its own choice."""
+    pytest.importorskip("numpy", reason="the ifc-db extra, which the merge needs, is not installed")
     from opencde.repos.merge import placements_moved_twice, split_attributes
 
     assert split_attributes(b"IFCWALL('a,b',$,(#1,#2),'it''s',#5)") == [b"'a,b'", b"$", b"(#1,#2)", b"'it''s'", b"#5"]
