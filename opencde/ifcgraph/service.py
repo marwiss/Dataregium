@@ -39,7 +39,7 @@ from ifc_db.files import worker_environment
 from ifc_db.gherkin_install import MANIFEST
 from ifc_db.graph import rebuild_point_indexes
 from ifc_db.importer import delete_model, import_records, model_facts, models
-from ifc_db.paths import PathError, canonical_path, resolve, unreachable
+from ifc_db.paths import unreachable
 from ifc_db.queries import MAX_GLOBAL_IDS, property_values
 from ifc_db.spatial import geometry_issues, import_spatial
 from ifc_db.validation import MAX_REPORTED, pack_report, unpack_report
@@ -57,10 +57,11 @@ from opencde.ifcgraph.gltf import LODS, build_glb
 from opencde.ifcgraph.maintenance import delete_geometry, drop_partial
 from opencde.logging import get_logger
 from opencde.postgres.database import Postgres
-from opencde.repos.git import Git
+from opencde.repos.git import Git, GitError
+from opencde.repos.writer import propose
 from opencde.settings import Settings
 from opencde.storage import LocalStorage, make_key
-from opencde.store.accounts.postgres import team_store
+from opencde.store.accounts.postgres import team_store, user_store
 from opencde.store.bcf.postgres import topic_store, viewpoint_store
 from opencde.store.documents.postgres import document_store
 from opencde.store.jobs.conversions import FACTS, SPATIAL_FACTS, STATE_DONE, STATE_FAILED, STATE_QUEUED, STATE_RUNNING
@@ -157,6 +158,28 @@ def _problem_issue(problem: dict[str, Any]) -> dict[str, Any]:
             "message": f"keep_theirs {problem['keep']}: {problem['error']}",
         }
     return {"kind": "proposal", "severity": "error", "message": f"change {problem['change']}: {problem['error']}"}
+
+
+def _judged(
+    checked: dict[str, Any], issues: list[dict[str, Any]], teams: list[dict[str, Any]], teams_error: str | None
+) -> dict[str, Any]:
+    """The fields of a trial's result: clean without an issue, the checks, the issues and the teams; the rooms of the
+    file, which the state never depends on (F38 a), where the checks found them."""
+    fields: dict[str, Any] = {
+        "state": STATE_CLEAN if not issues else STATE_ISSUES,
+        "checked_at": now_iso(),
+        "issue_count": len(issues),
+        "error_count": sum(1 for issue in issues if issue.get("severity") == "error"),
+        "truncated": bool(checked["truncated"]),
+        "ruleset": checked["ruleset"],
+        "checks": checked["checks"],
+        "report": pack_report(issues),
+        "teams": json.dumps(teams, separators=(",", ":")),
+        "teams_error": teams_error,
+    }
+    if "rooms" in checked:
+        fields["rooms"] = checked["rooms"]
+    return fields
 
 
 def _op_issue(failed: dict[str, Any]) -> dict[str, Any]:
@@ -833,28 +856,19 @@ class IfcGraphService:
             log.info("ifc_proposal_done", proposal_id=proposal_id, state=state, issues=fields["issue_count"])
 
     async def _try_proposal(
-        self,
-        proposal_id: str,
-        project_id: str,
-        snippet_key: str,
-        base_version_index: int | None = None,
-        *,
-        author: str = "",
+        self, proposal_id: str, project_id: str, snippet_key: str, *, author: str = ""
     ) -> dict[str, Any]:
         """Apply the operations and the changes to the base version's file, check the result, and keep what the base
         lacks.
 
-        ``base_version_index`` tries the change set on another version of its document than the one it names:
-        the latest, when the server merges at the approval (ADR 0021). A change set with ``keep_theirs`` is tried on
-        the latest version, where its proposer resolved the conflicts. ``author`` proposed it, and the owner
-        histories the operations make name them.
+        A change set with ``keep_theirs`` is tried on the latest version, where its proposer resolved the
+        conflicts. ``author`` proposed it, and the owner histories the operations make name them. Where the project
+        has a repository, the applied file is a commit on the proposal's branch (``propose``, ADR 0030).
         """
         with self.storage.open_read(snippet_key) as handle:
             change_set = json.loads(handle.read().decode("utf-8"))
         base = dict(change_set["base"])
-        if base_version_index is not None:
-            base["version_index"] = base_version_index
-        elif change_set.get("keep_theirs"):
+        if change_set.get("keep_theirs"):
             latest = await self.documents.head(project_id=project_id, document_id=str(base["document_id"]))
             if latest is not None:
                 base["version_index"] = latest.version_index
@@ -891,6 +905,16 @@ class IfcGraphService:
             answer = await self._in_a_process(command, "applying the change set")
             summary = json.loads(answer.strip().splitlines()[-1])
             await asyncio.to_thread(self.storage.copy_in, out, key)
+            commit = await self._branch(
+                proposal_id,
+                project_id,
+                str(base["document_id"]),
+                int(base["version_index"]),
+                version,
+                head,
+                key,
+                author,
+            )
             made = summary.get("ops")
             touching = changes
             if made is not None:  # what the operations touched is in a team's part as a change's instance is
@@ -898,11 +922,70 @@ class IfcGraphService:
                 named = [{"guid": guid} for guid in [*made["objects"], *made["removed"]]]
                 touching.write_text(json.dumps({"changes": [*change_set["changes"], *named]}), encoding="utf-8")
             teams, teams_error = await self._parts_touched(project_id, source, out, touching)
-            # A base checked before bSDD was asked, or while it was out of reach, is asked about now, so that the
-            # trial keeps only the findings the change set brings (OB-42).
-            base_bsdd = None
-            if version["report"] is not None and not _made(version["checks"], "bsdd"):
-                base_bsdd = await self._bsdd(source)
+            checked, new = await self._new_findings(project_id, version, source, key)
+        problems = [_problem_issue(problem) for problem in summary["problems"]]
+        if made is not None and made["failed"] is not None:
+            problems.insert(0, _op_issue(made["failed"]))
+        fields: dict[str, Any] = {
+            **_judged(checked, problems + new, teams, teams_error),
+            "storage_key": key,
+            "file_name": "proposal.ifc",
+            "base_document_id": str(base["document_id"]),
+            "base_version_index": int(base["version_index"]),
+            "change_count": int(summary["count"]) + (int(made["count"]) if made is not None else 0),
+            "applied": int(summary["applied"]) + (int(made["applied"]) if made is not None else 0),
+            "commit": commit,
+        }
+        if made is not None:  # what the client maps its refs and its preview by, and what the approval shows
+            fields["created"] = json.dumps(made["created"], separators=(",", ":"))
+            fields["notes"] = json.dumps(made["notes"], separators=(",", ":"))
+            fields["ops_objects"] = json.dumps(made["objects"][:MAX_OPS_OBJECTS], separators=(",", ":"))
+        return fields
+
+    async def _branch(
+        self,
+        proposal_id: str,
+        project_id: str,
+        document_id: str,
+        version_index: int,
+        version: dict[str, Any],
+        head: Any,
+        key: str,
+        author: str,
+    ) -> str | None:
+        """The trial's file as a commit on the proposal's branch, on the base version's commit (ADR 0030, fas 5.4);
+        None without one. A failure is logged and stops nothing: the approval makes the commit then."""
+        if self.git is None or head is None:
+            return None
+        try:
+            user = await user_store(self.store, self.postgres).get_by_username(author) if author else None
+            return await propose(
+                self.git,
+                project_id=project_id,
+                proposal_id=proposal_id,
+                path=self.storage.path(key),
+                document_id=document_id,
+                file_name=str(version["file_name"]),
+                title=str(head.title),
+                base=version_index,
+                base_commit=version.get("commit"),
+                author=author,
+                author_id=user.id if user else None,
+                created=now_iso(),
+            )
+        except (GitError, OSError, ValueError) as exc:
+            log.warning("ifc_proposal_branch_failed", proposal_id=proposal_id, error=str(exc)[:200])
+            return None
+
+    async def _new_findings(
+        self, project_id: str, version: dict[str, Any], source: Path, key: str
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """The checks of the file at ``key`` and the findings among them that ``version``, prepared at ``source``,
+        lacks. A version checked before bSDD was asked, or while it was out of reach, is asked about now, so that a
+        trial keeps only the findings the change set brings (OB-42)."""
+        base_bsdd = None
+        if version["report"] is not None and not _made(version["checks"], "bsdd"):
+            base_bsdd = await self._bsdd(source)
         checked = await self._run_checks(key, "proposal.ifc", project_id)
         if version["report"] is None:
             checked_base = await self._run_checks(
@@ -917,35 +1000,43 @@ class IfcGraphService:
             for issue in unpack_report(checked["report"])
             if _issue_key(issue) not in known and not _of_an_ids(issue)
         ]
-        problems = [_problem_issue(problem) for problem in summary["problems"]]
-        if made is not None and made["failed"] is not None:
-            problems.insert(0, _op_issue(made["failed"]))
-        issues = problems + new
-        fields: dict[str, Any] = {
-            "state": STATE_CLEAN if not issues else STATE_ISSUES,
-            "checked_at": now_iso(),
-            "storage_key": key,
-            "file_name": "proposal.ifc",
-            "base_document_id": str(base["document_id"]),
-            "base_version_index": int(base["version_index"]),
-            "change_count": int(summary["count"]) + (int(made["count"]) if made is not None else 0),
-            "applied": int(summary["applied"]) + (int(made["applied"]) if made is not None else 0),
-            "issue_count": len(issues),
-            "error_count": sum(1 for issue in issues if issue.get("severity") == "error"),
-            "truncated": bool(checked["truncated"]),
-            "ruleset": checked["ruleset"],
-            "checks": checked["checks"],
-            "report": pack_report(issues),
-            "teams": json.dumps(teams, separators=(",", ":")),
-            "teams_error": teams_error,
-        }
-        if "rooms" in checked:  # the applied file's rooms, which the state never depends on (F38 a)
-            fields["rooms"] = checked["rooms"]
-        if made is not None:  # what the client maps its refs and its preview by, and what the approval shows
-            fields["created"] = json.dumps(made["created"], separators=(",", ":"))
-            fields["notes"] = json.dumps(made["notes"], separators=(",", ":"))
-            fields["ops_objects"] = json.dumps(made["objects"][:MAX_OPS_OBJECTS], separators=(",", ":"))
-        return fields
+        return checked, new
+
+    async def merged_trial(
+        self, *, proposal_id: str, project_id: str, latest: Any, key: str, touching: list[dict[str, Any]]
+    ) -> str:
+        """The trial of a change set merged with the versions since its base (ADR 0030, fas 5.4): the merged file at
+        ``key`` checked against the findings of ``latest``, the document's latest version, and the teams of what it
+        changes from there. The proposal takes the result and the version it was merged with; the new state is
+        returned. The request waits for it."""
+        async with self._lock:
+            await self._set_proposal(proposal_id, STATE_RUNNING)
+            try:
+                version = await self.documents.version_file(
+                    project_id=project_id, document_id=str(latest.document_id), version_index=int(latest.version_index)
+                )
+                if version is None:
+                    raise RuntimeError("the latest version is not in this project")
+                with tempfile.TemporaryDirectory(prefix="ifcproposal-") as tmp:
+                    workdir = Path(tmp)
+                    source = await asyncio.to_thread(
+                        self._prepare_input, str(version["storage_key"]), str(version["file_name"]), workdir
+                    )
+                    listed = workdir / "touching.json"
+                    listed.write_text(json.dumps({"changes": touching}), encoding="utf-8")
+                    teams, teams_error = await self._parts_touched(project_id, source, self.storage.path(key), listed)
+                    checked, new = await self._new_findings(project_id, version, source, key)
+            except Exception as exc:
+                log.warning("ifc_proposal_failed", proposal_id=proposal_id, error=type(exc).__name__)
+                await self._set_proposal(proposal_id, STATE_FAILED, **_failure(exc))
+                return STATE_FAILED
+            fields = {
+                **_judged(checked, new, teams, teams_error),
+                "merged_with_version_index": int(latest.version_index),
+            }
+            state = str(fields.pop("state"))
+            await self._set_proposal(proposal_id, state, **fields)
+            return state
 
     async def _parts_touched(
         self, project_id: str, base: Path, changed: Path, changes: Path
@@ -971,36 +1062,23 @@ class IfcGraphService:
         unread = [str(parts[int(error["ids"])]["name"]) for error in answer.get("errors") or []]
         return touched, (f"the IDS of these teams could not be read: {', '.join(unread)}" if unread else None)
 
-    async def approve(self, *, proposal_id: str, approved_by: str, version_index: int) -> None:
-        """The trial became a version (ADR 0021): who approved it and which version it is."""
-        await self._set_proposal(proposal_id, STATE_APPROVED, approved_by=approved_by, version_index=version_index)
-
-    async def retry_proposal(self, *, proposal_id: str, base_version_index: int) -> str:
-        """Try the change set again, at once, on another version of its document; returns the new state.
-
-        The approval does this on the latest version when the change set collides with nothing that came
-        between its base and the latest (ADR 0021). The request waits for the trial.
-        """
-        row = await self.proposals.get(proposal_id)
-        if row is None:
-            raise ValueError("no such proposal")
-        async with self._lock:
-            await self._set_proposal(proposal_id, STATE_RUNNING)
-            try:
-                fields = await self._try_proposal(
-                    proposal_id,
-                    str(row["project_id"]),
-                    str(row["snippet_key"]),
-                    base_version_index=base_version_index,
-                    author=str(row["author"] or ""),
-                )
-            except Exception as exc:
-                log.warning("ifc_proposal_failed", proposal_id=proposal_id, error=type(exc).__name__)
-                await self._set_proposal(proposal_id, STATE_FAILED, **_failure(exc))
-                return STATE_FAILED
-            state = str(fields.pop("state"))
-            await self._set_proposal(proposal_id, state, **fields)
-            return state
+    async def approve(
+        self,
+        *,
+        proposal_id: str,
+        approved_by: str,
+        version_index: int,
+        renumbered: dict[str, int] | None = None,
+        renumbered_count: int | None = None,
+    ) -> None:
+        """The trial became a version (ADR 0021): who approved it and which version it is, and the ids of the
+        proposal's file that the merge moved, by their id in it (ADR 0030)."""
+        fields: dict[str, Any] = {"approved_by": approved_by, "version_index": version_index}
+        if renumbered:
+            fields["renumbered"] = json.dumps(renumbered, separators=(",", ":"))
+        if renumbered_count:
+            fields["renumbered_count"] = renumbered_count
+        await self._set_proposal(proposal_id, STATE_APPROVED, **fields)
 
     async def values_in(
         self, *, user_id: str, document_id: str, version_index: int, changes: list[dict[str, Any]]
@@ -1033,56 +1111,6 @@ class IfcGraphService:
                 ]
                 answer = await self._in_a_process(command, "reading the values")
         return list(json.loads(answer.strip().splitlines()[-1])["values"])
-
-    async def canonical_keys(
-        self, *, document_id: str, version_index: int, changes: list[dict[str, Any]]
-    ) -> list[str] | None:
-        """Each change's attribute as one string, the instance named by its canonical path in the model of the version
-        the change was made on: `<guid>/<path>.<attribute>`, or `#<step>.<attribute>` for an instance no GlobalId
-        reaches. A change whose path does not lead to a node there keeps the key its client wrote. None when that
-        version has no finished model in the graph (pruned, or never converted), or there is no graph (tier 2)."""
-        if self.graph is None:
-            return None
-        found = await self.conversions.latest_of_version(document_id=document_id, version_index=version_index)
-        if found is None:
-            return None
-        model_id = str(found["id"])
-        named: dict[int, str] = {}  # STEP id: its canonical name, since many changes touch one instance
-        keys: list[str] = []
-        for change in changes:
-            attribute = change.get("attribute")
-            written = (
-                f"#{change['step_id']}.{attribute}"
-                if change.get("step_id") is not None
-                else f"{change.get('guid')}/{change.get('path') or ''}.{attribute}"
-            )
-            try:
-                if change.get("step_id") is not None:
-                    step = int(change["step_id"])
-                else:
-                    found = await resolve(self.models, model_id, str(change.get("guid")), str(change.get("path") or ""))
-                    step = int(found["step"])
-                if step not in named:
-                    try:
-                        canonical = await canonical_path(self.models, model_id, step)
-                        named[step] = f"{canonical['global_id']}/{canonical['path']}"
-                    except PathError:
-                        named[step] = f"#{step}"  # in a block, or reached by no GlobalId: its STEP id names it
-                keys.append(f"{named[step]}.{attribute}")
-            except (PathError, ValueError, TypeError):
-                keys.append(written)
-        return keys
-
-    async def change_set_of(self, *, project_id: str, topic_guid: str) -> dict[str, Any] | None:
-        """The change set a topic carries, as uploaded; None when the topic has no trial any more."""
-        snippet_key = await self.proposals.snippet_key(project_id=project_id, topic_guid=topic_guid)
-        if snippet_key is None:
-            return None
-        try:
-            with self.storage.open_read(snippet_key) as handle:
-                return dict(json.loads(handle.read().decode("utf-8")))
-        except (OSError, ValueError):
-            return None
 
     async def diff(self, *, a: tuple[str, str], b: tuple[str, str], by_guid: bool = False) -> dict[str, Any]:
         """The difference between two stored IFC files, element by element (``diff.py``), computed now.
@@ -1119,7 +1147,7 @@ class IfcGraphService:
         node["issues"] = unpack_report(node.pop("report", None))
         node["checks"] = json.loads(node["checks"]) if node.get("checks") else []
         node["teams"] = json.loads(node["teams"]) if node.get("teams") else []
-        for name in ("created", "notes", "ops_objects", "rooms"):  # a trial of operations, or with the rooms, only
+        for name in ("created", "notes", "ops_objects", "rooms", "renumbered"):  # some trials have them
             node[name] = json.loads(node[name]) if node.get(name) else None
         return node
 

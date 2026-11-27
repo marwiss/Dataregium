@@ -18,7 +18,6 @@ from tests.integration.conftest import bim_settings
 from tests.integration.conftest_accounts import World, build_world, login_as
 from tests.integration.helpers import Session
 from tests.integration.test_bcf_links_documents import make_topic
-from tests.integration.test_documents_api import save_metadata, start_upload, upload_file
 from tests.integration.test_ifc_validation import MODEL, WALLS, checked, upload
 from tests.integration.test_web_signin import web_sign_in
 
@@ -199,7 +198,8 @@ def test_a_manager_approves_a_clean_trial_and_it_becomes_the_next_version(ifc_cl
     ).json()["selection"]
     assert [component["ifc_guid"] for component in selection] == [WALLS[0]], "the viewpoint selects what changed"
 
-    # A change set on a base the document has moved past is not approved: 412, as an upload on an old base.
+    # A change set on a base the document has moved past is not approved on a server without ifcmerge: 412, for
+    # the client to propose it again on the latest (merged where there is ifcmerge: test_proposal_merges.py).
     stale = make_topic(client, world, editor, bim_snippet=snippet_fields)
     assert (
         client.put(
@@ -210,6 +210,8 @@ def test_a_manager_approves_a_clean_trial_and_it_becomes_the_next_version(ifc_cl
     assert tried(client, editor, f"{topics}/{stale['guid']}/ifc-proposal")["state"] == "clean"
     refused = client.post(f"{topics}/{stale['guid']}/ifc-proposal/approve", headers=manager.headers)
     assert refused.status_code == 412 and refused.json()["code"] == "version_conflict"
+    assert refused.json()["conflicts"] == ["*"] and "does not merge" in refused.json()["message"]
+    assert refused.json()["merge"] == {"base_version_index": 1, "latest_version_index": 2}
 
     # A trial with issues is not approved either.
     broken = make_topic(client, world, editor, bim_snippet=snippet_fields)
@@ -224,131 +226,6 @@ def test_a_manager_approves_a_clean_trial_and_it_becomes_the_next_version(ifc_cl
     )
     assert tried(client, editor, f"{topics}/{broken['guid']}/ifc-proposal")["state"] == "issues"
     assert client.post(f"{topics}/{broken['guid']}/ifc-proposal/approve", headers=manager.headers).status_code == 409
-
-
-def test_the_server_merges_a_change_set_that_collides_with_nothing(ifc_client: tuple[TestClient, World]) -> None:
-    client, world = ifc_client
-    editor = login_as(client, world, "editor")
-    web_sign_in(client, world, "editor")
-    manager = login_as(client, world, "manager")
-    version = upload(client, world, editor, "three_walls_gtin.ifc", MODEL.read_bytes())
-    assert checked(client, editor, version)["ifc_validation_status"] == ["passed"]
-    document_id = version["document_id"]
-    topics = f"/bcf/3.0/projects/{world.project_id}/topics"
-    snippet_fields = {
-        "snippet_type": SNIPPET_TYPE,
-        "is_external": False,
-        "reference": "changes.json",
-        "reference_schema": f"http://testserver{SCHEMA_PATH}",
-    }
-
-    def propose(*changes: dict[str, Any]) -> str:
-        topic = make_topic(client, world, editor, bim_snippet=snippet_fields)
-        put = client.put(
-            f"{topics}/{topic['guid']}/snippet", content=change_set(document_id, *changes), headers=editor.headers
-        )
-        assert put.status_code == 200, put.text
-        assert tried(client, editor, f"{topics}/{topic['guid']}/ifc-proposal")["state"] == "clean"
-        return f"{topics}/{topic['guid']}/ifc-proposal"
-
-    # Three change sets on version 1: A renames a wall, B renames another, C renames the same wall as A.
-    a = propose({"guid": WALLS[0], "attribute": "Name", "op": "set", "new": "A"})
-    b = propose({"guid": WALLS[1], "attribute": "Name", "op": "set", "new": "B"})
-    c = propose({"guid": WALLS[0], "attribute": "Name", "op": "set", "new": "C"})
-    assert client.post(a + "/approve", headers=manager.headers).json()["version_index"] == 2
-
-    # B collides with nothing: it is tried again on version 2 and approved on it.
-    merged = client.post(b + "/approve", headers=manager.headers)
-    assert merged.status_code == 201, merged.text
-    assert merged.json()["version_index"] == 3
-    metadata = client.get(merged.json()["links"]["document_version_metadata"]["url"], headers=editor.headers).json()
-    entries = {entry["name"]: entry["value"] for entry in metadata["metadata"]}
-    assert entries["base_version_index"] == ["2"], "rebased on the latest"
-    trial = client.get(b, headers=editor.headers).json()
-    assert trial["state"] == "approved" and trial["base"]["version_index"] == 2 and trial["version_index"] == 3
-    download = client.get(merged.json()["links"]["document_version_download"]["url"], headers=editor.headers)
-    assert b"'A'" in download.content and b"'B'" in download.content, "both changes are in version 3"
-
-    # C changes what A changed: the client merges three ways.
-    refused = client.post(c + "/approve", headers=manager.headers)
-    assert refused.status_code == 412, refused.text
-    assert refused.json()["code"] == "version_conflict" and refused.json()["conflicts"] == [f"{WALLS[0]}/.Name"]
-    assert "collide" in refused.json()["message"]
-    (detail,) = refused.json()["conflict_details"]
-    assert {key: detail[key] for key in ("key", "guid", "attribute", "op", "base", "theirs", "ours")} == {
-        "key": f"{WALLS[0]}/.Name",
-        "guid": WALLS[0],
-        "attribute": "Name",
-        "op": "set",
-        "base": "YVT-A",
-        "theirs": "A",
-        "ours": "C",
-    }, "what the base held, what the latest holds and what the proposal sets"
-    assert detail["version_index"] == 2, "the version that changed it"
-
-    # A version uploaded as a whole file in between may have changed anything.
-    started = start_upload(
-        client, editor, [{"file_name": "three_walls_gtin.ifc", "session_file_id": "w", "document_id": document_id}]
-    )
-    instructions = save_metadata(
-        client, started["upload_ui_url"], world.project_id, {"title_0": "walls", "version_0": "4"}
-    )
-    plan = client.post(
-        instructions,
-        json={"files": [{"session_file_id": "w", "size_in_bytes": len(MODEL.read_bytes())}]},
-        headers=editor.headers,
-    ).json()["documents_to_upload"][0]
-    assert upload_file(client, editor, plan, MODEL.read_bytes())["version_index"] == 4
-    d = propose({"guid": WALLS[2] if len(WALLS) > 2 else WALLS[1], "attribute": "Description", "op": "set", "new": "D"})
-    whole = client.post(d + "/approve", headers=manager.headers)
-    assert whole.status_code == 412 and whole.json()["conflicts"] == ["*"]
-
-
-def test_two_paths_to_one_shared_instance_collide(ifc_client: tuple[TestClient, World], settings: Settings) -> None:
-    if settings.store_url is not None:  # the canonical paths are found in IFC-DB's graph (tier 3)
-        pytest.skip("without a graph an approval compares the keys the clients wrote")
-    """The instances are compared, not the keys the clients wrote: two walls share their owner history, and a change
-    to it through one wall collides with a change to it through the other."""
-    client, world = ifc_client
-    editor = login_as(client, world, "editor")
-    web_sign_in(client, world, "editor")
-    manager = login_as(client, world, "manager")
-    version = upload(client, world, editor, "three_walls_gtin.ifc", MODEL.read_bytes())
-    assert checked(client, editor, version)["ifc_validation_status"] == ["passed"]
-    topics = f"/bcf/3.0/projects/{world.project_id}/topics"
-    snippet_fields = {
-        "snippet_type": SNIPPET_TYPE,
-        "is_external": False,
-        "reference": "changes.json",
-        "reference_schema": f"http://testserver{SCHEMA_PATH}",
-    }
-
-    def propose(wall: str, stamp: int) -> str:
-        topic = make_topic(client, world, editor, bim_snippet=snippet_fields)
-        change = {"guid": wall, "path": "OwnerHistory", "attribute": "LastModifiedDate", "op": "set", "new": stamp}
-        put = client.put(
-            f"{topics}/{topic['guid']}/snippet",
-            content=change_set(version["document_id"], change),
-            headers=editor.headers,
-        )
-        assert put.status_code == 200, put.text
-        assert tried(client, editor, f"{topics}/{topic['guid']}/ifc-proposal")["state"] == "clean"
-        return f"{topics}/{topic['guid']}/ifc-proposal"
-
-    first, second = propose(WALLS[0], 1700000000), propose(WALLS[1], 1700000001)
-    assert client.post(first + "/approve", headers=manager.headers).json()["version_index"] == 2
-    refused = client.post(second + "/approve", headers=manager.headers)
-    assert refused.status_code == 412, refused.text
-    (key,) = refused.json()["conflicts"]
-    assert key.endswith(".LastModifiedDate") and not key.startswith(WALLS[1]), "one name for the shared instance"
-    (detail,) = refused.json()["conflict_details"]
-    assert detail["key"] == key and detail["guid"] == WALLS[1] and detail["path"] == "OwnerHistory"
-    assert (detail["base"], detail["theirs"], detail["ours"], detail["version_index"]) == (
-        None,
-        1700000000,
-        1700000001,
-        2,
-    )
 
 
 def test_the_proposals_against_a_document_are_listed_for_its_members(ifc_client: tuple[TestClient, World]) -> None:
@@ -539,60 +416,3 @@ def test_a_change_set_with_operations_builds_a_wall_that_the_approval_keeps(
     (issue,) = [issue for issue in report["issues"] if issue["kind"] == "op"]
     assert (issue["op"], issue["tool"]) == (1, "create_wall") and issue["message"].startswith("op 1 (create_wall): ")
     assert client.post(f"{topics}/{failing['guid']}/ifc-proposal/approve", headers=manager.headers).status_code == 409
-
-
-def test_a_proposal_that_gives_up_a_conflict_keeps_theirs_on_the_latest_version(
-    ifc_client: tuple[TestClient, World], tmp_path: Any
-) -> None:
-    """The client cannot cut one change out of its operations, so it sends them again with the keys it gave up in
-    ``keep_theirs``: the server applies them to the latest version and gives each key the latest version's value."""
-    client, world = ifc_client
-    editor = login_as(client, world, "editor")
-    web_sign_in(client, world, "editor")
-    manager = login_as(client, world, "manager")
-    version = upload(client, world, editor, "three_walls_gtin.ifc", MODEL.read_bytes())
-    assert checked(client, editor, version)["ifc_validation_status"] == ["passed"]
-    document_id = version["document_id"]
-    topics = f"/bcf/3.0/projects/{world.project_id}/topics"
-    import ifcopenshell
-
-    x, y, z = ifcopenshell.open(str(MODEL)).by_guid(WALLS[0]).ObjectPlacement.RelativePlacement.Location.Coordinates
-
-    # Theirs: the first wall moved to the origin, approved as version 2.
-    theirs = make_topic(client, world, editor, bim_snippet=SNIPPET_FIELDS)
-    origin = {"guid": WALLS[0], "path": LOCATION, "attribute": "Coordinates", "op": "set", "new": [0.0, 0.0, 0.0]}
-    assert (
-        client.put(
-            f"{topics}/{theirs['guid']}/snippet", content=change_set(document_id, origin), headers=editor.headers
-        ).status_code
-        == 200
-    )
-    assert tried(client, editor, f"{topics}/{theirs['guid']}/ifc-proposal")["state"] == "clean"
-    assert client.post(f"{topics}/{theirs['guid']}/ifc-proposal/approve", headers=manager.headers).status_code == 201
-
-    # Ours, on version 1: the wall moved a metre and a new wall, with the change the move makes as the app lowers it.
-    ours = make_topic(client, world, editor, bim_snippet=SNIPPET_FIELDS)
-    move = {"tool": "transform_elements", "ids": [WALLS[0]], "dx": 1, "dy": 0, "dz": 0}
-    moved = {**origin, "old": [x, y, z], "new": [x + 1000, y, z]}
-    snippet, proposal = f"{topics}/{ours['guid']}/snippet", f"{topics}/{ours['guid']}/ifc-proposal"
-    put = client.put(snippet, content=with_ops(document_id, 1, [move, NEW_WALL], moved), headers=editor.headers)
-    assert put.status_code == 200, put.text
-    assert tried(client, editor, proposal)["state"] == "clean", "a change the operations made counts as applied"
-    refused = client.post(proposal + "/approve", headers=manager.headers)
-    assert refused.status_code == 412, refused.text
-    (key,) = refused.json()["conflicts"]
-    assert key == f"{WALLS[0]}/{LOCATION}.Coordinates"
-
-    # The person keeps theirs: the same operations again, with the key given up and the change left out.
-    again = with_ops(document_id, 2, [move, NEW_WALL], keep_theirs=[key])
-    assert client.put(snippet, content=again, headers=editor.headers).status_code == 200
-    report = tried(client, editor, proposal)
-    assert report["state"] == "clean", report
-    assert report["base"]["version_index"] == 2, "tried on the latest version"
-    approved = client.post(proposal + "/approve", headers=manager.headers)
-    assert approved.status_code == 201, approved.text
-    assert approved.json()["version_index"] == 3
-    model = opened(client, editor, approved.json(), tmp_path)
-    location = model.by_guid(WALLS[0]).ObjectPlacement.RelativePlacement.Location
-    assert tuple(location.Coordinates) == (0.0, 0.0, 0.0), "theirs is kept"
-    assert model.by_guid(report["created"]["new-1"]).Name == "New wall", "the rest of the operations stand"

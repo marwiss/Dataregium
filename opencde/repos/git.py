@@ -24,6 +24,7 @@ from pathlib import Path
 from opencde.ids import is_uuid, normalize_guid
 
 MAIN = "refs/heads/main"
+PROPOSALS = "refs/heads/proposals/"
 ZERO = "0" * 40
 #: What a repository is set to when it is made: the server keeps it up, and refuses what would rewrite history.
 CONFIG = (
@@ -48,6 +49,14 @@ class Person:
     name: str
     email: str
     date: str  # ISO 8601 in UTC
+
+
+def proposal_ref(proposal_id: str) -> str:
+    """The branch of a change set's trial (ADR 0030, fas 5.4), named by the server's id of the proposal, never by the
+    topic's guid, which a client may choose."""
+    if not is_uuid(proposal_id):
+        raise ValueError("a proposal's branch is named by its UUID")
+    return PROPOSALS + normalize_guid(proposal_id)
 
 
 class Git:
@@ -173,7 +182,11 @@ class Git:
 
     async def head(self, repository: Path) -> str | None:
         """The commit ``main`` names, or None before the first."""
-        out = await self.run(repository, "rev-parse", "--verify", "--quiet", f"{MAIN}^{{commit}}", answers=(0, 1))
+        return await self.ref(repository, MAIN)
+
+    async def ref(self, repository: Path, name: str) -> str | None:
+        """The commit a ref of the server's own names, or None."""
+        out = await self.run(repository, "rev-parse", "--verify", "--quiet", f"{name}^{{commit}}", answers=(0, 1))
         return out.decode("ascii").strip() or None
 
     async def has(self, repository: Path, commit: str) -> bool:
@@ -220,7 +233,26 @@ class Git:
 
     async def move_main(self, repository: Path, new: str, old: str | None) -> None:
         """Point ``main`` at ``new`` only while it still names ``old`` (none: while it does not exist)."""
-        await self.run(repository, "update-ref", MAIN, new, old or ZERO)
+        await self.move_ref(repository, MAIN, new, old)
+
+    async def move_ref(self, repository: Path, name: str, new: str, old: str | None) -> None:
+        """Point a ref at ``new`` only while it still names ``old`` (none: while it does not exist)."""
+        await self.run(repository, "update-ref", name, new, old or ZERO)
+
+    async def delete_ref(self, repository: Path, name: str, old: str) -> None:
+        """Take a ref away while it still names ``old``; its commits stay while another ref reaches them."""
+        await self.run(repository, "update-ref", "-d", name, old)
+
+    async def proposals(self, repository: Path) -> dict[str, str]:
+        """The proposals' branches (``proposal_ref``): each proposal's id and the commit its branch names."""
+        out = await self.run(repository, "for-each-ref", "--format=%(refname) %(objectname)", PROPOSALS)
+        found: dict[str, str] = {}
+        for line in out.decode("ascii", "replace").splitlines():
+            name, _, commit = line.partition(" ")
+            proposal_id = name.removeprefix(PROPOSALS)
+            if name.startswith(PROPOSALS) and is_uuid(proposal_id):
+                found[proposal_id] = commit
+        return found
 
     def projects(self) -> list[str]:
         """The projects that have a repository, by the names of their folders: a UUID's alone."""

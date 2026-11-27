@@ -380,12 +380,11 @@ async def trials_of_change_sets(jobs: Jobs) -> None:
     assert await proposals.of_document(user_id=outsider.id, document_id=document, compiled=PAGE) == []
     assert await proposals.count(user_id=outsider.id, document_id=document, compiled=PAGE) == 0
 
+    assert await proposals.open_among([first, new_id()]) == {first}, "an open trial keeps its branch"
     await proposals.set_state(first, "approved", approved_by="manager", version_index=2)
     (approved,) = await proposals.of_document(user_id=member.id, document_id=document, compiled=PAGE)
     assert approved["state"] == "approved" and approved["version_index"] == 2
-    assert await proposals.get(first) == {"project_id": pid, "snippet_key": "snippets/a.json", "author": "member"}
-    assert await proposals.snippet_key(project_id=pid, topic_guid=topic) == "snippets/a.json"
-    assert await proposals.snippet_key(project_id=pid, topic_guid=other_topic) is None
+    assert await proposals.open_among([first]) == set(), "an approved one does not"
 
     await _tick()
     second, door = new_id(), new_id()
@@ -393,7 +392,7 @@ async def trials_of_change_sets(jobs: Jobs) -> None:
         True,
         ["proposals/a.ifc"],
     ), "a new trial replaces the topic's earlier one, whose file the caller deletes"
-    assert await proposals.get(first) is None
+    assert await proposals.open_among([first, second]) == {second}
     await _tick()
     assert await proposals.create(proposal_id=door, topic_guid=other_topic, snippet_key="snippets/c.json", **trial) == (
         True,
@@ -676,7 +675,7 @@ async def test_on_postgresql_what_a_job_belongs_to_takes_it_along(pg: Postgres) 
     draft = await jobs.drafts.open(user_id=member.id, project_id=pid, document_id=document, version_index=1)
     assert draft is not None
     await pg.execute("DELETE FROM topics WHERE guid = $1", topic)
-    assert await jobs.proposals.get(trial) is None, "a topic's trial goes with the topic"
+    assert await jobs.proposals.open_among([trial]) == set(), "a topic's trial goes with the topic"
     await pg.execute("DELETE FROM document_versions WHERE id = $1", version_id)
     assert await jobs.validations.project_of(check) is None, "a version's check goes with the version"
     await jobs.users.delete(member.id)

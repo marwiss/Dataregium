@@ -4,7 +4,9 @@
 The writer decides whether a version's file is text, writes its blob before the store's transaction, and hands the
 store a ``VersionCommit``: inside the transaction, under the project's lock, the store asks it for a commit on the
 head it holds and then to move main to it, so that the version's row, the project's head and the ref change
-together, and a head moved by another document of the project is no conflict. Every value in a path or a ref is the
+together, and a head moved by another document of the project is no conflict. A change set's trial is a commit on
+its proposal's branch (``propose``, fas 5.4), and its approval a merge commit of main and that commit, with the one
+who approved it as the committer. Every value in a path or a ref is the
 server's own: the project's and the document's UUIDs and a name from ``TEXT_NAMES``; the client's file name, title and
 message are data in the commit's message, cleaned of control characters, never arguments.
 """
@@ -18,7 +20,7 @@ from pathlib import Path
 
 from opencde.ids import is_uuid, normalize_guid
 from opencde.logging import get_logger
-from opencde.repos.git import MAIN, Git, GitError, Person
+from opencde.repos.git import MAIN, Git, GitError, Person, proposal_ref
 
 log = get_logger(__name__)
 
@@ -70,22 +72,31 @@ def message_of(
     version_number: str,
     message: str | None,
     document_id: str,
-    version_index: int,
+    version_index: int | None,
     base: int | None,
     merged_with: int | None = None,
     subject: str | None = None,
+    approved_by: str | None = None,
+    proposal: str | None = None,
 ) -> str:
-    """The commit's message: the title and the version, the client's message, and trailers a clone can be read by."""
+    """The commit's message: the title and the version, the client's message, and trailers a clone can be read by;
+    a proposal's commit has no version yet."""
     first = clean(title, MAX_TITLE).replace("\n", " ") or "Document"
     number = clean(version_number, 40).replace(chr(10), " ") or version_index
     lines = [f"{first}: {subject or f'version {number}'}", ""]
     if message and (body := clean(message, MAX_MESSAGE)):
         lines += [body, ""]
-    lines += [f"Dataregium-Document: {document_id}", f"Dataregium-Version: {version_index}"]
+    lines.append(f"Dataregium-Document: {document_id}")
+    if version_index is not None:
+        lines.append(f"Dataregium-Version: {version_index}")
     if base is not None:
         lines.append(f"Dataregium-Base: {base}")
     if merged_with is not None:
         lines.append(f"Dataregium-Merged-With: {merged_with}")
+    if proposal is not None:
+        lines.append(f"Dataregium-Proposal: {proposal}")
+    if approved_by is not None and (name := clean(approved_by, 200).replace("\n", " ")):
+        lines.append(f"Dataregium-Approved-By: {name}")
     return "\n".join(lines) + "\n"
 
 
@@ -110,6 +121,12 @@ class VersionCommit:
     side_parent: str | None = None
     merged_with: int | None = None
     side: str | None = None  # the side commit ``make`` gave
+    # An approved change set (fas 5.4): its trial's commit on the proposal's branch (``propose``) as the second
+    # parent, and the one who approved it as the committer.
+    proposal_commit: str | None = None
+    proposal_id: str | None = None
+    approver: str | None = None
+    approver_id: str | None = None
 
     async def make(
         self, *, head: str | None, document_id: str, version_index: int, version_number: str, created: str
@@ -143,12 +160,19 @@ class VersionCommit:
                 ),
             )
             parents.append(self.side)
+        if self.proposal_commit is not None and await self.git.has(self.repository, self.proposal_commit):
+            parents.append(self.proposal_commit)
+        committer = Person(*SERVER, when)
+        if self.approver is not None:
+            committer = Person(
+                clean(self.approver, 200) or "unknown", f"{self.approver_id or 'unknown'}@users.invalid", when
+            )
         self.commit = await self.git.commit(
             self.repository,
             await self.git.tree(self.repository, self.parent, {path: self.blob}),
             parents,
             author,
-            Person(*SERVER, when),
+            committer,
             message_of(
                 title=self.title,
                 version_number=version_number,
@@ -157,6 +181,8 @@ class VersionCommit:
                 version_index=version_index,
                 base=self.base,
                 merged_with=self.merged_with,
+                approved_by=self.approver,
+                proposal=self.proposal_id,
             ),
         )
         return self.commit
@@ -217,6 +243,53 @@ async def prepare(
         message=message,
         base=base,
     )
+
+
+async def propose(
+    git: Git | None,
+    *,
+    project_id: str,
+    proposal_id: str,
+    path: Path,
+    document_id: str,
+    file_name: str,
+    title: str,
+    base: int,
+    base_commit: str | None,
+    author: str,
+    author_id: str | None,
+    created: str,
+) -> str | None:
+    """A change set's trial as a commit on its proposal's branch (``proposal_ref``, fas 5.4): the tree of the base
+    version's commit with the trial's file, the proposer its author. None without repositories, for a file that is not
+    text, or a base without a commit, which the approval then goes without."""
+    where = tree_path(document_id, file_name)
+    if git is None or where is None or base_commit is None or not is_text(file_name, _start(path)):
+        return None
+    repository = await git.ensure(project_id)
+    if not await git.has(repository, base_commit):
+        return None
+    blob = await git.blob(repository, path)
+    commit = await git.commit(
+        repository,
+        await git.tree(repository, base_commit, {where: blob}),
+        [base_commit],
+        Person(clean(author, 200) or "unknown", f"{author_id or 'unknown'}@users.invalid", created),
+        Person(*SERVER, created),
+        message_of(
+            title=title,
+            version_number="",
+            message=None,
+            document_id=document_id,
+            version_index=None,
+            base=base,
+            subject=f"change set on version {base}",
+            proposal=proposal_id,
+        ),
+    )
+    branch = proposal_ref(proposal_id)
+    await git.move_ref(repository, branch, commit, await git.ref(repository, branch))
+    return commit
 
 
 def _start(path: Path) -> bytes:

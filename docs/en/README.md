@@ -341,8 +341,8 @@ administration's overview show it.
 - **Comparisons**: what changed since a version, a comparison of two versions (also
   on a page on the server) and a clash check whose clashes can become topics.
 - **Changes as proposals**: every new version names its base, and a change set in a
-  BCF topic is tested and approved by a `manager` into the next version, merged per
-  instance with what came in between; a real clash shows the value of the base, of
+  BCF topic is tested and approved by a `manager` into the next version, merged by
+  ifcmerge with what came in between; a real clash shows the value of the base, of
   the latest version and of the proposal.
 - **Publishing**: a `manager` publishes a version whose check found no errors, and the
   server keeps it as one whole `.ifczip` that everyone in the project can download.

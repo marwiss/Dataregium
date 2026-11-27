@@ -5,18 +5,20 @@ The server keeps its repositories itself (``gc.auto=0``): each round it takes aw
 interrupted making left (``.trash-*``, and ``.new-*`` and ``index-*`` older than an hour), and repacks, one project
 at a time, a repository whose loose objects have grown past ``LOOSE``, with a memory window and a time limit of its
 own, pruning then the objects that no ref reaches and that are older than a day, such as those of a write whose
-transaction rolled back. What fails is logged and tried again in a later round.
+transaction rolled back. A proposal's branch goes when its trial is no longer open (``open_among``): approved, or
+replaced by a new trial, or gone with its topic. What fails is logged and tried again in a later round.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from opencde.logging import get_logger
-from opencde.repos.git import Git, GitError, remove_tree
+from opencde.repos.git import Git, GitError, proposal_ref, remove_tree
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -34,10 +36,11 @@ _COUNT = re.compile(rb"^count: ([0-9]+)$", re.MULTILINE)
 class Upkept:
     removed: int = 0  # folders a deletion or an interrupted making left
     repacked: int = 0
+    branches: int = 0  # the proposals' branches taken away
 
 
-async def upkeep(git: Git) -> Upkept:
-    """One round of upkeep over every repository."""
+async def upkeep(git: Git, open_among: Callable[[list[str]], Awaitable[set[str]]] | None = None) -> Upkept:
+    """One round of upkeep over every repository; ``open_among`` tells the proposals whose trials are open."""
     done = Upkept()
     for leftover in _leftovers(git.root):
         try:
@@ -48,6 +51,12 @@ async def upkeep(git: Git) -> Upkept:
     for project_id in git.projects():
         repository = git.repository(project_id)
         try:
+            if open_among is not None and (branches := await git.proposals(repository)):
+                still = await open_among(sorted(branches))
+                for proposal_id, commit in branches.items():
+                    if proposal_id not in still:
+                        await git.delete_ref(repository, proposal_ref(proposal_id), commit)
+                        done.branches += 1
             counted = await git.run(repository, "count-objects", "-v")
             loose = _COUNT.search(counted)
             if loose is None or int(loose.group(1)) <= LOOSE:

@@ -164,8 +164,9 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
                 await delete_expired_rows(app.state.postgres, storage=app.state.storage)
             if app.state.ifcgraph is not None:
                 await app.state.ifcgraph.resume_interrupted()
-            if app.state.git is not None:  # the repositories' leftovers and repacking (ADR 0030)
-                await upkeep(app.state.git)
+            if app.state.git is not None:  # the repositories' leftovers, branches and repacking (ADR 0030)
+                trials = app.state.ifcgraph.proposals if app.state.ifcgraph is not None else None
+                await upkeep(app.state.git, trials.open_among if trials is not None else None)
 
         cleaner = ExpiryCleaner(  # what expires is in PostgreSQL when it holds the server's own data
             app.state.store if app.state.postgres is None else None,

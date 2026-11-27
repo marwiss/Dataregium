@@ -43,7 +43,7 @@ from opencde.store.jobs.drafts import (
     _steps,
 )
 from opencde.store.jobs.merges import KIND_PREPARE, MergeRepository
-from opencde.store.jobs.proposals import ProposalRepository
+from opencde.store.jobs.proposals import STATE_APPROVED, ProposalRepository
 from opencde.store.jobs.validations import PRECHECK_SECONDS, ValidationRepository
 from opencde.timeutil import later_iso, now_iso
 
@@ -487,11 +487,7 @@ SET state = $2, running_at = CASE WHEN $2 = 'running' THEN $3 ELSE running_at EN
     base_version_index = coalesce($6, base_version_index), fields = jsonb_strip_nulls(fields || $7::jsonb)
 WHERE id = $1
 """
-PROPOSAL_BY_ID = "SELECT project_id, snippet_key, author FROM proposals WHERE id = $1"
-PROPOSAL_SNIPPET = """
-SELECT snippet_key FROM proposals WHERE project_id = $1 AND topic_guid = $2
-ORDER BY created_at COLLATE "C" DESC LIMIT 1
-"""
+PROPOSALS_OPEN = "SELECT id FROM proposals WHERE id = ANY($1::text[]) AND state <> $2"
 PROPOSAL_OF_TOPIC = """
 SELECT r.* FROM proposals r JOIN memberships m ON m.project_id = r.project_id AND m.user_id = $1
 WHERE r.project_id = $2 AND r.topic_guid = $3
@@ -565,12 +561,9 @@ class PostgresProposalRepository:
             {**_fields(rest, PROPOSAL_COLUMNS), **stamp},
         )
 
-    async def get(self, proposal_id: str) -> dict[str, Any] | None:
-        return await self.postgres.one(PROPOSAL_BY_ID, proposal_id)
-
-    async def snippet_key(self, *, project_id: str, topic_guid: str) -> str | None:
-        row = await self.postgres.one(PROPOSAL_SNIPPET, project_id, topic_guid)
-        return str(row["snippet_key"]) if row and row["snippet_key"] else None
+    async def open_among(self, proposal_ids: list[str]) -> set[str]:
+        rows = await self.postgres.run(PROPOSALS_OPEN, list(proposal_ids), STATE_APPROVED)
+        return {str(row["id"]) for row in rows}
 
     async def of_topic(self, *, user_id: str, project_id: str, topic_guid: str) -> dict[str, Any] | None:
         return _node(await self.postgres.one(PROPOSAL_OF_TOPIC, user_id, project_id, topic_guid))

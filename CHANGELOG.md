@@ -40,6 +40,13 @@ are in the commit history.
 - ifcmerge gets each instance written `#id=CLASS(...)`, so that a file from a tool that writes `#id= CLASS` is merged
   with sides written by IfcOpenShell instead of colliding on every instance, and the actors both sides made alike,
   such as the application in their owner histories, stand once in the merged file.
+- With the repositories, a change set's trial is a commit on the proposal's branch (`refs/heads/proposals/<id>`) and
+  its approval a merge commit with the approver as committer. A change set approved on an older base is merged by
+  ifcmerge with the latest version, as an upload is, instead of by the server's own comparison of the change sets:
+  the merged file is tried against the latest version's findings, the version gets `merged_with_version_index` and
+  `ifc_renumbered`, and the trial `merged_with_version_index` and `renumbered`, the ids of its new instances in the
+  version. A collision is `412 version_conflict` with the keys `#<step>.<attribute>` and `merge`, as for an upload;
+  a server without ifcmerge answers `["*"]`. The approval no longer reads IFC-DB's graph.
 - The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
   the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
 

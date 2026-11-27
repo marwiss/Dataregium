@@ -320,13 +320,17 @@ versionen och uppladdningen, behåller den senaste versionens STEP-id och flytta
 uppladdningens nya uppåt, och resultatet blir nästa version, med
 `merged_with_version_index` i metadatan bredvid `base_version_index`. Dess commit
 är en sammanfogning av `main` och en sidocommit som rymmer uppladdningen som den
-kom, på basens commit. Klienten hämtar den nya versionen, som har båda sidorna.
+kom, på basens commit. Klienten hämtar den nya versionen, som har båda sidorna;
+de aktörer båda sidor skapat lika, som programmet i deras ägarhistorier, står en
+gång.
 Det båda sidor ändrat olika, och en placering båda flyttat, ger `412
 version_conflict` i ett godkännandes form: `conflicts` som `#<step>.<attribut>`
 (eller `#<step>` för en instans som tagits bort på ena sidan eller fått en annan
 klass), `conflict_details` med `base`, `theirs` och `ours`, och `merge` med basen
 och den senaste versionen; en fil vars rader inte är en instans var, av ett annat
-schema eller omexporterad med andra STEP-id får `conflicts: ["*"]`.
+schema eller omexporterad med andra STEP-id får `conflicts: ["*"]`. Ett
+ändringsset som godkänns på en äldre bas sammanfogas på samma sätt
+([ifc-db.md](ifc-db.md)).
 
 En version som rymmer en IFC-modell kan också få namngivna frågor, som dess
 våningar, rummens area eller en egenskaps värde. Det är ett tillägg som svarar
@@ -410,7 +414,7 @@ servern inte kan läsa, som servern svarar, där FastAPI själv skulle ange `422
 | `reauthentication_required` | 403 | En farlig administrationshandling och inloggningen är äldre än tio minuter | Auktorisera igen, upprepa sedan anropet |
 | `not_found` | 404 | Ingen sådan resurs, en resurs utanför användarens projekt, eller en funktion som är avstängd (registrering, begärandelogg, administrations-API) | Visa meddelandet, läs om listorna |
 | `conflict` | 409 | Ett guid som redan finns, eller en dubblerad länk | Hämta igen |
-| `version_conflict` | 412 | Uppladdningen angav `base_version_index`, och dokumentet har redan en nyare version, på en server som inte sammanfogar eller med det båda sidor ändrat i `conflicts` och `conflict_details`; eller ett ändringsset krockar med det som ändrats sedan dess bas, angivet i `conflicts`, med de tre värdena för var och en i `conflict_details` | Hämta den senaste versionen, sammanfoga och ladda upp igen |
+| `version_conflict` | 412 | Uppladdningen angav `base_version_index`, och dokumentet har redan en nyare version, på en server som inte sammanfogar eller med det båda sidor ändrat i `conflicts` och `conflict_details`; eller ett ändringsset krockar med det som ändrats sedan dess bas, i samma form, eller kan inte sammanfogas på den här servern (`["*"]`) | Hämta den senaste versionen, sammanfoga och ladda upp igen |
 | `ifc_validation_failed` | 422 | Projektet avvisar filer med valideringsfel, och filen har sådana; `report` i kroppen är rapportens adress | Visa rapporten, låt användaren rätta filen och ladda upp igen |
 | `payload_too_large` | 413 | Begärans kropp överstiger serverns gräns, eller en BCF-binär överstiger `max_image_bytes`/`max_upload_bytes` | Rätta begäran |
 | `upload_too_large` | 413 | En vald fil eller del överstiger uppladdningsgränsen (`max_size_in_bytes` i uppladdningsinstruktionerna) | Berätta gränsen för användaren |

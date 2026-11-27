@@ -714,8 +714,9 @@ föreslog den; svaret är den nya versionen som Documents API ger den, och den
 konverteras och kontrolleras som en uppladdning. Ärendet får en kommentar med
 versionens adress, en viewpoint som markerar de ändrade elementen, och
 statusen `Closed` där projektet har det värdet.
-`412 version_conflict` säger att dokumentet har gått vidare sedan basen; `409`
-att prövningen inte är ren, eller redan är godkänd. En AI föreslår bara:
+`412 version_conflict` säger att dokumentet har gått vidare sedan basen och att
+de två inte kunde sammanfogas (nedan); `409` att prövningen inte är ren, redan är
+godkänd, eller har ett nytt fynd efter sammanfogningen. En AI föreslår bara:
 godkännandet är en människas.
 Där projektet har team listar prövningen i `teams` de team vars del av modellen
 ändringssetet rör: det som specifikationerna i ett teams IDS-dokument gäller för, i
@@ -723,30 +724,42 @@ basens fil eller den ändrade. Ett ändringsset som rör ett enda teams del godk
 teamets ansvarige ensam, inte av en `manager`; ett som rör flera teams delar, eller
 ingens, av en `manager`, och likaså ett vars delar inte kunde hittas (`teams_error`).
 
-När dokumentet har gått vidare sedan basen sammanfogar servern: ändringarna i
-versionerna däremellan, var och en godkänd från ett ändringsset, jämförs
-attribut för attribut med förslagets. Krockar inga prövas ändringssetet på nytt
-mot den senaste versionen, på en gång, och godkänns mot den, så att den nya
-versionens bas är den senaste. Krockar några, eller laddades en version
-däremellan upp som hel fil, är svaret `412 version_conflict` med de krockande
-attributen i `conflicts` (`#123.Name`, eller GlobalId, sökväg och attribut; `*`
-för en hel fil), så att klienten sammanfogar trevägs och skickar igen.
+Med repona påslagna (`OPENCDE_GIT_ENABLED`, ADR 0030) är prövningens fil en
+commit på förslagets gren, `refs/heads/proposals/<id>` med serverns eget id för
+förslaget, på basversionens commit och med förslagsställaren som författare;
+godkännandet är en sammanfogningscommit av projektets main och den commiten, med
+den som godkände som committer och `Dataregium-Approved-By` i meddelandet, och
+grenen tas bort. En gren vars prövning ersatts, eller försvunnit med sitt ärende,
+tas bort i städrundan.
 
-Instanserna jämförs, inte nycklarna klienterna skrev: varje ändring löses i
-den version den gjordes på och namnges med sin kanoniska sökväg (IFC-DB:s
-`ifc_db.paths`), så att två ändringar som når en delad instans från olika
-GlobalId ändå kolliderar, och `conflicts` namnger instansen med den sökvägen.
-Bredvid ger `conflict_details` per kollision `key`, förslagets egna `guid`,
-`path` eller `step_id`, `attribute` och `op`, vad basen höll (`base`), vad den
-senaste versionen håller (`theirs`), vad förslaget sätter (`ours`), alla i
-ändringssetets värdeform, och den mellanliggande version som ändrade det
-(`version_index`); ett värde som inte kunde läsas är `null`. Klienten låter en
-person välja per kollision, skickar en ny snippet på den senaste versionen och
-godkänner igen. En klient som inte kan skära ut en enda ändring ur sina
-operationer skickar dem igen med de nycklar den ger upp i `keep_theirs`, som
-`conflicts` namngav dem: servern prövar då ändringssetet mot dokumentets
-senaste version och ger vart och ett av de attributen tillbaka den senaste
-versionens värde efter operationerna och ändringarna.
+När dokumentet har gått vidare sedan basen sammanfogar ifcmerge prövningens fil
+med den senaste versionen, som en uppladdning på en äldre bas sammanfogas
+([client-guide.md](client-guide.md)): de aktörer båda sidor skapat, som
+serverns program i deras ägarhistorier, står en gång; den sammanfogade filen
+kontrolleras mot den senaste versionens fynd, dess team tas fram på nytt, och den
+blir versionen, med `merged_with_version_index` bredvid `base_version_index` i
+metadatan. Prövningen ger då `merged_with_version_index`, och dess status, fynd
+och team är den sammanfogade filens; ett nytt fynd ger `409`, och ändringssetet
+föreslås igen på den senaste versionen. ifcmerge flyttar ändringssetets nya
+instanser förbi den senaste versionens högsta STEP-id: den godkända prövningens
+`renumbered` ger för varje flyttat id i prövningens fil, som sträng, dess id i
+versionen (de 1000 första, `renumbered_count` därutöver), och versionen har dem i
+`ifc_renumbered` som en uppladdning har; GlobalId:na i `created` står kvar.
+
+Det båda sidor ändrat olika, och en placering båda flyttat, ger `412
+version_conflict` med `conflicts`, `conflict_details` och `merge` överst i
+kroppen, som för en uppladdning: nyckeln namnger instansen med dess STEP-id,
+`#123.Name`, eller `#123` när ena sidan tagit bort den eller bytt dess klass, och
+`conflict_details` ger per krock `key`, `guid` (instansens egen, där den har
+en), `step_id`, `attribute` och `op`, vad basen höll (`base`), vad den senaste
+versionen håller (`theirs`) och vad prövningens fil håller (`ours`), i
+ändringssetets värdeform, och den senaste versionen (`version_index`). Filer som
+inte kan sammanfogas som text, och en server utan ifcmerge eller utan repona, ger
+`["*"]`: klienten föreslår då ändringssetet igen på den senaste versionen. En
+klient som inte kan skära ut en enda ändring ur sina operationer skickar dem
+igen med de nycklar den ger upp i `keep_theirs`: servern prövar då ändringssetet
+mot dokumentets senaste version och ger vart och ett av de attributen tillbaka
+den senaste versionens värde efter operationerna och ändringarna.
 
 En version som bygger på en annan är en nod med sin förälder:
 `parent_version_index` och en länk till förälderversionen, på en version

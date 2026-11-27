@@ -242,9 +242,7 @@ async def test_a_precheck_and_its_report_live_on_the_store(tmp_path: Path, monke
     assert_apart(ifc, store)
 
 
-async def test_a_trial_and_its_approval_run_on_the_store_and_the_keys_on_the_ifc_graph(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_a_trial_and_its_approval_run_on_the_store_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     snippet = make_key("snippets", new_id(), "json")
     service, ifc, store = service_with(
         tmp_path,
@@ -256,7 +254,6 @@ async def test_a_trial_and_its_approval_run_on_the_store_and_the_keys_on_the_ifc
                 "r.report AS report",
                 [{"storage_key": "k", "file_name": "base.ifc", "report": pack_report([]), "checks": None}],
             ),
-            ("RETURN p.snippet_key AS snippet_key", [{"snippet_key": snippet}]),
             ("RETURN properties(p) AS node", [{"node": {"id": "proposal-1", "state": "clean"}}]),
             ("RETURN properties(c) AS c", [{"c": {"id": "model-1"}}]),
         ],
@@ -266,18 +263,11 @@ async def test_a_trial_and_its_approval_run_on_the_store_and_the_keys_on_the_ifc
 
     await service.schedule_proposal(project_id="p1", topic_guid="topic-1", snippet_key=snippet, author="anna")
     await service.wait_idle()
-    proposal_id = new_id()  # it names the applied file in the storage
-    assert await service.retry_proposal(proposal_id=proposal_id, base_version_index=1) == "clean"
-    await service.approve(proposal_id=proposal_id, approved_by="manager", version_index=2)
+    proposal_id = new_id()
+    await service.approve(proposal_id=proposal_id, approved_by="manager", version_index=2, renumbered={"9": 12})
     assert await service.proposal(user_id="u", project_id="p1", topic_guid="topic-1") is not None
-    assert await service.change_set_of(project_id="p1", topic_guid="topic-1") == change_set
     assert await service.values_in(user_id="u", document_id="doc-1", version_index=1, changes=[]) is None
-    assert not ifc.statements, "a trial reads files and the server's own nodes alone"
-    change = {"guid": GUID, "path": "", "attribute": "Name"}
-    keys = await service.canonical_keys(document_id="doc-1", version_index=1, changes=[change])
-
-    assert keys == [f"{GUID}/.Name"], "a path that leads nowhere keeps the key its client wrote"
-    assert ifc.statements, "the canonical path is looked up in the model"
+    assert not ifc.statements, "a trial and its approval read files and the server's own nodes alone (ADR 0030)"
     written = "\n".join(store.statements)
     for made in ("HAS_PROPOSAL", "HAS_TEAM", "SET p.state = $state", "DETACH DELETE p"):
         assert made in written, made

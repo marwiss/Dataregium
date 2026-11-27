@@ -710,8 +710,9 @@ proposed it; the answer is the new version as the Documents API gives it, and
 it is converted and checked as an upload is. The topic gets a comment with the
 version's address, a viewpoint that selects the changed elements, and the
 status `Closed` where the project has that value.
-`412 version_conflict` says the document has moved on since the base; `409`
-that the trial is not clean, or was approved already. An AI only proposes:
+`412 version_conflict` says the document has moved on since the base and the
+two could not be merged (below); `409` that the trial is not clean, was
+approved already, or has a new finding once merged. An AI only proposes:
 approval is a person's.
 Where the project has teams, the trial lists in `teams` those whose part of the
 model the change set touches: what the specifications of a team's IDS document
@@ -720,31 +721,45 @@ of one team is approved by that team's responsible alone, not by a `manager`; on
 that touches the parts of several teams, or of none, by a `manager`, and so is one
 whose parts could not be found (`teams_error`).
 
-When the document has moved on since the base, the server merges: the
-changes of the versions in between, each approved from a change set, are
-compared attribute by attribute with the proposal's. When none collide, the
-change set is tried again on the latest version, at once, and approved on it,
-so that the new version's base is the latest. When some collide, or a version
-in between was uploaded as a whole file, the answer is `412 version_conflict`
-with the colliding attributes in `conflicts` (`#123.Name`, or the GlobalId, the
-path and the attribute; `*` for a whole file), for the client to merge three
-ways and send again.
+With the repositories on (`OPENCDE_GIT_ENABLED`, ADR 0030), the trial's file
+is a commit on the proposal's branch, `refs/heads/proposals/<id>` with the
+server's own id of the proposal, on the base version's commit and with the
+proposer as its author; the approval is a merge commit of the project's main
+and that commit, with the one who approved it as the committer and
+`Dataregium-Approved-By` in its message, and the branch goes. A branch whose
+trial was replaced, or went with its topic, goes in the cleaner's round.
 
-The instances are compared, not the keys the clients wrote: each change is
-resolved in the version it was made on and named by its canonical path
-(IFC-DB's `ifc_db.paths`), so that two changes that reach one shared
-instance from different GlobalIds collide all the same, and `conflicts` names
-the instance by that path. Beside it, `conflict_details` gives per conflict
-`key`, the proposal's own `guid`, `path` or `step_id`, `attribute` and `op`,
-what the base held (`base`), what the latest version holds (`theirs`), what
-the proposal sets (`ours`), all in the change set's value form, and the
-version in between that changed it (`version_index`); a value that could not
-be read is `null`. The client lets a person choose per conflict, sends a new
-snippet on the latest version and approves again. A client that cannot cut one
-change out of its operations sends them again with the keys it gives up in
-`keep_theirs`, as `conflicts` named them: the server then tries the change set
-on the document's latest version and gives each of those attributes back the
-latest version's value after the operations and the changes.
+When the document has moved on since the base, ifcmerge merges the trial's file
+with the latest version, as it merges an upload on an older base
+([client-guide.md](client-guide.md)): the actors both sides made, such as the server's
+application in their owner histories, stand once; the merged file is checked
+against the latest version's findings, its teams are found again, and it
+becomes the version, with `merged_with_version_index` beside
+`base_version_index` in its metadata. The trial then gives
+`merged_with_version_index`, and its state, issues and teams are those of the
+merged file; a new finding is `409`, and the change set is proposed again on
+the latest version. ifcmerge moves the new instances of the change set past
+the latest version's highest STEP id: the approved trial's `renumbered` maps
+each moved id of the trial's file, as a string, to its id in the version (the
+first 1000, `renumbered_count` beyond), and the version has them in
+`ifc_renumbered` as an upload has; the GlobalIds in `created` stay as they
+are.
+
+What both sides changed differently, and a placement both moved, is `412
+version_conflict` with `conflicts`, `conflict_details` and `merge` at the top
+of the body, as for an upload: the key names the instance by its STEP id,
+`#123.Name`, or `#123` when one side deleted it or changed its class, and
+`conflict_details` gives per conflict `key`, `guid` (the instance's own, where
+it has one), `step_id`, `attribute` and `op`, what the base held (`base`),
+what the latest version holds (`theirs`) and what the trial's file holds
+(`ours`), in the change set's value form, and the latest version
+(`version_index`). Files that cannot be merged as text, and a server without
+ifcmerge or without the repositories, give `["*"]`: the client proposes the
+change set again on the latest version. A client that cannot cut one change
+out of its operations sends them again with the keys it gives up in
+`keep_theirs`: the server then tries the change set on the document's latest
+version and gives each of those attributes back the latest version's value
+after the operations and the changes.
 
 A version built on another is a node with its parent: `parent_version_index`
 and a link to the parent version, on a version approved from a change set and

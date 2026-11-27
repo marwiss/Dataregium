@@ -20,17 +20,20 @@ touches the parts of several teams, or of none, by a ``manager`` (F21 b), and so
 found. The responsible is the team's at the time of the approval, so a manager who sets another one lets them
 approve.
 
-When the document has moved on since the base, the server merges (ADR 0021): the changes of the versions in
-between, each approved from a change set, are compared attribute by attribute with the proposal's; when none
-collide, the change set is tried again on the latest version, at once, and approved on it; when some collide, or
-a version in between was uploaded as a whole file, the answer is 412 with the colliding attributes, for the
-client to merge three ways and send again.
+Where the project has a repository (ADR 0030), the trial's file is a commit on the proposal's branch, on the base
+version's commit, and the approval a merge commit of main and it, with the one who approved it as the committer.
+When the document has moved on since the base, ifcmerge merges the trial's file with the versions since, as it
+merges an upload (``documents/three_way.py``): the merged file is checked against the latest version's findings and
+its teams found again, and it becomes the version; the ids ifcmerge moved are in the trial's ``renumbered`` and the
+version's ``ifc_renumbered``. A collision is 412 with ifcmerge's conflicts, and a server without ifcmerge answers
+412 with ``["*"]``, for the client to propose again on the latest version.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -43,30 +46,33 @@ from opencde.accounts.roles import Role, at_least
 from opencde.bcf.schemas import CommentPOST, Component, Components, TopicPUT, ViewpointPOST, Visibility
 from opencde.bcf.topic_access import TopicCtx, TopicsDep
 from opencde.deps import GitDep, ProjectsDep, SettingsDep, StorageDep, UsersDep
+from opencde.documents import three_way
 from opencde.documents.links import api_base
 from opencde.documents.routes_clash import camera_looking_at
 from opencde.documents.schemas import DocumentMetadataEntry, DocumentVersion
-from opencde.documents.step import stored_history
+from opencde.documents.step import MAX_LISTED, is_step, protect_stored, stored_history
 from opencde.documents.validation import IfcRooms, IfcValidationCheck, IfcValidationIssue, rooms_of
 from opencde.errors import CODE_VERSION_CONFLICT, ApiError
 from opencde.ids import new_id
 from opencde.ifcgraph.parts import owning_objects
 from opencde.ifcgraph.service import STATE_CLEAN, IfcGraphDep, IfcGraphService
-from opencde.repos.writer import prepare
+from opencde.logging import get_logger
+from opencde.repos.git import Git, GitError, proposal_ref
+from opencde.repos.writer import prepare, propose
 from opencde.storage import LocalStorage, make_key
 from opencde.store.accounts.teams import TeamsDep
 from opencde.store.bcf.comments import CommentsDep
 from opencde.store.bcf.viewpoints import ViewpointsDep
-from opencde.store.documents.versions import DocumentsDep, default_metadata
+from opencde.store.documents.versions import DocumentsDep, VersionRecord, default_metadata
 from opencde.store.protocols import TeamStore
+from opencde.timeutil import now_iso
 
 TAG = "IFC change sets (extension)"
 
 router = APIRouter(prefix="/projects/{project_id}/topics/{topic_id}", tags=[TAG])
+log = get_logger(__name__)
 
 CLOSED = "Closed"  # the topic's status after the approval, where the project's values have it
-MAX_CONFLICTS = 100
-EVERYTHING = "*"  # a version in between came as a whole file: anything may have changed
 
 
 class IfcProposalBase(BaseModel):
@@ -124,6 +130,19 @@ class IfcProposalReport(BaseModel):
     error: str | None = Field(None, description="Why the trial could not run, when it `failed`.")
     approved_by: str | None = Field(None, description="Who approved it, when it is `approved`.")
     version_index: int | None = Field(None, description="The version it became, when it is `approved`.")
+    merged_with_version_index: int | None = Field(
+        None,
+        description="The latest version that the approval merged the change set with, by ifcmerge, when the document "
+        "had moved on since the base: the state, the issues and the teams are then those of the merged file against "
+        "that version.",
+    )
+    renumbered: dict[str, int] | None = Field(
+        None,
+        description="When it is `approved` and the merge moved ids of the trial's file: each such STEP id, as a "
+        f"string, and the id it has in the version, the first {MAX_LISTED} in order. The GlobalIds in `created` "
+        "stay as they are.",
+    )
+    renumbered_count: int | None = Field(None, description="How many ids moved, when more than `renumbered` lists.")
     teams: list[IfcProposalTeam] = Field(
         default_factory=list, description="The teams whose part of the model the change set touches."
     )
@@ -159,6 +178,11 @@ def proposal_report(node: dict[str, Any]) -> IfcProposalReport:
         error=node.get("error"),
         approved_by=node.get("approved_by"),
         version_index=None if node.get("version_index") is None else int(node["version_index"]),
+        merged_with_version_index=(
+            None if node.get("merged_with_version_index") is None else int(node["merged_with_version_index"])
+        ),
+        renumbered=node.get("renumbered"),
+        renumbered_count=None if node.get("renumbered_count") is None else int(node["renumbered_count"]),
         teams=[
             IfcProposalTeam(team_id=str(team["team_id"]), name=str(team["name"])) for team in node.get("teams") or []
         ],
@@ -242,10 +266,11 @@ async def proposal_approve(
     the answer is the new version as the Documents API gives it, with
     `base_version_index`, `change_set_id`, `proposed_by`, `approved_by` and, where an AI proposed it, `ai_model` and
     `tool_call` in its metadata, and the topic gets a viewpoint that selects the changed elements (OB-32). When the
-    document has moved on since the base, the change set is tried again on
-    the latest version and approved on it, unless one of its attributes was changed in between: then 412
-    `version_conflict` with the colliding attributes in `conflicts`. 403 for other roles, 409 when the trial is not
-    clean or was approved already."""
+    document has moved on since the base, ifcmerge merges the trial's file with the latest version (ADR 0030): the
+    merged file is tried against the latest's findings and becomes the version, with `merged_with_version_index` and
+    the ids the merge moved in `ifc_renumbered`. 412 `version_conflict` with `conflicts`, `conflict_details` and `merge`
+    when the two collide, or with `["*"]` when the files cannot be merged or the server has no ifcmerge; 409 when the
+    trial is not clean, was approved already, or has a new finding once merged. 403 for other roles."""
     if ifcgraph is None:
         raise HTTPException(404, "Change sets are not tried on this server: the BIM functions are off")
     node = await ifcgraph.proposal(user_id=topic.user_id, project_id=topic.project_id, topic_guid=topic.guid)
@@ -258,49 +283,56 @@ async def proposal_approve(
     latest = await documents.latest(user_id=topic.user_id, document_id=document_id)
     if latest is None:
         raise HTTPException(404, "The base document is gone")
+    based = latest
     if latest.version_index != base_index:
-        colliding, conflict_details = await _collisions(
-            ifcgraph, documents, topic.user_id, topic.project_id, latest, base_index, node
-        )
-        if colliding:
-            raise ApiError(
-                412,
-                f"The change set builds on version {base_index}, but the document's latest version is "
-                f"{latest.version_index}, and {len(colliding)} of its changes collide with what came between",
-                code=CODE_VERSION_CONFLICT,
-                details={"conflicts": colliding[:MAX_CONFLICTS], "conflict_details": conflict_details},
-            )
-        state = await ifcgraph.retry_proposal(proposal_id=str(node["id"]), base_version_index=latest.version_index)
-        if state != STATE_CLEAN:
-            raise HTTPException(409, f"On version {latest.version_index} the trial is {state}; see the trial")
-        node = await ifcgraph.proposal(user_id=topic.user_id, project_id=topic.project_id, topic_guid=topic.guid)
-        if node is None:
-            raise HTTPException(404, "This topic has no change set that was tried")
-        await _may_approve(topic, teams, node)  # tried on the latest, it may touch other parts
-        base_index = latest.version_index
-    key = make_key("documents", new_id())
-    size, sha256 = await anyio.to_thread.run_sync(_copy_hashed, storage, storage.path(str(node["storage_key"])), key)
+        found = await documents.version(user_id=topic.user_id, document_id=document_id, version_index=base_index)
+        if found is None:
+            raise HTTPException(404, "The base version is gone")
+        based = found
     change_set = await anyio.to_thread.run_sync(_change_set, storage, str(node["snippet_key"]))
     provenance = dict(change_set.get("provenance") or {})
     proposer = str(node["author"])
-    metadata = default_metadata(
-        file_name=latest.file_name,
-        size_in_bytes=size,
-        sha256=sha256,
-        author=proposer,
-        project_name=latest.project_name,
-    )
-    metadata += [
-        DocumentMetadataEntry(name="base_version_index", value=[str(base_index)], data_type="integer32"),
-        DocumentMetadataEntry(name="change_set_id", value=[topic.guid], data_type="string"),
-        DocumentMetadataEntry(name="proposed_by", value=[proposer], data_type="string"),
-        DocumentMetadataEntry(name="approved_by", value=[topic.username], data_type="string"),
-    ]
-    for name in ("ai_model", "tool_call"):
-        if provenance.get(name):
-            metadata.append(DocumentMetadataEntry(name=name, value=[str(provenance[name])], data_type="string"))
+    proposing = await users.get_by_username(proposer)
+    branch = node.get("commit") or await _branch_now(git, storage, topic.project_id, node, based, proposing)
+    key = make_key("documents", new_id())
+    renumbered: list[tuple[int, int]] = []
+    renumbered_count = 0
+    merged_with = None
     try:
-        proposing = await users.get_by_username(proposer)
+        if latest.version_index != base_index:
+            size, sha256, renumbered, renumbered_count = await _merged(
+                ifcgraph, storage, topic.project_id, node, change_set, (based, latest), key
+            )
+            merged_with = latest.version_index
+            node = await ifcgraph.proposal(user_id=topic.user_id, project_id=topic.project_id, topic_guid=topic.guid)
+            if node is None:
+                raise HTTPException(404, "This topic has no change set that was tried")
+            await _may_approve(topic, teams, node)  # merged with the latest, it may touch other parts
+        else:
+            size, sha256 = await anyio.to_thread.run_sync(
+                _copy_hashed, storage, storage.path(str(node["storage_key"])), key
+            )
+        metadata = default_metadata(
+            file_name=latest.file_name,
+            size_in_bytes=size,
+            sha256=sha256,
+            author=proposer,
+            project_name=latest.project_name,
+        )
+        metadata += [
+            DocumentMetadataEntry(name="base_version_index", value=[str(base_index)], data_type="integer32"),
+            DocumentMetadataEntry(name="change_set_id", value=[topic.guid], data_type="string"),
+            DocumentMetadataEntry(name="proposed_by", value=[proposer], data_type="string"),
+            DocumentMetadataEntry(name="approved_by", value=[topic.username], data_type="string"),
+        ]
+        for name in ("ai_model", "tool_call"):
+            if provenance.get(name):
+                metadata.append(DocumentMetadataEntry(name=name, value=[str(provenance[name])], data_type="string"))
+        if merged_with is not None:
+            metadata.append(
+                DocumentMetadataEntry(name="merged_with_version_index", value=[str(merged_with)], data_type="integer32")
+            )
+        metadata += three_way.renumbered_metadata(renumbered, renumbered_count)
         commit = await prepare(
             git,
             project_id=topic.project_id,
@@ -309,14 +341,18 @@ async def proposal_approve(
             title=latest.title,
             author=proposer,
             author_id=proposing.id if proposing else None,
-            message=f"Change set {topic.guid}, approved by {topic.username}",
+            message=f"Change set {topic.guid}",
             base=base_index,
         )
+        if commit is not None:
+            commit.proposal_commit, commit.proposal_id = branch, str(node["id"])
+            commit.approver, commit.approver_id = topic.username, topic.user_id
+            commit.merged_with = merged_with
         record = await documents.create_version(
             project_id=topic.project_id,
             document_id=document_id,
             title=latest.title,
-            version_number=str(base_index + 1),
+            version_number=str(latest.version_index + 1),
             file_name=latest.file_name,
             size_in_bytes=size,
             sha256=sha256,
@@ -327,13 +363,21 @@ async def proposal_approve(
             approved_by=topic.username,
             change_set_id=topic.guid,
             change_set=pack_report(list(change_set.get("changes") or [])),
+            on_latest=latest.version_index,  # a version made meanwhile is 412, as for an upload
             max_step_id=await anyio.to_thread.run_sync(stored_history, storage, key, latest.file_name),
             commit=commit,
         )
     except BaseException:
         storage.delete(key)
         raise
-    await ifcgraph.approve(proposal_id=str(node["id"]), approved_by=topic.username, version_index=record.version_index)
+    await ifcgraph.approve(
+        proposal_id=str(node["id"]),
+        approved_by=topic.username,
+        version_index=record.version_index,
+        renumbered={str(old): new for old, new in renumbered} or None,
+        renumbered_count=renumbered_count if renumbered_count > len(renumbered) else None,
+    )
+    await _drop_branch(git, topic.project_id, str(node["id"]), branch)
     await _schedule(ifcgraph, topic.project_id, record.storage_key, record.file_name, record)
     version = record.to_model(api_base(settings))
     await comments.create(
@@ -367,6 +411,101 @@ async def proposal_approve(
         body = TopicPUT.model_validate({**fields, "topic_status": CLOSED})
         await topics.update(project_id=topic.project_id, guid=topic.guid, author=topic.username, body=body)
     return version
+
+
+async def _merged(
+    ifcgraph: IfcGraphService,
+    storage: LocalStorage,
+    project_id: str,
+    node: dict[str, Any],
+    change_set: dict[str, Any],
+    versions: tuple[VersionRecord, VersionRecord],
+    key: str,
+) -> tuple[int, str, list[tuple[int, int]], int]:
+    """The trial's file merged by ifcmerge with the versions since its base (ADR 0030), stored at ``key`` with the
+    safety net on it, and tried on the latest version: its size and SHA-256, and the ids of the trial's file that are
+    not where they were (``three_way.renumbering``). 412 when the server cannot merge or the two collide, 409 when the
+    merged file has a finding the latest version lacks."""
+    based, latest = versions
+    if not ifcgraph.settings.ifcmerge_on or not (is_step(based.file_name) and is_step(latest.file_name)):
+        raise ApiError(
+            412,
+            f"The change set builds on version {based.version_index}, but the document's latest version is "
+            f"{latest.version_index}, and this server does not merge it: propose it again on the latest",
+            code=CODE_VERSION_CONFLICT,
+            details={
+                "conflicts": [three_way.EVERYTHING],
+                "conflict_details": [],
+                "merge": {"base_version_index": based.version_index, "latest_version_index": latest.version_index},
+            },
+        )
+    ours = storage.path(str(node["storage_key"]))
+    with tempfile.TemporaryDirectory(prefix="ifcmerge-") as folder:
+        done = await three_way.merged(
+            ifcgraph=ifcgraph,
+            storage=storage,
+            what="The change set",
+            project_id=project_id,
+            based=based,
+            latest=latest,
+            ours=(str(node["storage_key"]), "proposal.ifc"),
+            folder=Path(folder),
+        )
+        size, sha256 = await anyio.to_thread.run_sync(_copy_hashed, storage, done.path, key)
+    after = await anyio.to_thread.run_sync(
+        protect_stored, storage, key, latest.storage_key, latest.file_name, latest.max_step_id
+    )
+    if after.size is not None and after.sha256 is not None:
+        size, sha256 = after.size, after.sha256
+    pairs, count = await anyio.to_thread.run_sync(three_way.renumbering, ours, done, after)
+    touching = [*(change_set.get("changes") or []), *({"guid": guid} for guid in node.get("ops_objects") or [])]
+    state = await ifcgraph.merged_trial(
+        proposal_id=str(node["id"]), project_id=project_id, latest=latest, key=key, touching=touching
+    )
+    if state != STATE_CLEAN:
+        raise HTTPException(409, f"Merged with version {latest.version_index}, the trial is {state}; see the trial")
+    return size, sha256, pairs, count
+
+
+async def _branch_now(
+    git: Git | None,
+    storage: LocalStorage,
+    project_id: str,
+    node: dict[str, Any],
+    based: VersionRecord,
+    proposing: Any,
+) -> str | None:
+    """The proposal's branch for a trial that has none, as one from before the branches (UL-48): made now, or None.
+    A failure is logged and stops nothing: the version is then a commit on main alone."""
+    try:
+        return await propose(
+            git,
+            project_id=project_id,
+            proposal_id=str(node["id"]),
+            path=storage.path(str(node["storage_key"])),
+            document_id=based.document_id,
+            file_name=based.file_name,
+            title=based.title,
+            base=based.version_index,
+            base_commit=based.commit,
+            author=str(node["author"] or ""),
+            author_id=proposing.id if proposing else None,
+            created=now_iso(),
+        )
+    except (GitError, OSError, ValueError) as exc:
+        log.warning("ifc_proposal_branch_failed", proposal_id=str(node["id"]), error=str(exc)[:200])
+        return None
+
+
+async def _drop_branch(git: Git | None, project_id: str, proposal_id: str, commit: str | None) -> None:
+    """The proposal's branch goes once it is approved: its commit is the version's second parent. One left behind is
+    taken by the repositories' upkeep."""
+    if git is None or commit is None:
+        return
+    try:
+        await git.delete_ref(git.repository(project_id), proposal_ref(proposal_id), commit)
+    except (GitError, ValueError) as exc:
+        log.warning("ifc_proposal_branch_left", proposal_id=proposal_id, error=str(exc)[:200])
 
 
 MAX_SELECTED = 1_000
@@ -408,100 +547,6 @@ def _changed_guids(applied: Path, changes: list[dict[str, Any]]) -> tuple[list[s
     centre = [sum(point[i] for point in points) / len(points) for i in range(3)]
     extent = max((max(abs(point[i] - centre[i]) for point in points) for i in range(3)), default=0.0) * 2
     return selected, centre, extent or None
-
-
-async def _keys(
-    ifcgraph: IfcGraphService, document_id: str, version_index: int, change_set: dict[str, Any]
-) -> list[tuple[str, dict[str, Any]]]:
-    """Each change of a change set with its key: the instance named by its canonical path in the version the set was
-    made on, so that two paths to one shared instance are one key; the key the client wrote when that version has no
-    model in the graph any more."""
-    changes = [dict(change) for change in change_set.get("changes") or []]
-    canonical = await ifcgraph.canonical_keys(document_id=document_id, version_index=version_index, changes=changes)
-    keys = canonical if canonical is not None else [_key(change) for change in changes]
-    return list(zip(keys, changes, strict=True))
-
-
-def _key(change: dict[str, Any]) -> str:
-    if change.get("step_id") is not None:
-        return f"#{change['step_id']}.{change.get('attribute')}"
-    return f"{change.get('guid')}/{change.get('path') or ''}.{change.get('attribute')}"
-
-
-def _locator(change: dict[str, Any]) -> dict[str, Any]:
-    """Where a change points and what it changes, without its values: for the worker that reads them."""
-    return {key: change[key] for key in ("step_id", "guid", "path", "attribute") if change.get(key) is not None}
-
-
-def _metadata(version: Any, name: str) -> Any:
-    return next((entry["value"][0] for entry in version.metadata if entry.get("name") == name and entry["value"]), None)
-
-
-async def _collisions(
-    ifcgraph: IfcGraphService,
-    documents: Any,
-    user_id: str,
-    project_id: str,
-    latest: Any,
-    base_index: int,
-    node: dict[str, Any],
-) -> tuple[list[str], list[dict[str, Any]]]:
-    """What the change set changes that a version since its base changed too, as keys (`*` for a whole-file upload)
-    and as details: per conflict what the base held, what the latest version holds, what the proposal sets, and the
-    version that changed it. The instances are compared, not the keys the clients wrote: each change set is resolved
-    in the version it was made on."""
-    mine = await anyio.to_thread.run_sync(_change_set, ifcgraph.storage, str(node["snippet_key"]))
-    theirs: dict[str, tuple[int, dict[str, Any]]] = {}  # key: the last version in between that changed it, and how
-    for version in sorted(
-        await documents.versions(user_id=user_id, document_id=latest.document_id), key=lambda v: v.version_index
-    ):
-        if not base_index < version.version_index <= latest.version_index:
-            continue
-        change_set_id = _metadata(version, "change_set_id")
-        other = await ifcgraph.change_set_of(project_id=project_id, topic_guid=change_set_id) if change_set_id else None
-        if other is None:
-            return [EVERYTHING], []
-        made_on = _metadata(version, "base_version_index")
-        made_on = int(made_on) if made_on is not None else version.version_index - 1
-        for key, change in await _keys(ifcgraph, latest.document_id, made_on, other):
-            theirs[key] = (version.version_index, change)
-    colliding: dict[str, dict[str, Any]] = {}
-    for key, change in await _keys(ifcgraph, latest.document_id, base_index, mine):
-        if key in theirs and key not in colliding:
-            colliding[key] = change
-    keys = sorted(colliding)[:MAX_CONFLICTS]
-    if not keys:
-        return [], []
-    ours = [colliding[key] for key in keys]
-    base_values = await ifcgraph.values_in(
-        user_id=user_id, document_id=latest.document_id, version_index=base_index, changes=[_locator(c) for c in ours]
-    )
-    latest_values = await ifcgraph.values_in(
-        user_id=user_id,
-        document_id=latest.document_id,
-        version_index=latest.version_index,
-        changes=[_locator(theirs[key][1]) for key in keys],
-    )
-
-    def value(values: list[dict[str, Any]] | None, index: int) -> Any:
-        return values[index].get("value") if values and index < len(values) else None
-
-    details = [
-        {
-            "key": key,
-            "guid": change.get("guid"),
-            "path": change.get("path"),
-            "step_id": change.get("step_id"),
-            "attribute": change.get("attribute"),
-            "op": change.get("op"),
-            "base": value(base_values, index),
-            "theirs": value(latest_values, index),
-            "ours": change.get("new"),
-            "version_index": theirs[key][0],
-        }
-        for index, (key, change) in enumerate(zip(keys, ours, strict=True))
-    ]
-    return keys, details
 
 
 async def _schedule(ifcgraph: IfcGraphService, project_id: str, key: str, file_name: str, record: Any) -> None:

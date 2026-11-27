@@ -313,13 +313,16 @@ version and the upload, keeping the latest version's STEP ids and moving the
 upload's new ones up, and the result becomes the next version, with
 `merged_with_version_index` in its metadata beside `base_version_index`. Its
 commit is a merge of `main` and a side commit that holds the upload as it came,
-on the base's commit. The client fetches the new version, which holds both sides.
+on the base's commit. The client fetches the new version, which holds both sides;
+the actors both sides made alike, such as the application of their owner
+histories, stand once.
 What both sides changed differently, and a placement both moved, is `412
 version_conflict` in the form of an approval's: `conflicts` as `#<step>.<attribute>`
 (or `#<step>` for an instance deleted on one side or of another class),
 `conflict_details` with `base`, `theirs` and `ours`, and `merge` with the base and
 the latest version; a file whose lines are not one instance each, of another
-schema or re-exported with other STEP ids gets `conflicts: ["*"]`.
+schema or re-exported with other STEP ids gets `conflicts: ["*"]`. A change set
+approved on an older base is merged the same way ([ifc-db.md](ifc-db.md)).
 
 A version that holds an IFC model can also be asked named queries, such as its
 storeys, the areas of its spaces or the value of a property: an extension that
@@ -400,7 +403,7 @@ server cannot read, as the server answers, where FastAPI itself would say `422`.
 | `reauthentication_required` | 403 | A dangerous administration action and the sign-in is older than ten minutes | Authorize again, then repeat the call |
 | `not_found` | 404 | No such resource, a resource outside the user's projects, or a feature that is off (registration, request log, administration API) | Show the message, refresh lists |
 | `conflict` | 409 | A guid that already exists, or a duplicate link | Fetch again |
-| `version_conflict` | 412 | The upload gave `base_version_index`, and the document already has a newer version, on a server that does not merge or with what both sides changed in `conflicts` and `conflict_details`; or a change set collides with what was changed since its base, named in `conflicts`, with the three values of each in `conflict_details` | Fetch the latest version, merge, and upload again |
+| `version_conflict` | 412 | The upload gave `base_version_index`, and the document already has a newer version, on a server that does not merge or with what both sides changed in `conflicts` and `conflict_details`; or a change set collides with what was changed since its base, in the same form, or cannot be merged on this server (`["*"]`) | Fetch the latest version, merge, and upload again |
 | `ifc_validation_failed` | 422 | The project refuses files with validation errors, and the file has some; `report` in the body is the report's address | Show the report, let the user fix the file, and upload again |
 | `payload_too_large` | 413 | The request body is over the server's limit, or a BCF binary is over `max_image_bytes`/`max_upload_bytes` | Fix the request |
 | `upload_too_large` | 413 | A chosen file or part is over the upload limit (`max_size_in_bytes` in the upload instructions) | Tell the user the limit |

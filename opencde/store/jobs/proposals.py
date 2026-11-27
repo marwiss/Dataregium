@@ -25,6 +25,7 @@ from opencde.timeutil import now_iso
 
 STATE_QUEUED = "queued"
 STATE_RUNNING = "running"
+STATE_APPROVED = "approved"
 
 #: The listing is ordered newest first by the proposal's creation time, and by nothing else; no field is filtered
 #: on, so ``$filter`` and ``$orderby`` are refused as unknown fields, and ``$top`` and ``$skip`` page through it.
@@ -142,28 +143,15 @@ class ProposalRepository:
             fields={**fields, f"{state}_at": now_iso()},
         )
 
-    async def get(self, proposal_id: str) -> dict[str, Any] | None:
-        """The trial's project, snippet and author, whatever its state; None without it."""
-        return await self.graph.one(
-            """
-            MATCH (p:Proposal {id: $id})
-            RETURN p.project_id AS project_id, p.snippet_key AS snippet_key, p.author AS author
-            """,
-            id=proposal_id,
+    async def open_among(self, proposal_ids: list[str]) -> set[str]:
+        """Those of the ids whose trial is still there and not approved, for the upkeep of the proposals' branches
+        (ADR 0030): a trial a new one replaced, or that went with its topic, is not."""
+        rows = await self.graph.run(
+            "MATCH (p:Proposal) WHERE p.id IN $ids AND p.state <> $approved RETURN p.id AS id",
+            ids=list(proposal_ids),
+            approved=STATE_APPROVED,
         )
-
-    async def snippet_key(self, *, project_id: str, topic_guid: str) -> str | None:
-        """The storage key of the change set a topic's trial tries; None when the topic has no trial."""
-        row = await self.graph.one(
-            """
-            MATCH (:Project {project_id: $project_id})-[:HAS_TOPIC]->(:Topic {guid: $guid})
-                  -[:HAS_PROPOSAL]->(p:Proposal)
-            RETURN p.snippet_key AS snippet_key
-            """,
-            project_id=project_id,
-            guid=topic_guid,
-        )
-        return str(row["snippet_key"]) if row and row["snippet_key"] else None
+        return {str(row["id"]) for row in rows}
 
     async def of_topic(self, *, user_id: str, project_id: str, topic_guid: str) -> dict[str, Any] | None:
         """The trial of a topic, as it is kept (its report packed), for a member of the project; None without one."""

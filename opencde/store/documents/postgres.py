@@ -251,7 +251,7 @@ ORDER BY v.version_index DESC
 LIMIT 1
 """
 VERSION_FILE = """
-SELECT v.storage_key, v.file_name, r.report, r.checks
+SELECT v.storage_key, v.file_name, v.commit, r.report, r.checks
 FROM documents d
 JOIN document_versions v ON v.document_id = d.document_id AND v.version_index = $3
 LEFT JOIN LATERAL (
@@ -474,7 +474,8 @@ class PostgresDocumentRepository:
 
     async def version_file(self, *, project_id: str, document_id: str, version_index: int) -> dict[str, Any] | None:
         """A version's file with the report and checks of its newest finished check, as the graph's
-        ``version_file``; the checks are the jobs area's, read through the view ``version_validations``."""
+        ``version_file``, and its commit (ADR 0030); the checks are the jobs area's, read through the view
+        ``version_validations``."""
         return await self.postgres.one(VERSION_FILE, project_id, document_id, version_index, STATE_DONE)
 
     async def project_heads(self, *, project_id: str, suffixes: list[str], limit: int) -> list[VersionRecord]:

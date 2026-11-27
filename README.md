@@ -344,7 +344,7 @@ graf sätter `OPENCDE_TIER=experimental`. Kapabilitetsdokumentet anger nivån so
   ärenden.
 - **Ändringar som förslag**: varje ny version anger sin bas, och ett ändringsset
   i ett BCF-ärende prövas och godkänns av en `manager` till nästa version,
-  sammanfogat per instans med det som kom emellan; en verklig krock visar basens,
+  sammanfogat av ifcmerge med det som kom emellan; en verklig krock visar basens,
   den senaste versionens och förslagets värde.
 - **Publicering**: en `manager` publicerar en version vars kontroll inte hittade några
   fel, och servern sparar den som en hel `.ifczip` som alla i projektet kan ladda ned.
