@@ -8,6 +8,7 @@
 | `relationships.jsonl.gz` | varje relation, med start- och slutnod angivna genom sina unika nycklar |
 | `store.jsonl.gz` | med PostgreSQL: varje tabellrad med serverns egna data, ett JSON-objekt per rad |
 | `storage.tar.gz` | lagringskatalogen: dokument, snapshots, bitmaps, snippets |
+| `git/<projektets id>.bundle` | med `OPENCDE_GIT_ENABLED`: varje projekts repo, alla refs |
 | `manifest.json` | format, tid, serverversion, dialekt, antal, SHA-256 för varje fil |
 
 Noder identifieras med schemats unika nycklar (`id`, `guid`, `project_id`, …),
@@ -24,7 +25,11 @@ främmande nycklar och alla från samma ögonblicksbild av databasen.
 och ingenting på en server utan graf (nivå 1 och 2). `manifest.json` anger
 `postgres` i `store_dialect`, antalet rader i `rows`, databasens senaste
 migrering i `store_migration` och `none` i `dialect` när det inte finns någon
-graf.
+graf. En server som har ett repo per projekt (`OPENCDE_GIT_ENABLED`) skriver
+vart och ett som en bundle efter raderna, så att det rymmer varje commit de
+nämner, med sin SHA-256 bland de andra och antalet i `repos`; återställningen
+prövar var och en och gör projektets repo av den, och vägrar en kopia med repon
+om inte `OPENCDE_GIT_ENABLED` är satt.
 
 Med serverns egna data i en egen graf (`OPENCDE_STORE_GRAPH_URI`,
 [ifc-db.md](../ifc-db.md)) håller en säkerhetskopia båda graferna i samma

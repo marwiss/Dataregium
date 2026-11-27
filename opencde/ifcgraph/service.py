@@ -57,6 +57,7 @@ from opencde.ifcgraph.gltf import LODS, build_glb
 from opencde.ifcgraph.maintenance import delete_geometry, drop_partial
 from opencde.logging import get_logger
 from opencde.postgres.database import Postgres
+from opencde.repos.git import Git
 from opencde.settings import Settings
 from opencde.storage import LocalStorage, make_key
 from opencde.store.accounts.postgres import team_store
@@ -213,7 +214,9 @@ class IfcGraphService:
         workcopy: Graph | None = None,
         store: Graph | None = None,
         postgres: Postgres | None = None,
+        git: Git | None = None,
     ) -> None:
+        self.git = git  # the projects' repositories (ADR 0030), for the versions the service writes
         self.workcopy = workcopy  # the second graph that holds the head model of every document (ADR 0024)
         # IFC-DB's models: the library's calls alone run here (ADR 0027). None without IFC-DB, where the BIM functions
         # run on the versions' files alone (tier 2, F59) and nothing is converted into a graph.

@@ -302,6 +302,14 @@ ligger under historiken sparas med appens vakt för den sist i sina data, en lö
 uppladdningen lämnade den utanför; versionens storlek och SHA-256 är den sparade
 filens.
 
+Samma versions metadata har `git_commit` när servern har ett repo per projekt
+(`git` i kapabiliteterna, `OPENCDE_GIT_ENABLED`): varje version av en textfil
+(`.ifc`, `.ids`, `.xml`, `.json`, `.geojson`, `.csv`, `.txt`, `.md`) är då en
+commit på projektets `main`, i `documents/<dokumentets id>/model.ifc` och så
+vidare, med den som laddade upp som författare. En uppladdnings filpost kan ge
+`message`, högst 2000 tecken, till commiten; servern lämnar utanför styrtecken
+utom radbrytningar. Andra filer, som `.ifczip` eller en PDF, har ingen commit.
+
 En version som rymmer en IFC-modell kan också få namngivna frågor, som dess
 våningar, rummens area eller en egenskaps värde. Det är ett tillägg som svarar
 på samma token och som kapabilitetsdokumentet annonserar i `ifc_queries`. Se

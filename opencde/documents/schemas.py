@@ -22,6 +22,7 @@ MAX_FILES = 100
 MAX_QUERY_IDS = 1000
 MAX_TITLE = 200
 MAX_VERSION_NUMBER = 50
+MAX_MESSAGE = 2000
 _HTTP_URL = re.compile(r"^https?://[^\s]+$", re.IGNORECASE)
 _EXTENSION = re.compile(r"^\.[A-Za-z0-9]{1,16}$")
 
@@ -155,6 +156,13 @@ class FileToUpload(DocumentsModel):
         description="Extension: the version of `document_id` this upload builds on. The completion answers 412 "
         "`version_conflict` when the document already has a newer version, and the new version's metadata records the "
         "base.",
+    )
+    message: str | None = Field(
+        None,
+        max_length=MAX_MESSAGE,
+        description="Extension: what the new version changes, for its commit when the server keeps a repository per "
+        "project (`git` in the capabilities): text of at most 2000 characters, whose control characters but line "
+        "breaks the server leaves out.",
     )
 
 

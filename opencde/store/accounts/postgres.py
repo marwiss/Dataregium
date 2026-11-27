@@ -21,6 +21,7 @@ from opencde.auth.passwords import hash_password, verify_password
 from opencde.ids import hash_secret, is_uuid, new_id, new_secret, normalize_guid
 from opencde.ifcgraph.maintenance import delete_geometry
 from opencde.logging import get_logger
+from opencde.repos.git import remove_repository
 from opencde.storage import LocalStorage
 from opencde.store.accounts.projects import (
     AI_POLICIES,
@@ -333,7 +334,8 @@ class PostgresProjectRepository:
         return await self.postgres.execute("DELETE FROM projects WHERE project_id = $1", project_id) > 0
 
     async def delete_with_files(self, project_id: str, storage: LocalStorage) -> bool:
-        """``delete``, and the stored files the project owned, so that deleting it frees the disk too."""
+        """``delete``, and the stored files the project owned and its repository (ADR 0030), so that deleting it frees
+        the disk too."""
         keys = await self.storage_keys(project_id)
         models = await self.model_ids(project_id)
         deleted = await self.delete(project_id)
@@ -347,6 +349,8 @@ class PostgresProjectRepository:
                 # A key the storage refuses was never one it wrote, and a file a worker holds open (Windows) stays.
                 # The project is gone by now, so the others still go, and the log names what stays.
                 log.warning("project_file_left", project_id=project_id, storage_key=key, error_type=type(exc).__name__)
+        if deleted and is_uuid(project_id) and not remove_repository(storage.root / "git", project_id):
+            log.warning("project_repo_left", project_id=project_id)
         return deleted
 
     async def storage_keys(self, project_id: str) -> list[str]:

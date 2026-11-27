@@ -9,6 +9,7 @@ from fastapi import Depends, Request
 
 from opencde.graph.graph import Graph
 from opencde.postgres.database import Postgres
+from opencde.repos.git import Git
 from opencde.settings import Settings
 from opencde.storage import LocalStorage
 from opencde.store.logbook.postgres import audit_log_store, request_log_store, sign_in_throttle_store
@@ -46,6 +47,11 @@ def get_postgres(request: Request) -> Postgres | None:
 
 def get_storage(request: Request) -> LocalStorage:
     return request.app.state.storage
+
+
+def get_git(request: Request) -> Git | None:
+    """The projects' repositories (ADR 0030), or None when the server keeps none."""
+    return getattr(request.app.state, "git", None)
 
 
 def get_users(
@@ -99,6 +105,7 @@ GraphDep = Annotated[Graph, Depends(get_graph)]
 PostgresDep = Annotated[Postgres | None, Depends(get_postgres)]
 ModelGraphDep = Annotated[Graph, Depends(get_model_graph)]
 StorageDep = Annotated[LocalStorage, Depends(get_storage)]
+GitDep = Annotated[Git | None, Depends(get_git)]
 UsersDep = Annotated[UserStore, Depends(get_users)]
 ProjectsDep = Annotated[ProjectStore, Depends(get_projects)]
 ClientsDep = Annotated[ClientStore, Depends(get_clients)]

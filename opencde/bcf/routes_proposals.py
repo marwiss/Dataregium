@@ -42,7 +42,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from opencde.accounts.roles import Role, at_least
 from opencde.bcf.schemas import CommentPOST, Component, Components, TopicPUT, ViewpointPOST, Visibility
 from opencde.bcf.topic_access import TopicCtx, TopicsDep
-from opencde.deps import ProjectsDep, SettingsDep, StorageDep
+from opencde.deps import GitDep, ProjectsDep, SettingsDep, StorageDep, UsersDep
 from opencde.documents.links import api_base
 from opencde.documents.routes_clash import camera_looking_at
 from opencde.documents.schemas import DocumentMetadataEntry, DocumentVersion
@@ -52,6 +52,7 @@ from opencde.errors import CODE_VERSION_CONFLICT, ApiError
 from opencde.ids import new_id
 from opencde.ifcgraph.parts import owning_objects
 from opencde.ifcgraph.service import STATE_CLEAN, IfcGraphDep, IfcGraphService
+from opencde.repos.writer import prepare
 from opencde.storage import LocalStorage, make_key
 from opencde.store.accounts.teams import TeamsDep
 from opencde.store.bcf.comments import CommentsDep
@@ -234,6 +235,8 @@ async def proposal_approve(
     storage: StorageDep,
     settings: SettingsDep,
     teams: TeamsDep,
+    users: UsersDep,
+    git: GitDep,
 ) -> DocumentVersion:
     """A `manager`, or the responsible of the one team whose part the change set touches, approves a `clean` trial:
     the answer is the new version as the Documents API gives it, with
@@ -297,6 +300,18 @@ async def proposal_approve(
         if provenance.get(name):
             metadata.append(DocumentMetadataEntry(name=name, value=[str(provenance[name])], data_type="string"))
     try:
+        proposing = await users.get_by_username(proposer)
+        commit = await prepare(
+            git,
+            project_id=topic.project_id,
+            path=storage.path(key),
+            file_name=latest.file_name,
+            title=latest.title,
+            author=proposer,
+            author_id=proposing.id if proposing else None,
+            message=f"Change set {topic.guid}, approved by {topic.username}",
+            base=base_index,
+        )
         record = await documents.create_version(
             project_id=topic.project_id,
             document_id=document_id,
@@ -313,6 +328,7 @@ async def proposal_approve(
             change_set_id=topic.guid,
             change_set=pack_report(list(change_set.get("changes") or [])),
             max_step_id=await anyio.to_thread.run_sync(stored_history, storage, key, latest.file_name),
+            commit=commit,
         )
     except BaseException:
         storage.delete(key)

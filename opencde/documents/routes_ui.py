@@ -20,7 +20,7 @@ from fastapi.responses import RedirectResponse, Response
 from opencde.accounts.roles import may_upload
 from opencde.auth.forms import FormTokenError
 from opencde.bcf.binary import file_response, sanitize_filename
-from opencde.deps import ProjectsDep, SettingsDep, StorageDep, UsersDep
+from opencde.deps import GitDep, ProjectsDep, SettingsDep, StorageDep, UsersDep
 from opencde.documents.assembly import store_stream
 from opencde.documents.links import api_base, with_query
 from opencde.documents.schemas import MAX_TITLE, MAX_VERSION_NUMBER
@@ -29,6 +29,7 @@ from opencde.documents.validation import report as validation_report
 from opencde.errors import CODE_UPLOAD_TOO_LARGE, ApiError
 from opencde.ids import is_uuid, new_id, normalize_guid
 from opencde.ifcgraph.service import IfcGraphDep
+from opencde.repos.writer import prepare
 from opencde.storage import TooLargeError, make_key
 from opencde.store.accounts.sessions import WebUser
 from opencde.store.documents.sessions import (
@@ -420,6 +421,7 @@ async def select_ui_upload(
     storage: StorageDep,
     settings: SettingsDep,
     ifcgraph: IfcGraphDep,
+    git: GitDep,
 ) -> Response:
     """Upload a file from the selection page so it can be selected right away (not part of the specification)."""
     require_same_origin(request)
@@ -480,6 +482,15 @@ async def select_ui_upload(
                     hint=tr(request, "docs.message.refused_hint"),
                 )
         try:
+            commit = await prepare(
+                git,
+                project_id=project_id,
+                path=storage.path(key),
+                file_name=file_name,
+                title=title,
+                author=web_user.user.username,
+                author_id=web_user.user.id,
+            )
             record = await documents.create_version(
                 project_id=project_id,
                 document_id=None,
@@ -498,6 +509,7 @@ async def select_ui_upload(
                     project_name=project.name if project else "",
                 ),
                 max_step_id=await anyio.to_thread.run_sync(stored_history, storage, key, file_name),
+                commit=commit,
             )
         except BaseException:
             storage.delete(key)

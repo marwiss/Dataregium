@@ -175,6 +175,20 @@ def listen_check(settings: Settings) -> Check:
     return Check("local_listen", False, "local_not_in_container")
 
 
+async def git_check(settings: Settings) -> Check:
+    """Whether the projects' repositories can be written (ADR 0030): git answers, and the server's own data is in
+    PostgreSQL, as a server whose data is in the graph keeps none (F99 a)."""
+    if not settings.git_on:
+        return Check("git", False, "git_needs_postgres")
+    from opencde.repos.git import Git, GitError
+
+    try:
+        version = await Git(settings.data_dir / "git", settings.git_path, 20).version()
+    except GitError:
+        return Check("git", False, "git_missing", {"path": settings.git_path})
+    return Check("git", True, "git_ok", {"version": version})
+
+
 async def run_checks(
     settings: Settings,
     graph: Graph,
@@ -193,6 +207,8 @@ async def run_checks(
     if settings.bim_on:  # the BIM functions run IfcOpenShell in their workers (F59)
         ready = importlib.util.find_spec("ifcopenshell") is not None
         checks.append(Check("bim", ready, "bim_ready" if ready else "bim_without_extra"))
+    if settings.git_enabled:
+        checks.append(await git_check(settings))
     https = settings.public_url.startswith("https://")
     fine = https or settings.environment != "production"
     checks.append(

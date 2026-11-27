@@ -394,6 +394,14 @@ class Settings(BaseSettings):
         "check of each upload and the precheck, the diff, the clash check, the rooms, and the change sets' trial "
         "and approval, each in a worker process with IfcOpenShell (needs the ifc-db extra). IFC-DB brings them too.",
     )
+    git_enabled: bool = Field(
+        False,
+        description="A git repository per project, every version of a text file a commit on its main (ADR 0030): "
+        "tiers 2 and 3, with the server's own data in PostgreSQL (OPENCDE_STORE_URL), and git on PATH or "
+        "OPENCDE_GIT_PATH.",
+    )
+    git_path: str = Field("git", min_length=1, description="The git program the repositories are written with.")
+    git_timeout_seconds: int = Field(120, ge=5, le=3600, description="Kill a git call that takes longer.")
     # The IFC-DB module: read as OPENCDE_IFC_DB_*, and still as OPENCDE_IFC_LPG_* and OPENCDE_IFCGRAPH_* (see `_ifc`).
     ifcgraph_enabled: bool = Field(
         False,
@@ -580,6 +588,8 @@ class Settings(BaseSettings):
                 raise ValueError(f"OPENCDE_MCP_ENABLED is tier 2 (bim-gis), beyond {name}")
             if self.bim_enabled:
                 raise ValueError(f"OPENCDE_BIM_ENABLED is tier 2 (bim-gis), beyond {name}")
+            if self.git_enabled:
+                raise ValueError(f"OPENCDE_GIT_ENABLED is tier 2 (bim-gis), beyond {name}")
         if self.ifcgraph_enabled:
             raise ValueError(f"OPENCDE_IFC_DB_ENABLED is tier 3 (experimental), beyond {name}")
         if self.store_url is None:
@@ -714,6 +724,12 @@ class Settings(BaseSettings):
         """Whether the BIM functions on the IFC files run: in tier 2 with OPENCDE_BIM_ENABLED, and with IFC-DB, which
         brings them along with its graph."""
         return self.bim_enabled or self.ifcgraph_enabled
+
+    @property
+    def git_on(self) -> bool:
+        """Whether the projects' repositories are written (ADR 0030): with OPENCDE_GIT_ENABLED and the server's own
+        data in PostgreSQL; a server whose own data is in the graph gets none (F99 a)."""
+        return self.git_enabled and self.store_url is not None
 
     @property
     def uses_graph(self) -> bool:

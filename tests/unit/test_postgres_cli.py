@@ -169,7 +169,7 @@ def test_backup_and_restore_of_postgresql_without_a_graph(world: World, tmp_path
     world.database.holding({"users": [{"id": "u1", "username": "anna"}]})
     done = CliRunner().invoke(app, ["backup", str(tmp_path / "backups")])
     assert done.exit_code == 0, done.output
-    assert "1 rows of PostgreSQL, migration 0008" in done.output
+    assert "1 rows of PostgreSQL, migration 0009" in done.output
     (folder,) = (tmp_path / "backups").iterdir()
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
     assert (manifest["store_dialect"], manifest["rows"], manifest["nodes"], manifest["dialect"]) == (
@@ -204,7 +204,7 @@ def test_the_doctor_reports_postgresql_and_its_migrations(world: World) -> None:
     for line in (
         "OK      Graph database: not used: PostgreSQL holds the server's own data and IFC-DB is off",
         f"OK      The server's own data: PostgreSQL at {URL}",
-        "OK      Schema of the server's own data: 8 of 8 migrations applied, the last 0008_document_step_ids",
+        "OK      Schema of the server's own data: 9 of 9 migrations applied, the last 0009_project_repos",
     ):
         assert line in done.output, done.output
     assert world.ifc.statements == [] and world.database.closed
@@ -220,8 +220,8 @@ async def test_the_doctor_tells_a_silent_a_behind_and_a_newer_postgresql(tmp_pat
     silent = await doctor.postgres_checks(settings, Silent())  # ty: ignore[invalid-argument-type]
     assert [(c.ok, c.detail_key) for c in silent] == [(False, "postgres_silent"), (False, "schema_no_database")]
     for ledger, ok, detail, words in (
-        (SHIPPED[:4], False, "migrations_short", "4 of 8 migrations applied, the last 0004_bcf; start the server"),
-        ([*SHIPPED, {"version": 9, "name": "0009_later"}], False, "migrations_newer", "know: 0009"),
+        (SHIPPED[:4], False, "migrations_short", "4 of 9 migrations applied, the last 0004_bcf; start the server"),
+        ([*SHIPPED, {"version": 10, "name": "0010_later"}], False, "migrations_newer", "know: 0010"),
     ):
         database = Database()
         database.answer = lambda query, args, ledger=ledger: (

@@ -202,6 +202,7 @@ def test_the_migrations_are_numbered_from_one_without_gaps(tmp_path: Path) -> No
         (6, "0006_logs"),
         (7, "0007_project_models"),
         (8, "0008_document_step_ids"),
+        (9, "0009_project_repos"),
     ], "every area's, in order"
     for names, words in ((["0001_a.sql", "0003_c.sql"], "without gaps"), (["1_a.sql"], "NNNN_name.sql")):
         folder = tmp_path / names[0]
@@ -926,7 +927,7 @@ async def test_a_version_is_made_in_one_transaction_with_the_next_index_and_its_
     assert record.document_id == "d-9" and record.version_index == 1 and record.metadata[0]["name"] == "file_name"
     made = fake.statements[1][1]
     assert made[3] == "editor" and made[5] == "1", "the author joins users by name; the number is the index"
-    assert made[13:] == (None, None, None, None), "no lineage without a version it was built on"
+    assert made[13:] == (None, None, None, None, None), "no lineage or commit without a version and a repository"
 
     fake.statements.clear()
     record = await repository.create_version(
@@ -938,7 +939,7 @@ async def test_a_version_is_made_in_one_transaction_with_the_next_index_and_its_
         documents.DOCUMENT_MAX_STEP_ID,
     ]
     assert fake.statements[0][1] == ("p-1", "d-9", "Plan") and record.version_index == 4
-    assert fake.statements[1][1][13:] == (3, "manager", "t-1", "x")
+    assert fake.statements[1][1][13:] == (3, "manager", "t-1", "x", None)
 
 
 async def test_a_version_is_refused_as_the_graph_refuses_it() -> None:

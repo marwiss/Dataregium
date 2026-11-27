@@ -72,6 +72,7 @@ from opencde.postgres.cleanup import delete_expired as delete_expired_rows
 from opencde.postgres.database import wait_for_postgres
 from opencde.postgres.schema import migrate
 from opencde.ratelimit import PathRateLimitMiddleware, install_rate_limiting
+from opencde.repos.git import Git
 from opencde.requestlog import RequestLogMiddleware, RequestLogWriter
 from opencde.settings import LOOPBACK_HOSTS, Settings
 from opencde.store.logbook.postgres import request_log_store
@@ -140,6 +141,9 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
         # the IFC graph's connection is made, as the choosers take it, but never connected.
         app.state.uses_graph = uses_graph(settings)
         app.state.storage = make_storage(settings)
+        app.state.git = (  # a repository per project (ADR 0030), with the server's own data in PostgreSQL
+            Git(settings.data_dir / "git", settings.git_path, settings.git_timeout_seconds) if settings.git_on else None
+        )
         app.state.ifcgraph = (  # the BIM functions, on the files alone without IFC-DB (tier 2, F59)
             IfcGraphService(
                 app.state.graph if settings.ifcgraph_enabled else None,
@@ -148,6 +152,7 @@ def create_app(settings: Settings | None = None, *, startup_wait_seconds: float 
                 workcopy=app.state.workcopy,
                 store=app.state.store,
                 postgres=app.state.postgres,
+                git=app.state.git,
             )
             if settings.bim_on
             else None

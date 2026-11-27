@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from opencde.graph.graph import Graph
     from opencde.postgres.database import Postgres, Tx
     from opencde.settings import Settings
-    from opencde.store.protocols import DocumentStore, SelectionSessionStore, UploadSessionStore
+    from opencde.store.protocols import CommitHook, DocumentStore, SelectionSessionStore, UploadSessionStore
 
 MAX_TOKEN_LENGTH = 128  # longer is no token the server gave
 
@@ -71,13 +71,14 @@ def _record(row: dict[str, Any]) -> VersionRecord:
         author=row["author"],
         metadata=list(row["metadata"] or []),
         max_step_id=None if row.get("max_step_id") is None else int(row["max_step_id"]),
+        commit=row.get("commit"),
     )
 
 
 # -- documents and their versions --------------------------------------------------------------------------------
 
 LATEST = """
-SELECT d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
+SELECT d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.commit, v.id, v.version_index, v.version_number,
        v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
 FROM documents d
 JOIN memberships m ON m.project_id = d.project_id AND m.user_id = $1
@@ -88,7 +89,7 @@ ORDER BY v.version_index DESC
 LIMIT 1
 """
 VERSION = """
-SELECT d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
+SELECT d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.commit, v.id, v.version_index, v.version_number,
        v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
 FROM documents d
 JOIN memberships m ON m.project_id = d.project_id AND m.user_id = $1
@@ -97,7 +98,7 @@ JOIN document_versions v ON v.document_id = d.document_id AND v.version_index = 
 WHERE d.document_id = $2
 """
 VERSIONS = """
-SELECT d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
+SELECT d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.commit, v.id, v.version_index, v.version_number,
        v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
 FROM documents d
 JOIN memberships m ON m.project_id = d.project_id AND m.user_id = $1
@@ -109,7 +110,7 @@ ORDER BY v.version_index
 LATEST_MANY = """
 SELECT h.* FROM (
     SELECT DISTINCT ON (d.document_id)
-           d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
+           d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.commit, v.id, v.version_index, v.version_number,
            v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
     FROM documents d
     JOIN memberships m ON m.project_id = d.project_id AND m.user_id = $1
@@ -123,7 +124,7 @@ ORDER BY h.document_id COLLATE "C"
 LATEST_IN_PROJECTS = """
 SELECT h.* FROM (
     SELECT DISTINCT ON (d.document_id)
-           d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
+           d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.commit, v.id, v.version_index, v.version_number,
            v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
     FROM documents d
     JOIN memberships m ON m.project_id = d.project_id AND m.user_id = $1
@@ -173,6 +174,13 @@ WHERE d.project_id = $1 AND d.document_id = $2 AND d.latest_index = $4
 RETURNING d.latest_index AS index
 """
 DOCUMENT_LATEST = "SELECT latest_index AS index FROM documents WHERE project_id = $1 AND document_id = $2"
+#: The project's lock while its main moves (ADR 0030): a transaction-scoped advisory lock on a number from its id.
+PROJECT_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended($1, 30))"
+PROJECT_HEAD = "SELECT head FROM project_repos WHERE project_id = $1"
+PROJECT_HEAD_SET = """
+INSERT INTO project_repos (project_id, head, created_at) VALUES ($1, $2, $3)
+ON CONFLICT (project_id) DO UPDATE SET head = EXCLUDED.head
+"""
 #: The highest STEP id the document has had, raised and never lowered (UL-48); GREATEST passes NULL over, so that a
 #: version without a value returns the document's as it stands.
 DOCUMENT_MAX_STEP_ID = """
@@ -184,17 +192,18 @@ VERSION_INSERT = """
 WITH made AS (
     INSERT INTO document_versions AS v (
         id, document_id, version_index, version_number, creation_date, title, file_name, size_in_bytes, sha256,
-        storage_key, author, uploaded_by, metadata, parent_version_index, approved_by, change_set_id, change_set
+        storage_key, author, uploaded_by, metadata, parent_version_index, approved_by, change_set_id, change_set,
+        commit
     )
     SELECT $3, d.document_id, $5::integer, $6, $7, $8, $9, $10::bigint, $11, $12, u.username, u.id, $13::jsonb,
-           $14::integer, $15, $16, $17
+           $14::integer, $15, $16, $17, $18
     FROM documents d JOIN users u ON u.username = $4
     WHERE d.project_id = $1 AND d.document_id = $2
     RETURNING v.*
 )
 SELECT made.document_id, p.project_id, p.name AS project_name, made.id, made.version_index, made.version_number,
        made.creation_date, made.title, made.file_name, made.size_in_bytes, made.sha256, made.storage_key,
-       made.author, made.metadata
+       made.author, made.metadata, made.commit
 FROM made JOIN projects p ON p.project_id = $1
 """
 VERSIONS_SINCE = """
@@ -232,7 +241,7 @@ RETURNING version_id
 """
 # What the server's own jobs read of a project, by the project they were started in, not for a member.
 HEAD = """
-SELECT d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
+SELECT d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.commit, v.id, v.version_index, v.version_number,
        v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
 FROM documents d
 JOIN projects p ON p.project_id = d.project_id
@@ -255,7 +264,7 @@ WHERE d.project_id = $1 AND d.document_id = $2
 PROJECT_HEADS = """
 SELECT h.* FROM (
     SELECT DISTINCT ON (d.document_id)
-           d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
+           d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.commit, v.id, v.version_index, v.version_number,
            v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
     FROM documents d
     JOIN projects p ON p.project_id = d.project_id
@@ -272,7 +281,7 @@ LIMIT $3
 MEMBER_HEADS = """
 SELECT h.* FROM (
     SELECT DISTINCT ON (d.document_id)
-           d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.id, v.version_index, v.version_number,
+           d.document_id, p.project_id, p.name AS project_name, d.max_step_id, v.commit, v.id, v.version_index, v.version_number,
            v.creation_date, v.title, v.file_name, v.size_in_bytes, v.sha256, v.storage_key, v.author, v.metadata
     FROM documents d
     JOIN memberships m ON m.project_id = d.project_id AND m.user_id = $1
@@ -340,10 +349,13 @@ class PostgresDocumentRepository:
         change_set: str | None = None,
         on_latest: int | None = None,
         max_step_id: int | None = None,
+        commit: CommitHook | None = None,
     ) -> VersionRecord:
         """A new document (``document_id`` None) or a new version of an existing one, in one transaction: the
         document's row is locked while its next index is taken, and with ``on_latest`` only while its latest version
-        is still that one (412 otherwise). The rest as the graph's ``create_version``."""
+        is still that one (412 otherwise). With ``commit`` (ADR 0030) the project's lock is taken first, the
+        commit is made on the project's head, and the version's row, the head and main change in the transaction.
+        The rest as the graph's ``create_version``."""
         now = now_iso()
         version_id = new_id()
         new_document_id = document_id or requested_document_id or new_id()
@@ -351,17 +363,31 @@ class PostgresDocumentRepository:
         derived = parent_version_index is not None  # the lineage is kept for a version built on another only
 
         async def work(tx: Tx) -> dict[str, Any]:
+            head = None
+            if commit is not None:
+                await tx.execute(PROJECT_LOCK, project_id)
+                held = await tx.one(PROJECT_HEAD, project_id)
+                head = held["head"] if held else None
             if document_id is None:
-                head = await tx.one(DOCUMENT_INSERT, new_document_id, project_id, title, now)
+                taken = await tx.one(DOCUMENT_INSERT, new_document_id, project_id, title, now)
             elif on_latest is None:
-                head = await tx.one(DOCUMENT_NEXT, project_id, document_id, title)
+                taken = await tx.one(DOCUMENT_NEXT, project_id, document_id, title)
             else:
-                head = await tx.one(DOCUMENT_NEXT_ON, project_id, document_id, title, on_latest)
-                if head is None and (now_latest := await tx.one(DOCUMENT_LATEST, project_id, document_id)):
+                taken = await tx.one(DOCUMENT_NEXT_ON, project_id, document_id, title, on_latest)
+                if taken is None and (now_latest := await tx.one(DOCUMENT_LATEST, project_id, document_id)):
                     raise latest_moved(on_latest, now_latest["index"])
-            if head is None:
+            if taken is None:
                 raise HTTPException(404, "Document not found")
-            index = int(head["index"])
+            index = int(taken["index"])
+            made = None
+            if commit is not None:
+                made = await commit.make(
+                    head=head,
+                    document_id=new_document_id,
+                    version_index=index,
+                    version_number=version_number or str(index),
+                    created=now,
+                )
             row = await tx.one(
                 VERSION_INSERT,
                 project_id,
@@ -381,10 +407,14 @@ class PostgresDocumentRepository:
                 approved_by if derived else None,
                 change_set_id if derived else None,
                 change_set if derived else None,
+                made,
             )
             if row is None:
                 raise HTTPException(404, "Project not found")
             raised = await tx.one(DOCUMENT_MAX_STEP_ID, project_id, new_document_id, max_step_id)
+            if commit is not None and made is not None:
+                await tx.execute(PROJECT_HEAD_SET, project_id, made, now)
+                await commit.move(new=made, old=head)
             return {**row, "max_step_id": raised["max_step_id"] if raised else None}
 
         return _record(await self.postgres.write(work))

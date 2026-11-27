@@ -27,7 +27,7 @@ from opencde.errors import CODE_VERSION_CONFLICT, ApiError
 from opencde.graph.graph import Graph, Tx
 from opencde.ids import new_id
 from opencde.store.jobs.conversions import STATE_DONE
-from opencde.store.protocols import DocumentStore
+from opencde.store.protocols import CommitHook, DocumentStore
 from opencde.timeutil import now_iso
 
 
@@ -48,6 +48,7 @@ class VersionRecord:
     author: str
     metadata: list[dict[str, Any]]
     max_step_id: int | None = None  # the highest STEP id the document has had (UL-48), None while unknown
+    commit: str | None = None  # the version's commit on its project's main (ADR 0030), None for a file that has none
 
     @property
     def extension(self) -> str:
@@ -74,6 +75,9 @@ class VersionRecord:
             entries.append(
                 DocumentMetadataEntry(name=MAX_STEP_ID, value=[str(self.max_step_id)], data_type="integer64")
             )
+        if self.commit is not None:
+            entries = [entry for entry in entries if entry.name != GIT_COMMIT]
+            entries.append(DocumentMetadataEntry(name=GIT_COMMIT, value=[self.commit], data_type="string"))
         return entries
 
 
@@ -83,6 +87,8 @@ RETURN d.document_id AS document_id, p.project_id AS project_id, p.name AS proje
 """
 #: The metadata entry with the highest STEP id a document has had (SA-103).
 MAX_STEP_ID = "ifc_max_step_id"
+#: The metadata entry with a version's commit on its project's main (ADR 0030).
+GIT_COMMIT = "git_commit"
 
 
 def latest_moved(base: int, latest: Any) -> ApiError:
@@ -283,6 +289,7 @@ class DocumentRepository:
         change_set: str | None = None,
         on_latest: int | None = None,
         max_step_id: int | None = None,
+        commit: CommitHook | None = None,
     ) -> VersionRecord:
         """A new document (``document_id`` None) or a new version of an existing one, in one transaction.
 
@@ -293,7 +300,10 @@ class DocumentRepository:
         With ``on_latest`` the version is made only while the document's latest version is still that one, as an
         upload on a base version asks (412 otherwise); the document's write lock is taken before its index is read.
         ``max_step_id`` raises the highest STEP id the document has had (``opencde.documents.step``), never lowers it.
+        A graph store keeps no repositories (ADR 0030, F99 a), so ``commit`` is refused here.
         """
+        if commit is not None:
+            raise ValueError("a server whose own data is in the graph keeps no repositories (ADR 0030)")
         now = now_iso()
         version_id = new_id()
         new_document_id = document_id or requested_document_id or new_id()

@@ -8,6 +8,7 @@
 | `relationships.jsonl.gz` | every relationship, with start and end node named by their unique keys |
 | `store.jsonl.gz` | with PostgreSQL: every row of the server's own data, one JSON object per line |
 | `storage.tar.gz` | the storage directory: documents, snapshots, bitmaps, snippets |
+| `git/<project id>.bundle` | with `OPENCDE_GIT_ENABLED`: each project's repository, every ref |
 | `manifest.json` | format, time, server version, dialect, counts, SHA-256 of each file |
 
 Nodes are identified by the unique keys of the schema (`id`, `guid`,
@@ -24,7 +25,11 @@ in the order of their foreign keys and all from one snapshot of the database.
 and nothing on a server without a graph (tiers 1 and 2). `manifest.json` names
 `postgres` in `store_dialect`, the number of rows in `rows`, the database's
 last migration in `store_migration`, and `none` in `dialect` when there is no
-graph.
+graph. A server that keeps a repository per project (`OPENCDE_GIT_ENABLED`)
+writes each as a bundle after the rows, so that it holds every commit they
+name, with its SHA-256 among the others and their number in `repos`; the
+restore verifies each and makes the project's repository from it, and refuses
+a backup with repositories unless `OPENCDE_GIT_ENABLED` is set.
 
 With the server's own data in a graph of its own (`OPENCDE_STORE_GRAPH_URI`,
 [ifc-db.md](../ifc-db.md)), one backup holds both graphs in the same files,

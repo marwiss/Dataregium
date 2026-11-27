@@ -124,6 +124,11 @@ def capabilities(settings: Settings) -> dict[str, Any]:
                 "url": "/documents/1.0/upload-documents",
                 "for": "confidential clients an administrator approved",
             },
+            "git": (
+                {"enabled": True, "ifcmerge": False, "max_message": 2000}
+                if settings.git_on and settings.offers("documents")
+                else {"enabled": False}
+            ),
             "ifc_diff": (
                 {
                     "enabled": True,

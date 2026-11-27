@@ -29,7 +29,16 @@ from opencde import audit
 from opencde.accounts.roles import may_upload
 from opencde.auth.dependencies import DocumentsPrincipal
 from opencde.bcf.binary import file_response, receive_upload
-from opencde.deps import AuditLogDep, ClientsDep, ProjectsDep, SettingsDep, StorageDep, UsersDep, client_ip
+from opencde.deps import (
+    AuditLogDep,
+    ClientsDep,
+    GitDep,
+    ProjectsDep,
+    SettingsDep,
+    StorageDep,
+    UsersDep,
+    client_ip,
+)
 from opencde.documents.assembly import AssemblyError, assemble
 from opencde.documents.links import api_base, part_ranges, precheck_url, publication_url, validation_report_url
 from opencde.documents.schemas import (
@@ -63,6 +72,8 @@ from opencde.etag import etag_for, matches
 from opencde.ids import is_uuid, new_id, normalize_guid
 from opencde.ifcgraph.service import IfcGraphDep, IfcGraphService
 from opencde.ratelimit import RATE_UPLOAD, limiter
+from opencde.repos.git import Git
+from opencde.repos.writer import prepare
 from opencde.storage import make_key
 from opencde.store.documents.sessions import (
     FILE_CANCELLED,
@@ -163,6 +174,7 @@ async def upload_documents(
             "state": "pending",
             "version_index": None,
             "base_version_index": item.base_version_index,
+            "message": item.message,
         }
         if headless:
             entry.update(
@@ -362,6 +374,7 @@ async def _complete(
     storage: StorageDep,
     base: str,
     ifcgraph: IfcGraphService | None = None,
+    git: Git | None = None,
 ) -> DocumentVersion:
     files = list(session.files)
     item = files[file_index]
@@ -428,6 +441,17 @@ async def _complete(
             details={"report": precheck_url(base, project_id, precheck_id)},
         )
     try:
+        commit = await prepare(
+            git,
+            project_id=project_id,
+            path=storage.path(target),
+            file_name=item["file_name"],
+            title=item["title"],
+            author=session.username,
+            author_id=session.user_id,
+            message=item.get("message"),
+            base=None if base_version is None else int(base_version),
+        )
         record = await documents.create_version(
             project_id=project_id,
             document_id=item.get("document_id"),
@@ -454,6 +478,7 @@ async def _complete(
             parent_version_index=None if base_version is None else int(base_version),
             on_latest=None if base_version is None else int(base_version),  # a second upload on the same base: 412
             max_step_id=await anyio.to_thread.run_sync(stored_history, storage, target, item["file_name"]),
+            commit=commit,
         )
     except BaseException:
         storage.delete(target)
@@ -518,6 +543,7 @@ async def upload_completion(
     storage: StorageDep,
     settings: SettingsDep,
     ifcgraph: IfcGraphDep,
+    git: GitDep,
 ) -> Response:
     """Assemble the parts, verify the size, store the file and create the version.
 
@@ -549,6 +575,7 @@ async def upload_completion(
             storage=storage,
             base=base,
             ifcgraph=ifcgraph,
+            git=git,
         )
     )
     done, _ = await asyncio.wait({task}, timeout=KEEPALIVE_AFTER_SECONDS)

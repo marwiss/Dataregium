@@ -19,13 +19,16 @@ import secrets
 import sys
 from collections.abc import Awaitable, Callable, Coroutine
 from pathlib import Path
-from typing import Annotated, Any, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, TypeVar
 from urllib.parse import urlsplit
 
 import typer
 
 from opencde import __version__
-from opencde.settings import LOOPBACK_HOSTS, Tier, in_a_container
+from opencde.settings import LOOPBACK_HOSTS, Settings, Tier, in_a_container
+
+if TYPE_CHECKING:
+    from opencde.repos.git import Git
 
 app = typer.Typer(no_args_is_help=True, help="Dataregium OpenCDE server.", rich_markup_mode="markdown")
 user_app = typer.Typer(no_args_is_help=True, help="Manage users and their project roles.")
@@ -428,6 +431,13 @@ def cleanup() -> None:
     print(f"OK      deleted {deleted} expired {what}")
 
 
+def _git(settings: Settings) -> Git | None:
+    """The projects' repositories (ADR 0030), when the server keeps them."""
+    from opencde.repos.git import Git
+
+    return Git(settings.data_dir / "git", settings.git_path, settings.git_timeout_seconds) if settings.git_on else None
+
+
 @app.command()
 def backup(
     target: Annotated[Path, typer.Argument(help="Directory that receives a new, timestamped backup folder.")],
@@ -447,6 +457,7 @@ def backup(
             folder,
             store=graphs.store,
             postgres=graphs.postgres,
+            git=_git(settings),
         )
 
     try:
@@ -457,6 +468,8 @@ def backup(
     print(f"        {manifest.nodes} nodes, {manifest.relationships} relationships, {manifest.files} files")
     if manifest.rows is not None:
         print(f"        {manifest.rows} rows of PostgreSQL, migration {manifest.store_migration:04d}")
+    if manifest.repos is not None:
+        print(f"        {manifest.repos} repositories of projects")
     if manifest.skipped_nodes:
         print(f"WARN    {manifest.skipped_nodes} nodes without a key were not exported")
 
@@ -498,6 +511,7 @@ def restore(
             source,
             store=graphs.store,
             postgres=graphs.postgres,
+            git=_git(settings),
         )
 
     try:

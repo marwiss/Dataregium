@@ -6,7 +6,7 @@
 FROM python:3.13-slim-trixie AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /bin/
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
-# git fetches IFC-DB at the commit uv.lock names, until it is on PyPI (ADR 0014). Only this stage has it.
+# git fetches IFC-DB at the commit uv.lock names, until it is on PyPI (ADR 0014).
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
@@ -43,8 +43,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM python:3.13-slim-trixie AS runtime
 # Apply the distribution's security updates and remove pip: the runtime needs no
 # package manager, and pip's vendored libraries are what image scanners flag
-# between rebuilds of the base image.
-RUN apt-get update && apt-get -y upgrade --no-install-recommends && rm -rf /var/lib/apt/lists/* \
+# between rebuilds of the base image. git writes the projects' repositories
+# (ADR 0030), run as a program of its own.
+RUN apt-get update && apt-get -y upgrade --no-install-recommends \
+    && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* \
     && python -m pip uninstall -y pip \
     && groupadd --system --gid 10001 opencde \
     && useradd --system --uid 10001 --gid opencde --home-dir /app --shell /usr/sbin/nologin opencde \

@@ -43,8 +43,9 @@ from opencde.documents.step import stored_history
 from opencde.ids import new_id
 from opencde.ifcgraph.maintenance import drop_partial
 from opencde.logging import get_logger
+from opencde.repos.writer import prepare
 from opencde.storage import make_key
-from opencde.store.accounts.postgres import project_store
+from opencde.store.accounts.postgres import project_store, user_store
 from opencde.store.documents.versions import default_metadata
 from opencde.store.jobs.merges import KIND_MERGE, KIND_PREPARE, STATE_DONE, STATE_RUNNING
 from opencde.timeutil import later_iso
@@ -249,6 +250,18 @@ async def _as_version(
         DocumentMetadataEntry(name="approved_by", value=[author], data_type="string"),
     ]
     try:
+        commit = await prepare(
+            service.git,
+            project_id=project_id,
+            path=service.storage.path(key),
+            file_name=latest.file_name,
+            title=latest.title,
+            author=author,
+            author_id=(
+                user.id if (user := await user_store(service.store, service.postgres).get_by_username(author)) else None
+            ),
+            base=int(base["version_index"]),
+        )
         record = await service.documents.create_version(
             project_id=project_id,
             document_id=str(base["document_id"]),
@@ -263,6 +276,7 @@ async def _as_version(
             parent_version_index=int(base["version_index"]),
             approved_by=author,
             max_step_id=await asyncio.to_thread(stored_history, service.storage, key, latest.file_name),
+            commit=commit,
         )
     except BaseException:
         service.storage.delete(key)

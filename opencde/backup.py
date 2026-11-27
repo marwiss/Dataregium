@@ -47,6 +47,7 @@ from opencde.timeutil import now_iso
 if TYPE_CHECKING:
     from opencde.postgres.database import Postgres
     from opencde.postgres.from_graph import Gathered
+    from opencde.repos.git import Git
 
 FORMAT = 1
 BATCH = 1000
@@ -61,6 +62,8 @@ MODEL_LABELS = frozenset(label for label, _ in LIBRARY_UNIQUE)
 POSTGRES = "postgres"
 #: The store's rows, when the server's own data is in PostgreSQL.
 STORE_ROWS = "store.jsonl.gz"
+REPOS = "git"
+_BUNDLE = re.compile(r"^git/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.bundle$")
 GRAPH_FILES = ("nodes.jsonl.gz", "relationships.jsonl.gz", "storage.tar.gz")
 
 
@@ -86,9 +89,10 @@ class Manifest:
     store_dialect: str | None = None  # the store's, when the server's own data had a graph of its own or PostgreSQL
     rows: int | None = None  # the store's rows, when it was PostgreSQL
     store_migration: int | None = None  # and the last migration it had
+    repos: int | None = None  # the projects' repositories, each a bundle in ``git/`` (ADR 0030)
 
     def to_json(self) -> dict[str, Any]:
-        optional = ("store_dialect", "rows", "store_migration")
+        optional = ("store_dialect", "rows", "store_migration", "repos")
         fields = {key: value for key, value in self.__dict__.items() if key not in optional or value is not None}
         return {"format": FORMAT, **fields}
 
@@ -130,11 +134,13 @@ async def export(
     *,
     store: Graph | None = None,
     postgres: Postgres | None = None,
+    git: Git | None = None,
 ) -> Manifest:
     """Write ``nodes.jsonl.gz``, ``relationships.jsonl.gz``, ``storage.tar.gz`` and ``manifest.json``: from the IFC
     graph ``graph``, and from the ``store`` when it is another graph, IFC-DB's nodes from the one and the server's
     own from the other. With ``postgres`` the server's own data is its rows, in ``store.jsonl.gz``, and only IFC-DB's
-    nodes come from ``graph``, which is None when the server uses no graph."""
+    nodes come from ``graph``, which is None when the server uses no graph. With ``git`` each project's repository is a
+    bundle, ``git/<project_id>.bundle``, taken after the rows, so that it holds every commit they name."""
     from opencde.postgres import tables
     from opencde.postgres.schema import applied
 
@@ -180,7 +186,15 @@ async def export(
                 archive.add(storage.path(key), arcname=key)
                 files += 1
 
-    names = (*GRAPH_FILES, STORE_ROWS) if postgres is not None else GRAPH_FILES
+    bundles: list[str] = []
+    if git is not None and postgres is not None:
+        (target_dir / REPOS).mkdir()
+        for project_id in git.projects():
+            name = f"{REPOS}/{project_id}.bundle"
+            if await git.bundle(project_id, target_dir / name):
+                bundles.append(name)
+
+    names = (*GRAPH_FILES, STORE_ROWS, *bundles) if postgres is not None else GRAPH_FILES
     checksums = {name: _sha256(target_dir / name) for name in names}
     if postgres is not None:
         store_dialect = POSTGRES
@@ -198,6 +212,7 @@ async def export(
         store_dialect=store_dialect,
         rows=rows,
         store_migration=migration,
+        repos=len(bundles) if git is not None and postgres is not None else None,
     )
     (target_dir / "manifest.json").write_text(json.dumps(manifest.to_json(), indent=2), encoding="utf-8")
     return manifest
@@ -305,13 +320,21 @@ async def restore(
     *,
     store: Graph | None = None,
     postgres: Postgres | None = None,
+    git: Git | None = None,
 ) -> Manifest:
     """Load a backup into an empty database and storage; the caller wipes first when needed. With a ``store`` apart
     from the IFC graph ``graph``, IFC-DB's nodes go to the IFC graph and every other node to the store, whichever
     graphs the backup was taken from; a relationship between the two, which no database can hold, is left out. With
     ``postgres`` the server's own data goes there, from a backup of PostgreSQL or of a graph, and IFC-DB's nodes to
-    ``graph``, which is None when the server uses no graph."""
+    ``graph``, which is None when the server uses no graph. Each repository in it comes back from its bundle with
+    ``git``, for a project among the rows; a backup with repositories needs ``git``."""
     manifest = read_manifest(source_dir)
+    bundles = sorted(name for name in manifest.checksums if name.startswith(f"{REPOS}/"))
+    if bundles and (git is None or postgres is None):
+        raise BackupError(
+            f"the backup holds {len(bundles)} repositories of projects: restore it with OPENCDE_GIT_ENABLED and "
+            "OPENCDE_STORE_URL (ADR 0030)"
+        )
     if postgres is not None:
         await _restore_into_postgres(graph, postgres, source_dir, manifest)
     elif manifest.store_dialect == POSTGRES:
@@ -326,7 +349,24 @@ async def restore(
             if not member.isfile() or not _is_storage_key(member.name):
                 raise BackupError(f"unexpected entry in storage archive: {member.name!r}")
         archive.extractall(storage.root, filter="data")
+    if bundles and git is not None and postgres is not None:
+        await _restore_repos(git, postgres, source_dir, bundles)
     return manifest
+
+
+async def _restore_repos(git: Git, postgres: Postgres, source_dir: Path, bundles: list[str]) -> None:
+    """Each bundle back as its project's repository: a name that is a UUID, of a project among the restored rows."""
+    from opencde.repos.git import GitError
+
+    known = {row["project_id"] for row in await postgres.run("SELECT project_id FROM projects")}
+    for name in bundles:
+        project_id = name.removeprefix(f"{REPOS}/").removesuffix(".bundle")
+        if not _BUNDLE.match(name) or project_id not in known:
+            raise BackupError(f"unexpected repository in the backup: {name!r}")
+        try:
+            await git.unbundle(project_id, source_dir / name)
+        except GitError as exc:
+            raise BackupError(f"{name} could not be restored: {exc}") from None
 
 
 async def _restore_nodes(source_dir: Path, targets: dict[bool, Graph | None]) -> None:

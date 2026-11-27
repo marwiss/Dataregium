@@ -35,6 +35,7 @@ def test_capabilities_document_has_the_agreed_shape_and_no_secrets(client: TestC
         "publication",
         "headless_uploads",
         "ifc_diff",
+        "git",
         "ifc_geometry",
         "ifc_changes",
         "ifc_merge",
@@ -58,6 +59,7 @@ def test_capabilities_document_has_the_agreed_shape_and_no_secrets(client: TestC
     assert extensions["ifc_validation"] == {"enabled": False}, "the checks of an upload need the IFC-DB module"
     assert extensions["ifc_precheck"] == {"enabled": False}, "the precheck needs the IFC-DB module"
     assert extensions["ifc_diff"] == {"enabled": False}, "the diff needs the IFC-DB module"
+    assert extensions["git"] == {"enabled": False}, "no repositories until configured"
     assert extensions["ifc_geometry"] == {"enabled": False}, "the geometry needs the IFC-DB module"
     assert extensions["ifc_changes"]["snippet_type"] == "DataregiumIfcChangeSet", "the form of a proposed change"
     assert extensions["ifc_changes"]["ifc_proposals_url"] == "/documents/1.0/documents/{document_id}/ifc-proposals"

@@ -295,6 +295,14 @@ the history is kept with the app's guard of it at the end of its data, a loose
 upload left that one out; the version's size and SHA-256 are those of the file
 kept.
 
+The same version's metadata carries `git_commit` when the server keeps a repository
+per project (`git` in the capabilities, `OPENCDE_GIT_ENABLED`): every version of a
+text file (`.ifc`, `.ids`, `.xml`, `.json`, `.geojson`, `.csv`, `.txt`, `.md`) is
+then a commit on its project's `main`, at `documents/<document id>/model.ifc` and
+so on, with the uploader as author. An upload's file entry may give `message`, at
+most 2000 characters, for the commit; the server leaves out control characters but
+line breaks. Other files, such as `.ifczip` or a PDF, have no commit.
+
 A version that holds an IFC model can also be asked named queries, such as its
 storeys, the areas of its spaces or the value of a property: an extension that
 answers to the same token, and that the capabilities document announces in

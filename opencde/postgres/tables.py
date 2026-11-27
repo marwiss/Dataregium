@@ -140,6 +140,10 @@ SIGN_IN_THROTTLES_OUT = "SELECT to_jsonb(t) AS data FROM sign_in_throttles t ORD
 SIGN_IN_THROTTLES_IN = """
 INSERT INTO sign_in_throttles SELECT * FROM jsonb_populate_recordset(NULL::sign_in_throttles, $1::jsonb)
 """
+PROJECT_REPOS_OUT = "SELECT to_jsonb(t) AS data FROM project_repos t ORDER BY t.project_id OFFSET $1 LIMIT $2"
+PROJECT_REPOS_IN = """
+INSERT INTO project_repos SELECT * FROM jsonb_populate_recordset(NULL::project_repos, $1::jsonb)
+"""
 
 TABLES: tuple[Table, ...] = (
     Table("users", 1, USERS_OUT, USERS_IN),
@@ -177,6 +181,7 @@ TABLES: tuple[Table, ...] = (
     Table("audit_events", 6, AUDIT_EVENTS_OUT, AUDIT_EVENTS_IN),
     Table("request_log_entries", 6, REQUEST_LOG_ENTRIES_OUT, REQUEST_LOG_ENTRIES_IN),
     Table("sign_in_throttles", 6, SIGN_IN_THROTTLES_OUT, SIGN_IN_THROTTLES_IN),
+    Table("project_repos", 9, PROJECT_REPOS_OUT, PROJECT_REPOS_IN),
 )
 BY_NAME = {table.name: table for table in TABLES}
 #: Every table at once, for ``restore --force`` and ``seed --reset``, into a database with every migration.
@@ -185,7 +190,7 @@ TRUNCATE users, projects, memberships, teams, team_members, web_sessions, oauth_
          access_tokens, refresh_tokens, documents, document_versions, publications, upload_sessions, upload_parts,
          selection_sessions, topics, related_topics, header_files, document_references, comments, viewpoints,
          components, bitmaps, bcf_documents, bcf_events, conversions, validations, proposals, clashes, merges,
-         change_set_drafts, audit_events, request_log_entries, sign_in_throttles
+         change_set_drafts, audit_events, request_log_entries, sign_in_throttles, project_repos
 """
 PRESENT = "SELECT tablename FROM pg_tables WHERE schemaname = current_schema()"
 COLUMNS = """

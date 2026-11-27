@@ -24,6 +24,11 @@ are in the commit history.
   removed (`step_ids_removed`, in the first) that belong to it, and the instances no object reaches or that more than
   100 objects reach are listed as `unplaced` and `shared`; a re-export, or two documents, are compared by GlobalId
   (`by: "guid"`).
+- With `OPENCDE_GIT_ENABLED` (tiers 2 and 3, the server's own data in PostgreSQL) every version of a text file is a
+  commit on its project's `main`, made in the version's transaction, and its metadata names it in `git_commit`;
+  an upload's file entry may give `message` for the commit, and the capabilities announce `git`. The backup holds
+  each repository as a bundle and restores it, the repository goes with its project, the doctor says whether git
+  answers, and the image has git. PostgreSQL migration 0009.
 - The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
   the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
 

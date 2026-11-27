@@ -343,6 +343,17 @@ class BcfDocumentStore(Protocol):
 
 
 # -- The Documents area ----------------------------------------------------------------------------------
+class CommitHook(Protocol):
+    """A version's commit on its project's main (ADR 0030, ``opencde.repos.writer.VersionCommit``), which the store
+    asks for inside its transaction, under the project's lock: first the commit on the head it holds, then to move
+    main to it; the transaction rolls back if either fails."""
+
+    async def make(
+        self, *, head: str | None, document_id: str, version_index: int, version_number: str, created: str
+    ) -> str: ...
+    async def move(self, *, new: str, old: str | None) -> None: ...
+
+
 class DocumentStore(Protocol):
     """What ``DocumentRepository`` answers for; its own docstring says how."""
 
@@ -374,6 +385,7 @@ class DocumentStore(Protocol):
         change_set: str | None = None,
         on_latest: int | None = None,
         max_step_id: int | None = None,
+        commit: CommitHook | None = None,
     ) -> VersionRecord: ...
     async def versions_since(
         self, *, user_id: str, document_id: str, since: int, until: int
