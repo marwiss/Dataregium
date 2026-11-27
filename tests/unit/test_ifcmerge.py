@@ -16,25 +16,9 @@ from pathlib import Path
 import pytest
 
 from opencde.repos.merge import Merged, MergeError, environment, merge, re_exported, shape, why_not
+from tests.conftest import FIXTURES_DIR
 
-STAND_IN = r"""
-import json, shutil, sys, time
-flag, base, theirs, ours, merged = sys.argv[1:6]
-assert flag == "--prioritise-local"
-text = open(ours, encoding="utf-8").read()
-if "CONFLICT" in text:
-    report = {"status": "failed", "message": "Merge failed due to conflicts", "conflicts": [
-        {"type": "attribute_conflict", "entity_id": 5, "attribute_index": 3, "entity_class": "IfcWall",
-         "base_value": "'a'", "local_value": "'b\x07'", "remote_value": "'c'"}]}
-    print(json.dumps(report, indent=2).replace("\\u0007", "\x07"))
-    sys.exit(1)
-if "BROKEN" in text:
-    sys.exit(1)
-if "SLOW" in text:
-    time.sleep(30)
-print("Success!")
-shutil.copyfile(theirs, merged)
-"""
+STAND_IN = FIXTURES_DIR / "ifcmerge_stand_in.py"
 
 
 def model(*lines: str, schema: str = "IFC4") -> bytes:
@@ -87,8 +71,7 @@ def test_perl_gets_no_variable_that_loads_a_module(monkeypatch: pytest.MonkeyPat
 
 
 def _merge(tmp_path: Path, ours: bytes, seconds: float = 20) -> Merged:
-    stand_in = tmp_path / "stand_in.py"
-    stand_in.write_text(STAND_IN, encoding="utf-8")
+    stand_in = STAND_IN
     files = {}
     for name, data in (("b", model(WALL)), ("t", model(WALL)), ("o", ours)):
         files[name] = tmp_path / f"{name}.ifc"
@@ -169,3 +152,82 @@ def test_the_real_ifcmerge_merges_changes_to_two_attributes_and_reports_one_chan
     assert [(c["type"], c["entity_id"], c["attribute_index"]) for c in conflict.conflicts] == [
         ("attribute_conflict", 5, 3)
     ]
+
+
+def test_a_placement_both_sides_moved_is_a_conflict_ifcmerge_would_settle_by_itself(tmp_path: Path) -> None:
+    """F201 b: main and the upload each give the wall another placement; ifcmerge keeps main's without a word, and
+    the server reports it. A name both renamed is ifcmerge's own conflict, and an owner history its own choice."""
+    from opencde.repos.merge import placements_moved_twice, split_attributes
+
+    assert split_attributes(b"IFCWALL('a,b',$,(#1,#2),'it''s',#5)") == [b"'a,b'", b"$", b"(#1,#2)", b"'it''s'", b"#5"]
+    lines = (
+        "#2=IFCOWNERHISTORY($,$,$,$,$,$,$,0);",
+        "#3=IFCOWNERHISTORY($,$,$,$,$,$,$,1);",
+        "#10=IFCLOCALPLACEMENT($,$);",
+    )
+    base = tmp_path / "base.ifc"
+    base.write_bytes(model(*lines, "#5=IFCWALL('2O2Fr$t4X7Zf8NOew3FLOH',#2,'W',$,$,#10,$,$,$);"))
+    theirs = tmp_path / "theirs.ifc"
+    theirs.write_bytes(
+        model(*lines, "#5=IFCWALL('2O2Fr$t4X7Zf8NOew3FLOH',#3,'Main',$,$,#20,$,$,$);", "#20=IFCLOCALPLACEMENT(#10,$);")
+    )
+    ours = tmp_path / "ours.ifc"
+    ours.write_bytes(
+        model(*lines, "#5=IFCWALL('2O2Fr$t4X7Zf8NOew3FLOH',#2,'Mine',$,$,#21,$,$,$);", "#21=IFCLOCALPLACEMENT($,$);")
+    )
+    found = placements_moved_twice(base, theirs, ours)
+    assert found == [
+        {
+            "type": "placement_conflict",
+            "entity_id": 5,
+            "attribute_index": 6,
+            "entity_class": "IFCWALL",
+            "base_value": "#10",
+            "local_value": "#20",
+            "remote_value": "#21",
+        }
+    ]
+    assert placements_moved_twice(base, theirs, theirs) == [], "one side's change alone is no conflict"
+
+
+def test_the_doctor_tries_a_merge_of_its_own(tmp_path: Path) -> None:
+    from pydantic import SecretStr
+
+    from opencde.admin.doctor import ifcmerge_check
+    from tests.conftest import test_settings
+
+    common = {"ifcmerge_path": str(STAND_IN), "perl_path": sys.executable, "data_dir": tmp_path}
+    off = test_settings(tmp_path, **common)
+    assert asyncio.run(ifcmerge_check(off)).detail_key == "ifcmerge_needs_git"
+    on = test_settings(
+        tmp_path,
+        **common,
+        git_enabled=True,
+        bim_enabled=True,
+        store_url="postgresql://u@127.0.0.1:9/d",
+        store_password=SecretStr("x" * 20),
+    )
+    assert on.ifcmerge_on
+    wrong = asyncio.run(ifcmerge_check(on))
+    assert (wrong.ok, wrong.detail_key) == (False, "ifcmerge_wrong"), "the stand-in gives main's file back unmerged"
+    if REAL and shutil.which("perl"):
+        right = asyncio.run(ifcmerge_check(on.model_copy(update={"ifcmerge_path": REAL, "perl_path": "perl"})))
+        assert right.ok, right.detail
+
+
+def test_ifcmerges_conflicts_are_named_by_the_schemas_attributes() -> None:
+    pytest.importorskip("ifcopenshell", reason="the ifc-db extra is not installed")
+    from opencde.repos.conflicts import _change, attribute_name
+
+    assert (
+        attribute_name("IFC4", "IFCWALL", 3) == "Name"
+        and attribute_name("IFC2X3", "IfcLocalPlacement", 1) == "PlacementRelTo"
+    )
+    assert attribute_name("IFC4", "IFCWALL", 99) is None and attribute_name("IFC4", "IFCNOSUCH", 1) is None
+    named = _change(
+        {"type": "attribute_conflict", "entity_id": 5, "attribute_index": 6, "entity_class": "IFCWALL"}, "IFC4"
+    )
+    assert named == {"key": "#5.ObjectPlacement", "step_id": 5, "attribute": "ObjectPlacement", "op": "set"}
+    gone = _change({"type": "entity_deleted_and_modified", "entity_id": 7}, "IFC4")
+    assert (gone["key"], gone["op"]) == ("#7", "delete")
+    assert _change({"type": "class_changed", "entity_id": 8}, "IFC4")["op"] == "class"

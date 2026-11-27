@@ -123,7 +123,8 @@ jobs:
           COMMIT: ${{ matrix.commit }}
           SHA256: ${{ matrix.sha256 }}
       - run: uv sync --extra ifc-db
-      - run: uv run pytest -q tests/unit/test_ifcmerge.py
+      # The runner and the doctor's check, and an upload merged on PostgreSQL in a testcontainer.
+      - run: uv run pytest -q tests/unit/test_ifcmerge.py tests/integration/test_git_repos.py -k "ifcmerge or merged"
         env:
           OPENCDE_TEST_IFCMERGE: ${{ runner.temp }}/ifcmerge
 

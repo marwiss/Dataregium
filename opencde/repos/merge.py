@@ -165,3 +165,98 @@ async def merge(
         if isinstance(report, dict) and report.get("status") == "failed" and isinstance(report.get("conflicts"), list):
             return Merged(conflicts=[c for c in report["conflicts"] if isinstance(c, dict)])
     raise MergeError(f"ifcmerge ended with exit code {process.returncode}")
+
+
+# -- moved placements, which ifcmerge settles by itself (F201 b) ------------------------------------------------------
+
+_PLACEMENT = re.compile(rb"^IFC(LOCAL|LINEAR|GRID)PLACEMENT\b")
+_REFERENCE = re.compile(rb"^#([0-9]+)$")
+
+
+def split_attributes(body: bytes) -> list[bytes]:
+    """The top-level attributes of an instance's body ``CLASS(a,b,(c,d),'e,f')``, as written."""
+    start = body.find(b"(")
+    if start < 0 or not body.endswith(b")"):
+        return []
+    inner = body[start + 1 : -1]
+    parts: list[bytes] = []
+    depth = 0
+    quoted = False
+    at = 0
+    for index, byte in enumerate(inner):
+        if byte == 0x27:  # '
+            quoted = not quoted
+        elif quoted:
+            continue
+        elif byte == 0x28:  # (
+            depth += 1
+        elif byte == 0x29:  # )
+            depth -= 1
+        elif byte == 0x2C and depth == 0:  # ,
+            parts.append(inner[at:index].strip())
+            at = index + 1
+    parts.append(inner[at:].strip())
+    return parts
+
+
+def _lines(path: Path, wanted: set[int]) -> dict[int, bytes]:
+    """The bodies (``CLASS(...)``) of the instances ``wanted`` in a file, read line by line as ifcmerge reads it."""
+    found: dict[int, bytes] = {}
+    with path.open("rb") as stream:
+        while line := stream.readline(MAX_LINE):
+            if not line.startswith(b"#"):
+                continue
+            head, _, rest = line.partition(b"=")
+            if head[1:].isdigit() and int(head[1:]) in wanted:
+                found[int(head[1:])] = rest.rstrip().removesuffix(b";")
+    return found
+
+
+def placements_moved_twice(base: Path, theirs: Path, ours: Path) -> list[dict[str, Any]]:
+    """An attribute that both sides changed to different references to a placement, which ifcmerge settles for main
+    without a word: F201 b counts it as a conflict, in the form of ifcmerge's own (``type`` ``placement_conflict``).
+    The files are compared instance by instance first, so that only the few changed on both sides are read."""
+    import numpy as np
+
+    from opencde.documents.step import fingerprints
+
+    prints = []
+    for path in (base, theirs, ours):
+        with path.open("rb") as stream:
+            prints.append(fingerprints(stream))
+    if any(found.over for found in prints):
+        return []
+    size = max(len(found.prints) for found in prints)
+    arrays = []
+    for found in prints:
+        array = np.zeros(size, np.uint64)
+        array[: len(found.prints)] = np.frombuffer(found.prints, dtype=np.uint64)
+        arrays.append(array)
+    b, t, o = arrays
+    both = set(np.flatnonzero((b != 0) & (t != 0) & (o != 0) & (b != t) & (b != o) & (t != o)).tolist())
+    if not both:
+        return []
+    then, main, upload = _lines(base, both), _lines(theirs, both), _lines(ours, both)
+    candidates: list[tuple[int, int, bytes, bytes, bytes]] = []
+    for step_id in sorted(both):
+        old, mine, yours = (split_attributes(lines.get(step_id, b"")) for lines in (then, main, upload))
+        for index, (x, y, z) in enumerate(zip(old, mine, yours, strict=False)):
+            if x != y and x != z and y != z and _REFERENCE.match(y) and _REFERENCE.match(z):
+                candidates.append((step_id, index, x, y, z))
+    referred = {int(value[1:]) for *_, y, z in candidates for value in (y, z)}
+    classes = {**_lines(ours, referred), **_lines(theirs, referred)}
+    conflicts = []
+    for step_id, index, x, y, z in candidates:
+        if all(_PLACEMENT.match(classes.get(int(value[1:]), b"")) for value in (y, z)):
+            conflicts.append(
+                {
+                    "type": "placement_conflict",
+                    "entity_id": step_id,
+                    "attribute_index": index + 1,
+                    "entity_class": main[step_id].partition(b"(")[0].decode("ascii", "replace"),
+                    "base_value": x.decode("utf-8", "replace"),
+                    "local_value": y.decode("utf-8", "replace"),
+                    "remote_value": z.decode("utf-8", "replace"),
+                }
+            )
+    return conflicts

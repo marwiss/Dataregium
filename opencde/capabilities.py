@@ -125,7 +125,7 @@ def capabilities(settings: Settings) -> dict[str, Any]:
                 "for": "confidential clients an administrator approved",
             },
             "git": (
-                {"enabled": True, "ifcmerge": False, "max_message": 2000}
+                {"enabled": True, "ifcmerge": settings.ifcmerge_on, "max_message": 2000}
                 if settings.git_on and settings.offers("documents")
                 else {"enabled": False}
             ),

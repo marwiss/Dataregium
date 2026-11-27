@@ -65,16 +65,27 @@ def clean(text: str, limit: int) -> str:
 
 
 def message_of(
-    *, title: str, version_number: str, message: str | None, document_id: str, version_index: int, base: int | None
+    *,
+    title: str,
+    version_number: str,
+    message: str | None,
+    document_id: str,
+    version_index: int,
+    base: int | None,
+    merged_with: int | None = None,
+    subject: str | None = None,
 ) -> str:
     """The commit's message: the title and the version, the client's message, and trailers a clone can be read by."""
     first = clean(title, MAX_TITLE).replace("\n", " ") or "Document"
-    lines = [f"{first}: version {clean(version_number, 40).replace(chr(10), ' ') or version_index}", ""]
+    number = clean(version_number, 40).replace(chr(10), " ") or version_index
+    lines = [f"{first}: {subject or f'version {number}'}", ""]
     if message and (body := clean(message, MAX_MESSAGE)):
         lines += [body, ""]
     lines += [f"Dataregium-Document: {document_id}", f"Dataregium-Version: {version_index}"]
     if base is not None:
         lines.append(f"Dataregium-Base: {base}")
+    if merged_with is not None:
+        lines.append(f"Dataregium-Merged-With: {merged_with}")
     return "\n".join(lines) + "\n"
 
 
@@ -93,6 +104,12 @@ class VersionCommit:
     base: int | None = None
     commit: str | None = None  # what ``make`` gave
     parent: str | None = None  # what it was made on
+    # A merged upload (fas 5.3): the upload as it came, as a side commit on its base's commit, and the version a
+    # merge commit of it and main, which ``merged_with`` names.
+    side_blob: str | None = None
+    side_parent: str | None = None
+    merged_with: int | None = None
+    side: str | None = None  # the side commit ``make`` gave
 
     async def make(
         self, *, head: str | None, document_id: str, version_index: int, version_number: str, created: str
@@ -102,13 +119,35 @@ class VersionCommit:
         path = tree_path(document_id, self.file_name)
         if path is None:
             raise GitError("the file is not of a kind the repository holds")
-        tree = await self.git.tree(self.repository, self.parent, {path: self.blob})
         when = created
+        author = Person(clean(self.author, 200) or "unknown", f"{self.author_id or 'unknown'}@users.invalid", when)
+        parents = [self.parent] if self.parent else []
+        if self.side_blob is not None:
+            side_parent = (
+                self.side_parent if self.side_parent and await self.git.has(self.repository, self.side_parent) else None
+            )
+            self.side = await self.git.commit(
+                self.repository,
+                await self.git.tree(self.repository, side_parent, {path: self.side_blob}),
+                [side_parent] if side_parent else [],
+                author,
+                Person(*SERVER, when),
+                message_of(
+                    title=self.title,
+                    version_number=version_number,
+                    message=self.message,
+                    document_id=document_id,
+                    version_index=version_index,
+                    base=self.base,
+                    subject=f"upload on version {self.base}",
+                ),
+            )
+            parents.append(self.side)
         self.commit = await self.git.commit(
             self.repository,
-            tree,
-            [self.parent] if self.parent else [],
-            Person(clean(self.author, 200) or "unknown", f"{self.author_id or 'unknown'}@users.invalid", when),
+            await self.git.tree(self.repository, self.parent, {path: self.blob}),
+            parents,
+            author,
             Person(*SERVER, when),
             message_of(
                 title=self.title,
@@ -117,6 +156,7 @@ class VersionCommit:
                 document_id=document_id,
                 version_index=version_index,
                 base=self.base,
+                merged_with=self.merged_with,
             ),
         )
         return self.commit

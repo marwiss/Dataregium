@@ -31,6 +31,12 @@ are in the commit history.
   answers, and the image has git. PostgreSQL migration 0009. `opencde git migrate` gives the projects without a
   repository their history from their versions, and the doctor names how many still lack it. The cleaner's round
   repacks a repository whose loose objects have grown and takes away what a deletion left.
+- With the repositories, the BIM functions and ifcmerge, which the image now has at a pinned commit, an upload of
+  an IFC file on an older base is merged with the versions since rather than refused: the result is the next
+  version, with `merged_with_version_index`, and its commit a merge of `main` and a side commit with the upload as
+  it came. What both sides changed differently, and a placement both moved, is `412 version_conflict` with
+  `conflicts` and `conflict_details` as for an approval; the capabilities' `git.ifcmerge` says whether the server
+  merges, and the doctor tries a merge of its own.
 - The guide's command for the backup that moves a server from the graph to PostgreSQL runs in a one-off container of
   the pulled image, without the entrypoint's `opencde` and with `--no-deps`, and names the release's image tag.
 

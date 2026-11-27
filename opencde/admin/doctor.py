@@ -189,6 +189,51 @@ async def git_check(settings: Settings) -> Check:
     return Check("git", True, "git_ok", {"version": version})
 
 
+_TRIAL = (
+    "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('','2026-01-01T00:00:00+00:00',(''),(''),'','','');\n"
+    "FILE_SCHEMA(('IFC4'));\nENDSEC;\nDATA;\n{lines}ENDSEC;\nEND-ISO-10303-21;\n"
+)
+
+
+async def ifcmerge_check(settings: Settings) -> Check:
+    """Whether ifcmerge merges a small model of the doctor's own: two changes to one wall, one on each side."""
+    import tempfile
+    from pathlib import Path
+
+    from opencde.repos.merge import MergeError, merge
+
+    if not settings.ifcmerge_on:
+        return Check("ifcmerge", False, "ifcmerge_needs_git")
+    wall = "#1=IFCWALL('2O2Fr$t4X7Zf8NOew3FLOH',$,{name},{description},$,$,$,$,$);\n"
+    sides = {
+        "base.ifc": wall.format(name="'W'", description="$"),
+        "theirs.ifc": wall.format(name="'Main'", description="$"),
+        "ours.ifc": wall.format(name="'W'", description="'Mine'"),
+    }
+    with tempfile.TemporaryDirectory(prefix="ifcmerge-check-") as folder:
+        root = Path(folder)
+        for name, line in sides.items():
+            (root / name).write_text(_TRIAL.format(lines=line), encoding="utf-8")
+        (root / "merging").mkdir()
+        try:
+            done = await merge(
+                perl=settings.perl_path,
+                ifcmerge=str(settings.ifcmerge_path),
+                base=root / "base.ifc",
+                theirs=root / "theirs.ifc",
+                ours=root / "ours.ifc",
+                folder=root / "merging",
+                seconds=60,
+                memory_mb=settings.ifcmerge_memory_mb,
+            )
+        except MergeError as exc:
+            return Check("ifcmerge", False, "ifcmerge_failed", {"error": str(exc)[:200]})
+        merged = done.path.read_text(encoding="utf-8") if done.path is not None else ""
+    if "'Main','Mine'" not in merged:
+        return Check("ifcmerge", False, "ifcmerge_wrong", {"path": str(settings.ifcmerge_path)})
+    return Check("ifcmerge", True, "ifcmerge_ok", {"path": str(settings.ifcmerge_path)})
+
+
 #: The projects with versions of text files and no repository: their history comes with ``opencde git migrate``.
 WITHOUT_HISTORY = r"""
 SELECT count(DISTINCT d.project_id) AS projects
@@ -230,6 +275,8 @@ async def run_checks(
         checks.append(await git_check(settings))
         if settings.git_on and postgres is not None:
             checks.append(await git_history_check(postgres))
+    if settings.ifcmerge_path:
+        checks.append(await ifcmerge_check(settings))
     https = settings.public_url.startswith("https://")
     fine = https or settings.environment != "production"
     checks.append(

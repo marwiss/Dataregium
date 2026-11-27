@@ -5,6 +5,7 @@ main, made in the version's transaction, and a file that is not text gets none. 
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import subprocess
 from collections.abc import Iterator
@@ -192,3 +193,100 @@ def test_the_versions_from_before_the_repositories_get_their_history(settings: S
         third = _upload(client, world, editor, file, b"three\n", "3")
         commit = _metadata(client, editor, third)["git_commit"][0]
         assert _git(on, world.project_id, "rev-parse", f"{commit}^").strip() == migrated.head
+
+
+def test_an_upload_on_an_older_base_is_merged_with_the_versions_since(settings: Settings, clean_database: None) -> None:
+    """Fas 5.3 with a stand-in for ifcmerge (GPL, never here): an upload on version 1 when the latest is 2 becomes
+    version 3, a merge commit of main and a side commit that holds the upload as it came on version 1's commit; and
+    a collision is 412 with the conflicts in the approval's form."""
+    import sys
+
+    pytest.importorskip("ifcopenshell", reason="the ifc-db extra is not installed")
+    from tests.conftest import FIXTURES_DIR
+    from tests.integration.conftest import bim_settings
+
+    on = bim_settings(settings, ifcgraph_validate_uploads=False).model_copy(
+        update={
+            "git_enabled": True,
+            "ifcmerge_path": str(FIXTURES_DIR / "ifcmerge_stand_in.py"),
+            "perl_path": sys.executable,
+        }
+    )
+    data = (FIXTURES_DIR / "three_walls_gtin.ifc").read_bytes()
+    world = build_world(on)
+    with TestClient(create_app(on, startup_wait_seconds=30)) as client:
+        editor = login_as(client, world, "editor")
+        web_sign_in(client, world, "editor")
+        first = _upload(client, world, editor, {"file_name": "model.ifc"}, data, "1")
+        on_first = {"file_name": "model.ifc", "document_id": first["document_id"], "base_version_index": 1}
+        second = _upload(client, world, editor, on_first, data.replace(b"'YVT-A'", b"'Main'"), "2")
+        mine = data.replace(b"'YVT-B'", b"'Mine'")
+        third = _upload(client, world, editor, {**on_first, "message": "My wall"}, mine, "3")
+        assert third["version_index"] == 3
+        meta = _metadata(client, editor, third)
+        assert meta["merged_with_version_index"] == ["2"] and meta["base_version_index"] == ["1"]
+        commit = meta["git_commit"][0]
+        parents = _git(on, world.project_id, "rev-list", "--parents", "-n", "1", commit).split()
+        assert parents[:2] == [commit, _metadata(client, editor, second)["git_commit"][0]] and len(parents) == 3
+        side = parents[2]
+        path = f"documents/{first['document_id']}/model.ifc"
+        assert (
+            _git(on, world.project_id, "rev-parse", f"{side}^").strip()
+            == _metadata(client, editor, first)["git_commit"][0]
+        )
+        assert b"'Mine'" in _git(on, world.project_id, "cat-file", "blob", f"{side}:{path}").encode(), (
+            "the upload as it came"
+        )
+        assert "Dataregium-Merged-With: 2" in _git(on, world.project_id, "log", "-1", "--format=%B", commit)
+
+        # A collision: the stand-in reports one on #5's third attribute, as ifcmerge reports one.
+        started = start_upload(client, editor, [{"session_file_id": "f", **on_first}])
+        instructions = save_metadata(
+            client, started["upload_ui_url"], world.project_id, {"title_0": "Plan", "version_0": "4"}
+        )
+        colliding = data.replace(b"'YVT-B'", b"'CONFLICT'")
+        plan = client.post(
+            instructions,
+            json={"files": [{"session_file_id": "f", "size_in_bytes": len(colliding)}]},
+            headers=editor.headers,
+        ).json()["documents_to_upload"][0]
+        for part in plan["upload_file_parts"]:
+            chunk = colliding[part["content_range_start"] : part["content_range_end"] + 1]
+            assert client.put(part["url"], content=chunk, headers=editor.headers).status_code == 200
+        refused = client.post(plan["upload_completion"]["url"], headers=editor.headers)
+        assert refused.status_code == 412, refused.text
+        body = refused.json()
+        assert body["code"] == "version_conflict" and body["conflicts"] == ["#5.Name"]
+        detail = body["conflict_details"][0]
+        assert (detail["key"], detail["op"], detail["attribute"], detail["version_index"]) == (
+            "#5.Name",
+            "set",
+            "Name",
+            3,
+        )
+        assert body["merge"] == {"base_version_index": 1, "latest_version_index": 3}
+
+
+@pytest.mark.skipif(not os.environ.get("OPENCDE_TEST_IFCMERGE"), reason="OPENCDE_TEST_IFCMERGE names no ifcmerge")
+def test_the_real_ifcmerge_merges_two_walls_renamed_apart(settings: Settings, clean_database: None) -> None:
+    """The real ifcmerge, where CI fetches it: main renames one wall and an upload on version 1 another, and version 3
+    has both names."""
+    pytest.importorskip("ifcopenshell", reason="the ifc-db extra is not installed")
+    from tests.conftest import FIXTURES_DIR
+    from tests.integration.conftest import bim_settings
+
+    on = bim_settings(settings, ifcgraph_validate_uploads=False).model_copy(
+        update={"git_enabled": True, "ifcmerge_path": os.environ["OPENCDE_TEST_IFCMERGE"], "perl_path": "perl"}
+    )
+    data = (FIXTURES_DIR / "three_walls_gtin.ifc").read_bytes()
+    world = build_world(on)
+    with TestClient(create_app(on, startup_wait_seconds=30)) as client:
+        editor = login_as(client, world, "editor")
+        web_sign_in(client, world, "editor")
+        first = _upload(client, world, editor, {"file_name": "model.ifc"}, data, "1")
+        on_first = {"file_name": "model.ifc", "document_id": first["document_id"], "base_version_index": 1}
+        _upload(client, world, editor, on_first, data.replace(b"'YVT-A'", b"'Main'"), "2")
+        third = _upload(client, world, editor, on_first, data.replace(b"'YVT-B'", b"'Mine'"), "3")
+        merged = client.get(third["links"]["document_version_download"]["url"], headers=editor.headers).content
+        assert b"'Main'" in merged and b"'Mine'" in merged
+        assert _metadata(client, editor, third)["merged_with_version_index"] == ["2"]

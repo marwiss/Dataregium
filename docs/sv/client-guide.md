@@ -313,6 +313,21 @@ På en server som hade versioner innan den fick repon ger `opencde git migrate`
 varje projekt utan repo sin historik ur de versionerna, i den ordning de gjordes,
 och `opencde doctor` säger hur många projekt som fortfarande saknar den.
 
+När kapabiliteterna säger `"ifcmerge": true` i `git` sammanfogas en uppladdning av
+en IFC-fil som anger `base_version_index` när dokumentet redan har en nyare
+version, i stället för att avvisas: servern kör ifcmerge på basen, den senaste
+versionen och uppladdningen, behåller den senaste versionens STEP-id och flyttar
+uppladdningens nya uppåt, och resultatet blir nästa version, med
+`merged_with_version_index` i metadatan bredvid `base_version_index`. Dess commit
+är en sammanfogning av `main` och en sidocommit som rymmer uppladdningen som den
+kom, på basens commit. Klienten hämtar den nya versionen, som har båda sidorna.
+Det båda sidor ändrat olika, och en placering båda flyttat, ger `412
+version_conflict` i ett godkännandes form: `conflicts` som `#<step>.<attribut>`
+(eller `#<step>` för en instans som tagits bort på ena sidan eller fått en annan
+klass), `conflict_details` med `base`, `theirs` och `ours`, och `merge` med basen
+och den senaste versionen; en fil vars rader inte är en instans var, av ett annat
+schema eller omexporterad med andra STEP-id får `conflicts: ["*"]`.
+
 En version som rymmer en IFC-modell kan också få namngivna frågor, som dess
 våningar, rummens area eller en egenskaps värde. Det är ett tillägg som svarar
 på samma token och som kapabilitetsdokumentet annonserar i `ifc_queries`. Se
@@ -395,7 +410,7 @@ servern inte kan läsa, som servern svarar, där FastAPI själv skulle ange `422
 | `reauthentication_required` | 403 | En farlig administrationshandling och inloggningen är äldre än tio minuter | Auktorisera igen, upprepa sedan anropet |
 | `not_found` | 404 | Ingen sådan resurs, en resurs utanför användarens projekt, eller en funktion som är avstängd (registrering, begärandelogg, administrations-API) | Visa meddelandet, läs om listorna |
 | `conflict` | 409 | Ett guid som redan finns, eller en dubblerad länk | Hämta igen |
-| `version_conflict` | 412 | Uppladdningen angav `base_version_index`, och dokumentet har redan en nyare version; eller ett ändringsset krockar med det som ändrats sedan dess bas, angivet i `conflicts`, med de tre värdena för var och en i `conflict_details` | Hämta den senaste versionen, sammanfoga och ladda upp igen |
+| `version_conflict` | 412 | Uppladdningen angav `base_version_index`, och dokumentet har redan en nyare version, på en server som inte sammanfogar eller med det båda sidor ändrat i `conflicts` och `conflict_details`; eller ett ändringsset krockar med det som ändrats sedan dess bas, angivet i `conflicts`, med de tre värdena för var och en i `conflict_details` | Hämta den senaste versionen, sammanfoga och ladda upp igen |
 | `ifc_validation_failed` | 422 | Projektet avvisar filer med valideringsfel, och filen har sådana; `report` i kroppen är rapportens adress | Visa rapporten, låt användaren rätta filen och ladda upp igen |
 | `payload_too_large` | 413 | Begärans kropp överstiger serverns gräns, eller en BCF-binär överstiger `max_image_bytes`/`max_upload_bytes` | Rätta begäran |
 | `upload_too_large` | 413 | En vald fil eller del överstiger uppladdningsgränsen (`max_size_in_bytes` i uppladdningsinstruktionerna) | Berätta gränsen för användaren |

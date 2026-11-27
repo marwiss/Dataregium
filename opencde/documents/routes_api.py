@@ -17,7 +17,11 @@ are fixed here and handed to clients inside the responses, never guessed:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import pathlib
+import shutil
+import tempfile
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
@@ -71,10 +75,13 @@ from opencde.errors import (
 from opencde.etag import etag_for, matches
 from opencde.ids import is_uuid, new_id, normalize_guid
 from opencde.ifcgraph.service import IfcGraphDep, IfcGraphService
+from opencde.logging import get_logger
 from opencde.ratelimit import RATE_UPLOAD, limiter
+from opencde.repos.conflicts import details as conflict_details
 from opencde.repos.git import Git
+from opencde.repos.merge import MergeError, merge, placements_moved_twice, shape, why_not
 from opencde.repos.writer import prepare
-from opencde.storage import make_key
+from opencde.storage import LocalStorage, make_key
 from opencde.store.documents.sessions import (
     FILE_CANCELLED,
     FILE_DONE,
@@ -91,6 +98,7 @@ from opencde.store.documents.sessions import (
 from opencde.store.documents.versions import DocumentsDep, VersionRecord, default_metadata, publication_metadata
 from opencde.store.oauth2.tokens import Principal
 
+log = get_logger(__name__)
 router = APIRouter(prefix="/documents/1.0", tags=["Documents API"])
 
 SessionId = Annotated[str, Path(alias="session_id", max_length=64)]
@@ -364,6 +372,102 @@ def _renumbered(protection: Protection) -> list[DocumentMetadataEntry]:
     return entries
 
 
+def _merges(git: Git | None, ifcgraph: IfcGraphService | None, item: dict[str, Any], latest: VersionRecord) -> bool:
+    """Whether an upload on an older base is merged rather than refused: an IFC file in STEP, on a server with the
+    repositories, the BIM functions and ifcmerge (ADR 0030)."""
+    return (
+        git is not None
+        and ifcgraph is not None
+        and ifcgraph.settings.ifcmerge_on
+        and is_step(str(item["file_name"]))
+        and is_step(latest.file_name)
+    )
+
+
+async def _merge_upload(
+    git: Git,
+    ifcgraph: IfcGraphService,
+    storage: LocalStorage,
+    project_id: str,
+    target: str,
+    item: dict[str, Any],
+    merging: tuple[VersionRecord, VersionRecord],
+) -> tuple[str, int, str]:
+    """Merge the upload at ``target`` (its ids already above the document's history) with the versions since its
+    base, in its place: the upload's own blob for the side commit, and the merged file's size and SHA-256. 412
+    ``version_conflict`` with ifcmerge's conflicts in the approval's form, and the moved placements F201 b counts, or
+    with ``["*"]`` when the files cannot be merged as text."""
+    based, latest = merging
+    repository = await git.ensure(project_id)
+    side_blob = await git.blob(repository, storage.path(target))
+    paths = (storage.path(based.storage_key), storage.path(latest.storage_key), storage.path(target))
+    shapes = [await anyio.to_thread.run_sync(shape, path) for path in paths]
+    where = {"base_version_index": based.version_index, "latest_version_index": latest.version_index}
+    if (reason := why_not(*shapes)) is not None:
+        raise ApiError(
+            412,
+            f"The upload builds on version {based.version_index}, and the document's latest version is "
+            f"{latest.version_index}: {reason}, so it cannot be merged",
+            code=CODE_VERSION_CONFLICT,
+            details={"conflicts": ["*"], "conflict_details": [], "merge": where},
+        )
+    settings = ifcgraph.settings
+    with tempfile.TemporaryDirectory(prefix="ifcmerge-") as folder:
+        moved = await anyio.to_thread.run_sync(placements_moved_twice, *paths)
+        try:
+            merged = await merge(
+                perl=settings.perl_path,
+                ifcmerge=str(settings.ifcmerge_path),
+                base=paths[0],
+                theirs=paths[1],
+                ours=paths[2],
+                folder=pathlib.Path(folder),
+                seconds=settings.ifcmerge_timeout_seconds,
+                memory_mb=settings.ifcmerge_memory_mb,
+            )
+        except MergeError as exc:
+            log.warning("ifcmerge_failed", project_id=project_id, error=str(exc)[:200])
+            raise HTTPException(500, "The upload could not be merged") from None
+        conflicts = merged.conflicts + moved
+        if conflicts or merged.path is None:
+            guids = {step_id: guid for guid, step_id in shapes[1].global_ids.items()}
+            keys, listed = await conflict_details(
+                ifcgraph,
+                conflicts,
+                schema=str(shapes[1].schema),
+                files=(
+                    (based.storage_key, based.file_name),
+                    (latest.storage_key, latest.file_name),
+                    (target, str(item["file_name"])),
+                ),
+                guids=guids,
+                latest_index=latest.version_index,
+            )
+            raise ApiError(
+                412,
+                f"The upload builds on version {based.version_index}, and what it changes collides with what "
+                f"version {latest.version_index} changed",
+                code=CODE_VERSION_CONFLICT,
+                details={"conflicts": keys or ["*"], "conflict_details": listed, "merge": where},
+            )
+        await anyio.to_thread.run_sync(shutil.copyfile, merged.path, storage.path(target))
+    after = await anyio.to_thread.run_sync(
+        protect_stored, storage, target, latest.storage_key, latest.file_name, latest.max_step_id
+    )
+    if after.size is not None and after.sha256 is not None:
+        return side_blob, after.size, after.sha256
+    size, sha256 = await anyio.to_thread.run_sync(_measured, storage.path(target))
+    return side_blob, size, sha256
+
+
+def _measured(path: pathlib.Path) -> tuple[int, str]:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while block := stream.read(1 << 20):
+            digest.update(block)
+    return path.stat().st_size, digest.hexdigest()
+
+
 async def _complete(
     session: UploadSession,
     file_index: int,
@@ -388,10 +492,18 @@ async def _complete(
     if not project_id:
         raise HTTPException(400, "No project was chosen for this upload")
     base_version = item.get("base_version_index")
+    merging: tuple[VersionRecord, VersionRecord] | None = None  # the base and the latest, for ifcmerge
     if base_version is not None:
-        # The upload builds on a version: it is refused when someone else has added one since (412).
+        # The upload builds on a version: when someone else has added one since, an IFC file is merged with it where
+        # the server has ifcmerge (ADR 0030), and anything else is refused (412).
         latest = await documents.latest(user_id=session.user_id, document_id=str(item["document_id"]))
-        if latest is None or latest.version_index != int(base_version):
+        if latest is not None and latest.version_index > int(base_version) and _merges(git, ifcgraph, item, latest):
+            based = await documents.version(
+                user_id=session.user_id, document_id=str(item["document_id"]), version_index=int(base_version)
+            )
+            if based is not None and is_step(based.file_name):
+                merging = (based, latest)
+        if merging is None and (latest is None or latest.version_index != int(base_version)):
             raise ApiError(
                 412,
                 f"The upload builds on version {base_version}, but the document's latest version is "
@@ -414,6 +526,13 @@ async def _complete(
         raise
     if protection.size is not None and protection.sha256 is not None:
         size, sha256 = protection.size, protection.sha256  # the file kept, with the ids moved or the guard added
+    side_blob = None
+    if merging is not None and git is not None and ifcgraph is not None:
+        try:
+            side_blob, size, sha256 = await _merge_upload(git, ifcgraph, storage, project_id, target, item, merging)
+        except BaseException:
+            storage.delete(target)
+            raise
     try:
         project = await _project(projects, project_id)
         checked = await _check_first(ifcgraph, project, project_id, target, item["file_name"])
@@ -452,6 +571,9 @@ async def _complete(
             message=item.get("message"),
             base=None if base_version is None else int(base_version),
         )
+        if commit is not None and merging is not None:
+            commit.side_blob, commit.side_parent = side_blob, merging[0].commit
+            commit.merged_with = merging[1].version_index
         record = await documents.create_version(
             project_id=project_id,
             document_id=item.get("document_id"),
@@ -474,9 +596,19 @@ async def _complete(
                 if base_version is not None
                 else []
             )
-            + _renumbered(protection),
+            + _renumbered(protection)
+            + (
+                [
+                    DocumentMetadataEntry(
+                        name="merged_with_version_index", value=[str(merging[1].version_index)], data_type="integer32"
+                    )
+                ]
+                if merging is not None
+                else []
+            ),
             parent_version_index=None if base_version is None else int(base_version),
-            on_latest=None if base_version is None else int(base_version),  # a second upload on the same base: 412
+            # A second upload on the same base gets 412, and a merge holds while the latest it merged is the latest.
+            on_latest=merging[1].version_index if merging else (None if base_version is None else int(base_version)),
             max_step_id=await anyio.to_thread.run_sync(stored_history, storage, target, item["file_name"]),
             commit=commit,
         )

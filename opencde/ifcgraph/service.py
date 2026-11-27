@@ -1010,10 +1010,15 @@ class IfcGraphService:
         record = await self.documents.version(user_id=user_id, document_id=document_id, version_index=version_index)
         if record is None or not changes:
             return None
+        return await self.values_of(record.storage_key, record.file_name, changes)
+
+    async def values_of(self, storage_key: str, file_name: str, changes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """What each change's attribute holds in a stored file, read by the apply worker, as ``values_in`` reads a
+        version's; for a file that is not a version yet, such as an upload being merged (ADR 0030)."""
         async with self._lock:
             with tempfile.TemporaryDirectory(prefix="ifcvalues-") as tmp:
                 workdir = Path(tmp)
-                source = await asyncio.to_thread(self._prepare_input, record.storage_key, record.file_name, workdir)
+                source = await asyncio.to_thread(self._prepare_input, storage_key, file_name, workdir)
                 listed = workdir / "changes.json"
                 listed.write_text(json.dumps({"changes": changes}), encoding="utf-8")
                 command = [
