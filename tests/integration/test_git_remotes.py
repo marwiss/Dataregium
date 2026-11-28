@@ -26,6 +26,7 @@ from tests.conftest import FIXTURES_DIR
 from tests.integration.conftest_accounts import World, build_world, login_as, login_with_scope
 from tests.integration.test_ai_policy import audited
 from tests.integration.test_git_repos import _upload
+from tests.integration.test_web_signin import web_sign_in
 
 pytestmark = [pytest.mark.integration, pytest.mark.parametrize("store_kind", ["postgres"], indirect=True)]
 GIT = shutil.which("git")
@@ -67,6 +68,7 @@ def test_a_manager_mirrors_the_projects_repository_to_a_forge(
     address = f"/manage/1.0/projects/{world.project_id}/remote"
     manager = login_with_scope(client, world, "manager", "profile bcf documents project")
     editor = login_as(client, world, "editor")
+    web_sign_in(client, world, "editor")  # the upload page is the web's
     capabilities = client.get("/.well-known/dataregium").json()["extensions"]["git"]["remote"]
     assert capabilities == {"enabled": True, "url": "/manage/1.0/projects/{project_id}/remote", "hosts": ["github.com"]}
     assert client.get(address, headers=manager.headers).status_code == 404, "not connected yet"
@@ -125,8 +127,10 @@ def test_a_manager_mirrors_the_projects_repository_to_a_forge(
     assert client.delete(address, headers=manager.headers).status_code == 204
     assert client.get(address, headers=manager.headers).status_code == 404
     assert client.put(address, json=body, headers=manager.headers).status_code == 200
-    gone = client.portal.call(delete_expired, client.app.state.postgres, "2999-01-01T00:00:00Z")  # type: ignore[union-attr,attr-defined]
-    assert gone >= 1 and client.get(address, headers=manager.headers).status_code == 404
+    postgres = client.app.state.postgres  # type: ignore[attr-defined]
+    gone = client.portal.call(delete_expired, postgres, "2999-01-01T00:00:00Z")  # type: ignore[union-attr]
+    # The sign-ins expire too, so the row is read as it is left.
+    assert gone >= 1 and client.portal.call(PostgresRemotes(postgres).get, world.project_id) is None  # type: ignore[union-attr]
 
 
 def test_the_mirror_is_off_by_default(settings: Settings, clean_database: None) -> None:

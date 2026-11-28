@@ -138,7 +138,7 @@ async def test_on_postgresql_a_backup_restores_the_same_rows(
     assert {"conversions", "validations", "teams", "team_members", "web_sessions", "bcf_events"} <= set(before)
 
     manifest = await backups.export(None, storage, tmp_path / "backup", postgres=pg)
-    assert (manifest.store_dialect, manifest.store_migration, manifest.nodes) == ("postgres", 10, 0)
+    assert (manifest.store_dialect, manifest.store_migration, manifest.nodes) == ("postgres", 11, 0)
     assert manifest.rows == sum(len(rows) for rows in before.values())
 
     await tables.wipe(pg)
