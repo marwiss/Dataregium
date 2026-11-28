@@ -58,6 +58,9 @@ are in the commit history.
   that `ifc_open` makes, editing with an allow-list of `ifcopenshell.api` functions, ShapeBuilder and quantities;
   `ifc_propose` makes the copy a proposal as a whole file, which a person approves. No tool loads, saves or
   draws a file; the pictures are Dataspatium's. PostgreSQL migration 0010.
+- A working copy of a model of 50 MB or more keeps its IfcMCP worker between an AI's calls, so that only the first
+  reads the model (`OPENCDE_IFCMCP_RESIDENTS`, 2, and `OPENCDE_IFCMCP_RESIDENT_MB`, 50); its edits are written when the
+  calls pause, before `ifc_propose` and when the worker is let go after 15 minutes unused.
 - A whole IFC file can be proposed on a base version as a topic's snippet of the type `DataregiumIfcFile`, with the
   base and what made it in the upload's query; it is checked as it is, given back at `…/ifc-proposal/file`, compared
   by its `commit`, and approved as a change set is. The capabilities' `ifc_changes` names it.

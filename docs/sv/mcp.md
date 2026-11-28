@@ -274,6 +274,16 @@ klient anger.
   anropat igen lägger det kopian som den är då på samma ärende. `ifc_close`
   kastar kopian.
 
+En arbetskopia av en modell om 50 MB eller mer behåller sin arbetsprocess
+mellan anropen (F210 c): det första anropet läser in modellen, och anropen
+efter det svarar ur minnet. Ändringarna skrivs till kopian när dess anrop har
+gjort uppehåll i 30 sekunder, före `ifc_propose` och när processen släpps,
+efter 15 minuter utan användning; en process som tar slut svarar att en ändring
+som inte hunnit skrivas kan vara förlorad. `OPENCDE_IFCMCP_RESIDENTS` (2) anger
+hur många servern håller, var och en upp till några GB, och
+`OPENCDE_IFCMCP_RESIDENT_MB` (50) storleken; en kopia utöver dem, och en
+versions fil, får en arbetsprocess per anrop.
+
 Det finns inga ritverktyg: Dataspatiums AI-panel ritar ur sin egen 3D-vy (F205
 d). `ifc_load`, `ifc_save`, `ifc_new`, `ifc_reset`, `ifc_plot`, `ifc_render`
 och `ifc_clash` ges inte.

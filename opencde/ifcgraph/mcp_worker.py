@@ -8,6 +8,13 @@ beside it and then renamed in, with IfcOpenShell's counter raised to the documen
 owner histories naming the proposer and this server, as the apply worker does. The answer is one line of JSON on
 stdout, ``{"result": …}``, cut to ``--budget`` bytes with ``truncated``; a tool's own failure is ``{"error": …}``.
 
+``python -m opencde.ifcgraph.mcp_worker <file> --serve`` holds a working copy's model instead (F210 c): it reads one
+request a line on stdin, ``{"tool", "arguments", "write", "max_step_id", "proposer", "budget"}`` or ``{"op": "ping"}``,
+and answers each with a line on stdout. The model is opened on the first call and kept. An edit stays in memory
+until a ping (which the server sends when the calls pause and before a proposal reads the file) or stdin closes,
+which ends the worker; writing a large model takes as long as reading it, so a run of edits is written once. An edit
+that fails leaves the model to be opened again from the file.
+
 Nothing the caller gives reaches a path: the server names the file, ``ifc_load``, ``ifc_save``, ``ifc_new``,
 ``ifc_reset``, the drawing tools and ``ifc_clash`` are not here, ``ifc_edit``, ``ifc_list`` and ``ifc_docs`` see only
 the API functions of ``ALLOWED`` that take no IFC file but the model, and ShapeBuilder's methods only those that are
@@ -189,11 +196,47 @@ def _listed(result: Any, allowed: list[str], module: str) -> Any:
     return kept
 
 
+class Held:
+    """A working copy's model, held between the calls of the ``--serve`` mode (F210 c)."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.model: Any = None
+        self.unwritten = False
+
+    def opened(self) -> Any:
+        if self.model is None:
+            import ifcopenshell
+
+            self.model = ifcopenshell.open(str(self.path))
+        return self.model
+
+    def forget(self) -> None:
+        """After an edit that failed half way: the next call opens the file again."""
+        from opencde.ifcgraph.ops import _ifc_ids
+
+        if self.model is not None:
+            _ifc_ids.pop(id(self.model), None)
+        self.model, self.unwritten = None, False
+
+    def write_back(self) -> None:
+        if self.unwritten:
+            _write(self.model, self.path)
+            self.unwritten = False
+
+
 def run(
-    path: Path | None, tool: str, arguments: dict[str, Any], *, write: bool, max_step_id: int, proposer: str
+    path: Path | None,
+    tool: str,
+    arguments: dict[str, Any],
+    *,
+    write: bool,
+    max_step_id: int,
+    proposer: str,
+    held: Held | None = None,
 ) -> Any:
     """One tool on the file at ``path`` (none for the tools that need no model); the edited file is written back
-    with ``write``."""
+    with ``write``, at once, or by ``held`` after the answer."""
     if tool not in TOOLS:
         raise Refused("the tool is not offered")
     from ifcmcp.core import IfcSession
@@ -219,7 +262,7 @@ def run(
         raise Refused("the tool needs a model")
     import ifcopenshell
 
-    model = ifcopenshell.open(str(path))
+    model = held.opened() if held is not None else ifcopenshell.open(str(path))
     if tool in CHANGING:
         if not write:
             raise Refused("an edit needs a working copy: ifc_open makes one")
@@ -230,7 +273,7 @@ def run(
             arguments = {**arguments, "params": {name: _as_text(value) for name, value in dict(given).items()}}
         if tool == "ifc_shape" and not _shape_allowed(str(arguments.get("method"))):
             raise Refused("the method is not one an AI may run on this server; ifc_shape_list names them")
-        return _change(session, model, path, tool, arguments, max_step_id, proposer)
+        return _change(session, model, path, tool, arguments, max_step_id, proposer, held)
     session.model = model
     return getattr(session, tool)(**arguments)
 
@@ -241,10 +284,18 @@ def _as_text(value: Any) -> str:
 
 
 def _change(
-    session: Any, model: Any, path: Path, tool: str, arguments: dict[str, Any], max_step_id: int, proposer: str
+    session: Any,
+    model: Any,
+    path: Path,
+    tool: str,
+    arguments: dict[str, Any],
+    max_step_id: int,
+    proposer: str,
+    held: Held | None,
 ) -> Any:
-    """An edit with the document's id history held and the owner histories naming the proposer, written back."""
-    from opencde.ifcgraph.ops import ServerChangeSet, _ifc_hold_ids, _ifc_keep_guard
+    """An edit with the document's id history held and the owner histories naming the proposer, written back, or
+    left to ``held`` to write after the answer."""
+    from opencde.ifcgraph.ops import ServerChangeSet, _ifc_hold_ids
 
     model = _ifc_hold_ids(model, max_step_id)
     owning = ServerChangeSet(model, proposer)
@@ -257,13 +308,62 @@ def _change(
             import ifcopenshell.api.owner.settings as settings
 
             settings.get_user, settings.get_application = previous
-    failed = isinstance(result, dict) and result.get("ok") is False
-    if not failed:
-        _ifc_keep_guard(model)
-        written = path.with_name(path.name + ".tmp")
-        model.write(str(written))
-        os.replace(written, path)
+    if isinstance(result, dict) and result.get("ok") is False:
+        if held is not None:
+            held.forget()  # the edit may have changed part of the model
+    elif held is not None:
+        held.unwritten = True
+    else:
+        _write(model, path)
     return result
+
+
+def _write(model: Any, path: Path) -> None:
+    """The guard decided and the file written beside the copy, then renamed in."""
+    from opencde.ifcgraph.ops import _ifc_keep_guard
+
+    _ifc_keep_guard(model)
+    written = path.with_name(path.name + ".tmp")
+    model.write(str(written))
+    os.replace(written, path)
+
+
+def serve(path: Path) -> int:
+    """The ``--serve`` mode: a request a line on stdin, an answer a line on stdout, until stdin closes; the edits are
+    written on a ping and when stdin closes. One thread alone: on Windows a thread blocked reading the pipe would hold
+    up a library loading a DLL in another."""
+    held = Held(path)
+    for line in sys.stdin:
+        asked: dict[str, Any] = {}
+        try:
+            asked = json.loads(line)
+            if asked.get("op") == "ping":
+                held.write_back()  # a failure here ends the worker, and the server opens the file again
+                answer: dict[str, Any] = {"ok": True}
+            else:
+                arguments = asked.get("arguments")
+                if not isinstance(arguments, dict):
+                    raise Refused("the arguments are not an object")
+                result = run(
+                    path,
+                    str(asked.get("tool")),
+                    arguments,
+                    write=bool(asked.get("write")),
+                    max_step_id=int(asked.get("max_step_id") or 0),
+                    proposer=str(asked.get("proposer") or ""),
+                    held=held,
+                )
+                answer = _cut(result, int(asked.get("budget") or 200_000))
+        except Refused as exc:
+            answer = {"error": str(exc), "refused": True}
+        except Exception as exc:  # as main's: data for the AI, cut
+            if asked.get("tool") in CHANGING:
+                held.forget()
+            answer = {"error": f"{type(exc).__name__}: {exc}"[:MAX_ERROR]}
+        sys.stdout.write(json.dumps(answer, separators=(",", ":"), default=str) + "\n")
+        sys.stdout.flush()
+    held.write_back()
+    return 0
 
 
 def _cut(result: Any, budget: int) -> dict[str, Any]:
@@ -289,8 +389,9 @@ def _cut(result: Any, budget: int) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="opencde-mcp-worker")
     parser.add_argument("file", type=Path)
-    parser.add_argument("tool")
-    parser.add_argument("arguments", type=Path)
+    parser.add_argument("tool", nargs="?")
+    parser.add_argument("arguments", type=Path, nargs="?")
+    parser.add_argument("--serve", action="store_true")
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--no-model", action="store_true")
     parser.add_argument("--max-step-id", type=int, default=0)
@@ -302,6 +403,10 @@ def main(argv: list[str] | None = None) -> int:
         limit_memory(args.memory_mb)
     keep_stdout_for_the_answer()
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
+    if args.serve:
+        return serve(args.file)
+    if args.tool is None or args.arguments is None:
+        parser.error("a tool and its arguments, or --serve")
     try:
         arguments = json.loads(args.arguments.read_text(encoding="utf-8"))
         if not isinstance(arguments, dict):

@@ -6,6 +6,7 @@ makes a copy of a version's file for the caller (``ifc_copies``, with ``expires_
 the editing tools change it, and ``ifc_propose`` makes it a proposal: a BCF topic whose snippet is the whole file
 (``DataregiumIfcFile``, SA-129), tried on the copy's version and approved by a person, never by a tool. Every call
 runs in a worker (``opencde.ifcgraph.mcp_worker``) with the server's own path; nothing a caller sends names a file.
+A working copy of a large model keeps its worker between the calls (``opencde.ifcgraph.residents``, F210 c).
 What an answer quotes from a model is data. The pictures are Dataspatium's (F205 d): there is no drawing tool here.
 """
 
@@ -25,6 +26,7 @@ from opencde.bcf.schemas import TEXT_MAX, BimSnippet, TopicPOST
 from opencde.documents.changes import FILE_SNIPPET_TYPE
 from opencde.documents.step import is_step
 from opencde.ids import is_uuid, new_id, normalize_guid
+from opencde.ifcgraph.residents import CopyLost
 from opencde.mcp.registry import MAX_ANSWER_BYTES, Arguments, Tool, ToolContext, ToolRefusal, member_project
 from opencde.mcp.registry import member_version as version_of
 from opencde.repos.reading import restore_record
@@ -179,19 +181,21 @@ async def _model(context: ToolContext, arguments: ModelArguments) -> dict[str, A
     here = _here(context)
     if arguments.copy_id is not None:
         found = await _copy(context, arguments.copy_id)
-        return {"path": here.storage.path(str(found["storage_key"]))}
+        return {"path": here.storage.path(str(found["storage_key"])), "copy": True}
     if arguments.document_id is None:
         raise ToolRefusal("Name a working copy, or a document and its version")
     record = await version_of(context, arguments.document_id, arguments.version_index)
     if not is_step(record.file_name):
         raise ToolRefusal("The version is not an IFC file in STEP")
     await restore_record(here.ifcgraph.git, here.storage, record)
-    return {"path": here.storage.path(record.storage_key)}
+    return {"path": here.storage.path(record.storage_key), "copy": False}
 
 
 async def _answer(context: ToolContext, tool: str, arguments: dict[str, Any], **where: Any) -> dict[str, Any]:
     try:
         return await _here(context).ifcgraph.ifcmcp(tool, arguments, budget=_BUDGET, **where)
+    except CopyLost as exc:
+        raise ToolRefusal(str(exc)) from None
     except RuntimeError:
         raise ToolRefusal("The tool could not finish on this model, in the time or the memory a call has") from None
 
@@ -200,7 +204,7 @@ def _reading(tool: str, model: type[ModelArguments], title: str, description: st
     async def run(context: ToolContext, arguments: Any) -> dict[str, Any]:
         where = await _model(context, arguments)
         given = arguments.model_dump(exclude={"copy_id", "document_id", "version_index"}, exclude_none=True)
-        return await _answer(context, tool, given, path=where["path"])
+        return await _answer(context, tool, given, path=where["path"], copy=where["copy"])
 
     return Tool(name=tool, title=title, description=description, arguments=model, run=run, needs_ifcgraph=True)
 
@@ -247,6 +251,7 @@ def _changing(tool: str, model: type[Arguments], title: str, description: str) -
             write=True,
             known=head.max_step_id if head is not None else None,
             proposer=context.principal.username,
+            copy=True,
         )
         await context.record("mcp.ifcmcp.edited", copy_id=str(found["copy_id"]), project_id=str(found["project_id"]))
         return answer
@@ -306,15 +311,27 @@ async def ifc_close(context: ToolContext, arguments: CopyArguments) -> dict[str,
     )
     if key is None:
         raise ToolRefusal("There is no such working copy of yours")
+    await here.ifcgraph.residents.drop(here.storage.path(key))
     here.storage.delete(key)
     return {"ok": True}
 
 
 async def ifc_propose(context: ToolContext, arguments: ProposeArguments) -> dict[str, Any]:
     found = await _copy(context, arguments.copy_id)
-    project_id, copy_id = str(found["project_id"]), str(found["copy_id"])
-    await _proposer(context, project_id)
+    await _proposer(context, str(found["project_id"]))
     here = _here(context)
+    try:
+        async with here.ifcgraph.residents.settled(here.storage.path(str(found["storage_key"]))):
+            return await _propose(context, arguments, found, here)
+    except CopyLost as exc:
+        raise ToolRefusal(str(exc)) from None
+
+
+async def _propose(
+    context: ToolContext, arguments: ProposeArguments, found: dict[str, Any], here: _Here
+) -> dict[str, Any]:
+    """The proposal from the copy's file, as its worker last wrote it."""
+    project_id, copy_id = str(found["project_id"]), str(found["copy_id"])
     topics = PostgresTopicRepository(here.postgres, id_prefix=context.settings.server_assigned_id_prefix)
     links = PostgresTopicLinkRepository(here.postgres)
     author, public_url = context.principal.username, context.settings.public_url

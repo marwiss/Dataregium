@@ -56,6 +56,7 @@ from opencde.ifcgraph.bsdd import check as check_bsdd
 from opencde.ifcgraph.bsdd import ruleset as bsdd_ruleset
 from opencde.ifcgraph.gltf import LODS, build_glb
 from opencde.ifcgraph.maintenance import delete_geometry, drop_partial
+from opencde.ifcgraph.residents import Residents
 from opencde.logging import get_logger
 from opencde.postgres.database import Postgres
 from opencde.repos.git import Git, GitError
@@ -271,6 +272,12 @@ class IfcGraphService:
         self._lock = asyncio.Semaphore(1)
         # IfcMCP's tools for an AI (ADR 0031): one at a time beside the queue above, so that they never hold it up.
         self._ifcmcp = asyncio.Semaphore(1)
+        self.residents = Residents(  # the large working copies' models, held between the calls (F210 c)
+            most=settings.ifcmcp_residents,
+            least_bytes=settings.ifcmcp_resident_mb * 1024 * 1024,
+            memory_mb=settings.ifcgraph_memory_mb,
+            timeout=settings.ifcgraph_timeout_seconds,
+        )
 
     # -- scheduling ------------------------------------------------------------------------------
 
@@ -372,6 +379,7 @@ class IfcGraphService:
             self._start_validation(row["id"], row["storage_key"], row["file_name"])
 
     async def shutdown(self) -> None:
+        await self.residents.close()
         for task in list(self._tasks):
             task.cancel()
         for task in list(self._tasks):
@@ -1244,11 +1252,25 @@ class IfcGraphService:
         known: int | None = None,
         proposer: str = "",
         budget: int = 200_000,
+        copy: bool = False,
     ) -> dict[str, Any]:
         """One of IfcMCP's tools on the file at ``path`` (``mcp_worker``): a reading one on a version's file or a
         working copy, an editing one on a working copy with ``write``, which the worker writes back; ``path`` is the
-        server's own, never a client's. The answer is ``{"result"}``, perhaps with ``truncated``, or ``{"error"}``,
+        server's own, never a client's. A working copy (``copy``) of a large model is held by a worker between the
+        calls (``residents``, F210 c). The answer is ``{"result"}``, perhaps with ``truncated``, or ``{"error"}``,
         whose text may quote the model and is data."""
+        if copy and path is not None and (self.residents.holds(path) or self.residents.wants(path)):
+            request = {
+                "tool": tool,
+                "arguments": arguments,
+                "write": write,
+                "max_step_id": int(known or 0),
+                "proposer": proposer,
+                "budget": int(budget),
+            }
+            held = await self.residents.call(path, request, self._ifcmcp)
+            if held is not None:
+                return held
         async with self._ifcmcp:
             with tempfile.TemporaryDirectory(prefix="ifcmcp-") as tmp:
                 listed = Path(tmp) / "arguments.json"

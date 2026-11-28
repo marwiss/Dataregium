@@ -2,7 +2,7 @@
 """IfcMCP's tools behind the MCP endpoint on PostgreSQL (ADR 0031, F60, F204 a, F205 d): an editor's AI reads a
 version, opens a working copy, renames a wall with an allowed API function, is refused one that would read a file,
 and proposes the copy as a whole file, which the server tries on the version; a viewer reads but never opens a
-copy, and a closed copy is gone."""
+copy, and a closed copy is gone. Once with a worker per call, and once with the copy's model held (F210 c)."""
 
 from __future__ import annotations
 
@@ -31,9 +31,11 @@ pytestmark = [
 ifcopenshell = pytest.importorskip("ifcopenshell", reason="the ifc-db extra is not installed")
 
 
-@pytest.fixture
-def ifcmcp_client(settings: Settings, clean_database: None) -> Iterator[tuple[TestClient, World]]:
-    on = bim_settings(settings, mcp_enabled=True)
+@pytest.fixture(params=[False, True], ids=["per call", "held"])
+def ifcmcp_client(
+    settings: Settings, clean_database: None, request: pytest.FixtureRequest
+) -> Iterator[tuple[TestClient, World]]:
+    on = bim_settings(settings, mcp_enabled=True, **({"ifcmcp_resident_mb": 0} if request.param else {}))
     world = build_world(on)
     with TestClient(create_app(on, startup_wait_seconds=30)) as client:
         state = client.app.state  # type: ignore[attr-defined]
@@ -87,6 +89,9 @@ def test_an_ai_reads_edits_a_copy_and_proposes_it_as_a_whole_file(ifcmcp_client:
         )
     )
     assert "error" not in edited, edited
+    service = client.app.state.ifcgraph  # type: ignore[attr-defined]
+    held = service.settings.ifcmcp_resident_mb == 0
+    assert len(service.residents) == (1 if held else 0), "a copy's model is held from the size set"
     outside = _ok(
         _tool(
             client,
@@ -125,6 +130,7 @@ def test_an_ai_reads_edits_a_copy_and_proposes_it_as_a_whole_file(ifcmcp_client:
     assert snippet.status_code == 200 and b"'AI wall'" in snippet.content, "the file as the AI left it"
 
     assert _ok(_tool(client, editor, "ifc_close", {"copy_id": copy_id})) == {"ok": True}
+    assert len(service.residents) == 0, "a closed copy's worker ends"
     gone = _tool(client, editor, "ifc_info", {"copy_id": copy_id, "document_id": None, "version_index": None,
                                               "element_id": wall})  # fmt: skip
     assert gone["isError"] is True, "a closed copy is gone"

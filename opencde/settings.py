@@ -353,6 +353,16 @@ class Settings(BaseSettings):
         "(RFC 8707), its protected resource metadata is served, and the capabilities document announces it. Off "
         "unless an AI program needs it.",
     )
+    ifcmcp_residents: int = Field(
+        2,
+        ge=0,
+        le=32,
+        description="Working copies of a large model whose model a worker holds between an AI's calls to IfcMCP's "
+        "tools (F210 c), each up to a few GB; a copy beyond them runs a worker per call. 0 holds none.",
+    )
+    ifcmcp_resident_mb: int = Field(
+        50, ge=0, description="The size from which a working copy's model is held between the calls (F210 c)."
+    )
     allow_localhost_redirects: bool = Field(
         False,
         description="Accept http://localhost redirect URIs besides the loopback IPs RFC 8252 allows. Development only.",

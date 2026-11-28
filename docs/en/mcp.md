@@ -273,6 +273,15 @@ client names.
   ([ifc-db.md](ifc-db.md)); called again, it puts the copy as it is then on the
   same topic. `ifc_close` throws the copy away.
 
+A working copy of a model of 50 MB or more keeps its worker between the calls
+(F210 c): the first call reads the model, and the calls after it answer from
+memory. The edits are written to the copy when its calls have paused for 30
+seconds, before `ifc_propose` and when the worker is let go, after 15 minutes
+unused; a worker that ends answers that an edit not yet written may be lost.
+`OPENCDE_IFCMCP_RESIDENTS` (2) sets how many the server holds, each up to a few
+GB, and `OPENCDE_IFCMCP_RESIDENT_MB` (50) the size; a copy beyond them, and a
+version's file, get a worker per call.
+
 There are no drawing tools: Dataspatium's AI panel draws from its own 3D view
 (F205 d). `ifc_load`, `ifc_save`, `ifc_new`, `ifc_reset`, `ifc_plot`,
 `ifc_render` and `ifc_clash` are not offered.
